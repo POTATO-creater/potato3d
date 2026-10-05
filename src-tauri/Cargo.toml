@@ -1,6 +1,6 @@
 [package]
 name = "splatforge"
-version = "0.3.0"
+version = "0.4.0"
 description = "Vídeo orbital → Gaussian Splatting, 100% local"
 authors = ["Bryan Diniz"]
 edition = "2021"
@@ -35,9 +35,14 @@ futures-util = "0.3.34"
 # ~18% menor que o encoder em Rust puro (image-webp), que não faz LZ77 bem.
 libwebp-sys = "0.14"
 
-# Recorte no Windows: BiRefNet com ONNX Runtime (estático) + DirectML.dll.
+# Recorte no Windows: MODNet/BiRefNet/RMBG com ONNX Runtime (estático) + DirectML.dll.
 [target.'cfg(windows)'.dependencies]
 ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "download-binaries", "copy-dylibs", "tls-native", "directml", "api-27"] }
+
+# Recorte no macOS (Apple Silicon): RMBG-1.4 com ONNX Runtime (estático) + CoreML.
+# O pyke só publica binário com CoreML para aarch64-apple-darwin.
+[target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dependencies]
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "download-binaries", "tls-native", "coreml", "api-27"] }
 
 # Frame decoding/sharpness runs on every candidate frame; keep it fast in dev builds too.
 [profile.dev.package."*"]

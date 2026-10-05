@@ -9,11 +9,15 @@
 //! - Windows, qualquer objeto: BiRefNet-lite (MIT). Mais preciso fora de
 //!   pessoas, mas as convoluções deformáveis viram ~16 mil operações no ONNX
 //!   e ficam lentas até na GPU (~4 s/frame numa RTX 4070 Ti Super).
+//! - RMBG-1.4 (BRIA, não comercial), Windows e macOS em Apple Silicon: IS-Net
+//!   de convoluções simples, bordas melhores que o Vision em objetos.
+//!   ~0,4 s/frame com CoreML na GPU de um M4; baixado só se escolhido.
 //! - Cor sólida (chroma key): distância RGB à cor de fundo, com tolerância,
 //!   suavização e preenchimento a partir das bordas. Instantâneo.
 //!
 //! As máscaras (cinza, 255 = sujeito) viram o alpha dos PNGs de treino: o
 //! Brush aprende o fundo como transparente e o splat sai só com o sujeito.
+//! Com fundo verde/azul, o despill tira do sujeito a luz rebatida pelo fundo.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -34,6 +38,8 @@ pub enum MaskMethod {
     People,
     /// Windows: BiRefNet (qualquer objeto, lento).
     General,
+    /// RMBG-1.4 (qualquer objeto; Windows e macOS em Apple Silicon).
+    Rmbg,
     /// Chroma key por cor sólida.
     Chroma,
 }
@@ -50,29 +56,42 @@ pub struct ChromaOptions {
     pub softness: f32,
     /// Só remove regiões ligadas à borda (não fura o sujeito).
     pub contiguous: bool,
-    /// Tira o reflexo da cor de fundo nas bordas do sujeito.
-    pub despill: bool,
 }
 
 impl Default for ChromaOptions {
     fn default() -> Self {
         // Mais conservador que o usual em editores: um furo semitransparente no
         // sujeito vira buraco no splat (18/8 já comia tons claros de azul).
-        Self { auto_color: true, color: [0, 255, 0], tolerance: 12.0, softness: 6.0, contiguous: true, despill: true }
+        Self { auto_color: true, color: [0, 255, 0], tolerance: 12.0, softness: 6.0, contiguous: true }
     }
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
 pub struct MaskOptions {
     pub enabled: bool,
     /// Também passa as máscaras ao COLMAP. Ajuda quando o fundo "derrete";
     /// atrapalha em sujeitos com pouca textura (ex.: nuca), por isso é opcional.
     pub for_poses: bool,
-    #[serde(default)]
     pub method: MaskMethod,
-    #[serde(default)]
     pub chroma: ChromaOptions,
+    /// Tira do sujeito o reflexo de um fundo verde ou azul (qualquer método).
+    pub despill: bool,
+    /// 0–100.
+    pub despill_strength: f32,
+}
+
+impl Default for MaskOptions {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            for_poses: false,
+            method: MaskMethod::Auto,
+            chroma: ChromaOptions::default(),
+            despill: true,
+            despill_strength: 100.0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -188,6 +207,31 @@ async fn run_ai(
     on_log: &mut impl FnMut(&str),
     no_subject: &mut u32,
 ) -> Result<String> {
+    if method == MaskMethod::Rmbg && !crate::tools::ONNX_AVAILABLE {
+        bail!("o RMBG-1.4 precisa de Windows ou de um Mac com Apple Silicon");
+    }
+
+    // Modelos ONNX: tudo no Windows; só o RMBG no macOS (o resto é Vision).
+    #[cfg(any(windows, all(target_os = "macos", target_arch = "aarch64")))]
+    {
+        let kind = match method {
+            MaskMethod::Rmbg => Some(ModelKind::Rmbg),
+            MaskMethod::General if cfg!(windows) => Some(ModelKind::BiRefNet),
+            _ if cfg!(windows) => Some(ModelKind::Modnet),
+            _ => None,
+        };
+        if let Some(kind) = kind {
+            let model = match kind {
+                ModelKind::BiRefNet => &tools.birefnet_model,
+                ModelKind::Modnet => &tools.modnet_model,
+                ModelKind::Rmbg => &tools.rmbg_model,
+            };
+            let model = crate::tools::Tools::require(model, kind.label(), crate::tools::install_hint("model"))?;
+            let (images, masks, cancel) = (images.to_path_buf(), masks.to_path_buf(), cancel.clone());
+            return drive(move |tx| onnx::run(&model, kind, &images, &masks, &cancel, &tx), on_progress, on_log).await;
+        }
+    }
+
     #[cfg(target_os = "macos")]
     {
         let bin = crate::tools::Tools::require(&tools.masker, "Recortador (Vision)", "Recompile o app no macOS 14+.")?;
@@ -212,79 +256,117 @@ async fn run_ai(
         Ok("Vision · GPU".to_string())
     }
 
-    #[cfg(windows)]
+    #[cfg(not(target_os = "macos"))]
     {
-        let kind = if method == MaskMethod::General { ModelKind::BiRefNet } else { ModelKind::Modnet };
-        let model = match kind {
-            ModelKind::BiRefNet => &tools.birefnet_model,
-            ModelKind::Modnet => &tools.modnet_model,
-        };
-        let model = crate::tools::Tools::require(model, kind.label(), crate::tools::install_hint("model"))?;
-        let (images, masks, cancel) = (images.to_path_buf(), masks.to_path_buf(), cancel.clone());
-        drive(move |tx| onnx::run(&model, kind, &images, &masks, &cancel, &tx), on_progress, on_log).await
-    }
-
-    #[cfg(not(any(target_os = "macos", windows)))]
-    {
-        let _ = (tools, method, images, masks, cancel, on_progress, on_log, no_subject);
+        let _ = (tools, images, masks, cancel, on_progress, on_log, no_subject);
         bail!("o recorte por IA ainda não está disponível neste sistema; use a cor sólida");
     }
 }
 
-/// Remove o reflexo da cor de fundo ("spill") na borda do recorte: o canal
-/// dominante da cor-chave é limitado ao maior dos outros dois. Só na borda
-/// (alpha < 255 ou até `EDGE_PX` do fundo) para não desbotar partes do
-/// sujeito que tenham a mesma cor do fundo.
-#[derive(Debug, Clone, Copy)]
+/// Supressão do reflexo da cor do fundo ("spill"): a luz que uma tela verde
+/// rebate no sujeito. O canal dominante da cor-chave é limitado ao maior dos
+/// outros dois em todo o sujeito (não só na borda: o verde rebatido cobre
+/// superfícies inteiras, como a base de uma bola cinza) e a luminância tirada
+/// volta como cinza, para o sujeito não escurecer. Limitar pelo maior (e não
+/// pela média) dos outros canais preserva amarelos e cianos.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Despill {
-    pub key: [u8; 3],
-    /// Distância RGB até onde o pixel ainda é considerado contaminado.
-    pub reach: f32,
+    /// Canal da cor-chave: 1 = verde, 2 = azul.
+    channel: usize,
+    /// 0–1.
+    strength: f32,
 }
 
+/// Peso de cada canal na luminância (Rec. 709).
+const LUMA: [f32; 3] = [0.2126, 0.7152, 0.0722];
+
 impl Despill {
-    pub fn from_chroma(key: [u8; 3], c: &ChromaOptions) -> Option<Self> {
-        let (max, min) = (*key.iter().max().unwrap() as i32, *key.iter().min().unwrap() as i32);
-        // Só faz sentido para cores saturadas (verde, azul, magenta…).
-        (c.despill && max - min > 60).then(|| Self { key, reach: (c.tolerance + 2.0 * c.softness) * 4.42 })
+    /// Só para fundos verdes ou azuis bem saturados: num fundo bege ou cinza o
+    /// "reflexo" seria a própria cor do sujeito (pele, madeira…).
+    pub fn new(key: [u8; 3], strength: f32) -> Option<Self> {
+        let channel = (0..3).max_by_key(|&i| key[i]).unwrap();
+        let others = (0..3).filter(|&i| i != channel).map(|i| key[i]).max().unwrap();
+        (channel != 0 && key[channel] as i32 - others as i32 > 50 && strength > 0.0)
+            .then(|| Self { channel, strength: (strength / 100.0).clamp(0.0, 1.0) })
     }
 
     fn apply(&self, px: &mut [u8]) {
-        let c = (0..3).max_by_key(|&i| self.key[i]).unwrap();
-        if chroma::dist(px, self.key) > self.reach {
+        let c = self.channel;
+        let limit = (0..3).filter(|&i| i != c).map(|i| px[i]).max().unwrap();
+        let spill = (px[c] as f32 - limit as f32) * self.strength;
+        if spill <= 0.0 {
             return;
         }
-        let limit = (0..3).filter(|&i| i != c).map(|i| px[i]).max().unwrap();
-        px[c] = px[c].min(limit);
+        let gray = spill * LUMA[c];
+        for (i, v) in px.iter_mut().take(3).enumerate() {
+            let x = *v as f32 - if i == c { spill } else { 0.0 } + gray;
+            *v = x.round().clamp(0.0, 255.0) as u8;
+        }
     }
+}
+
+/// Lê a máscara de um frame já no tamanho dele.
+fn load_mask(masks: &Path, img_path: &Path, (w, h): (u32, u32)) -> Result<GrayImage> {
+    let stem = img_path.file_stem().context("nome de frame inválido")?;
+    let mask_path = masks.join(stem).with_extension("png");
+    let mask = image::open(&mask_path)
+        .with_context(|| format!("máscara ausente: {}", mask_path.display()))?
+        .into_luma8();
+    Ok(if mask.dimensions() == (w, h) {
+        mask
+    } else {
+        image::imageops::resize(&mask, w, h, image::imageops::FilterType::Triangle)
+    })
+}
+
+/// Cor do fundo: mediana por canal dos pixels que a máscara diz serem fundo,
+/// numa amostra de até 24 frames. Vale para qualquer método de recorte e é
+/// uma só para o vídeo todo (cores coerentes entre as vistas).
+pub fn background_color(images: &[PathBuf], masks: &Path) -> Result<Option<[u8; 3]>> {
+    let step = images.len().div_ceil(24).max(1);
+    let hists = images
+        .par_iter()
+        .step_by(step)
+        .map(|p| -> Result<[[u64; 256]; 3]> {
+            let img = image::open(p)?.into_rgb8();
+            let mask = load_mask(masks, p, img.dimensions())?;
+            let mut h = [[0u64; 256]; 3];
+            for (px, m) in img.pixels().zip(mask.pixels()).step_by(3) {
+                if m[0] < 26 {
+                    for c in 0..3 {
+                        h[c][px[c] as usize] += 1;
+                    }
+                }
+            }
+            Ok(h)
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let mut total = [[0u64; 256]; 3];
+    for h in &hists {
+        for c in 0..3 {
+            for v in 0..256 {
+                total[c][v] += h[c][v];
+            }
+        }
+    }
+    let n: u64 = total[0].iter().sum();
+    if n < 1000 {
+        return Ok(None);
+    }
+    Ok(Some(std::array::from_fn(|c| {
+        let mut acc = 0;
+        total[c].iter().position(|&k| {
+            acc += k;
+            acc * 2 >= n
+        }).unwrap_or(0) as u8
+    })))
 }
 
 /// Monta o dataset de treino com fundo transparente: PNGs RGBA (alpha =
 /// máscara) e uma cópia do modelo COLMAP com os nomes trocados para `.png`.
 /// O Brush procura cada imagem pelo nome registrado no `images.bin`.
-const EDGE_PX: i32 = 2;
-
-/// Pixels a até `r` px de um pixel de fundo (máscara < 128): dilatação
-/// separável (linhas, depois colunas).
-fn near_background(mask: &GrayImage, r: i32) -> Vec<bool> {
-    let (w, h) = (mask.width() as i32, mask.height() as i32);
-    let bg: Vec<bool> = mask.as_raw().iter().map(|&m| m < 128).collect();
-    let mut rows = vec![false; bg.len()];
-    for y in 0..h {
-        for x in 0..w {
-            rows[(y * w + x) as usize] = (x - r..=x + r).any(|xx| xx >= 0 && xx < w && bg[(y * w + xx) as usize]);
-        }
-    }
-    let mut out = vec![false; bg.len()];
-    for y in 0..h {
-        for x in 0..w {
-            out[(y * w + x) as usize] = (y - r..=y + r).any(|yy| yy >= 0 && yy < h && rows[(yy * w + x) as usize]);
-        }
-    }
-    out
-}
-
-pub fn build_alpha_dataset(dataset: &Path, masks: &Path, out: &Path, despill: Option<Despill>) -> Result<()> {
+/// `despill`: intensidade 0–100; devolve a cor de fundo quando aplicou.
+pub fn build_alpha_dataset(dataset: &Path, masks: &Path, out: &Path, despill: Option<f32>) -> Result<Option<[u8; 3]>> {
     if out.exists() {
         std::fs::remove_dir_all(out)?;
     }
@@ -293,25 +375,21 @@ pub fn build_alpha_dataset(dataset: &Path, masks: &Path, out: &Path, despill: Op
     std::fs::create_dir_all(&out_images)?;
     std::fs::create_dir_all(&out_model)?;
 
-    list_images(&dataset.join("images"))?.par_iter().try_for_each(|img_path| -> Result<()> {
+    let images = list_images(&dataset.join("images"))?;
+    let key = match despill {
+        Some(strength) => background_color(&images, masks)?.filter(|&k| Despill::new(k, strength).is_some()),
+        None => None,
+    };
+    let despill = key.zip(despill).and_then(|(k, s)| Despill::new(k, s));
+
+    images.par_iter().try_for_each(|img_path| -> Result<()> {
         let stem = img_path.file_stem().context("nome de frame inválido")?;
-        let mask_path = masks.join(stem).with_extension("png");
         let mut rgba = image::open(img_path)?.into_rgba8();
-        let mask = image::open(&mask_path)
-            .with_context(|| format!("máscara ausente: {}", mask_path.display()))?
-            .into_luma8();
-        let mask = if mask.dimensions() == rgba.dimensions() {
-            mask
-        } else {
-            image::imageops::resize(&mask, rgba.width(), rgba.height(), image::imageops::FilterType::Triangle)
-        };
-        let edge = despill.map(|_| near_background(&mask, EDGE_PX));
-        for (i, (px, m)) in rgba.pixels_mut().zip(mask.pixels()).enumerate() {
+        let mask = load_mask(masks, img_path, rgba.dimensions())?;
+        for (px, m) in rgba.pixels_mut().zip(mask.pixels()) {
             px[3] = m[0];
-            if let (Some(d), Some(edge)) = (despill, &edge) {
-                if m[0] > 0 && (m[0] < 255 || edge[i]) {
-                    d.apply(&mut px.0[..3]);
-                }
+            if let Some(d) = despill.filter(|_| m[0] > 0) {
+                d.apply(&mut px.0[..3]);
             }
         }
         rgba.save(out_images.join(stem).with_extension("png"))?;
@@ -324,7 +402,8 @@ pub fn build_alpha_dataset(dataset: &Path, masks: &Path, out: &Path, despill: Op
     }
     crate::scene::rewrite_image_names(&model.join("images.bin"), &out_model.join("images.bin"), |name| {
         Path::new(name).with_extension("png").to_string_lossy().into_owned()
-    })
+    })?;
+    Ok(key)
 }
 
 /// O COLMAP espera `<nome_da_imagem>.png` (ex.: `00000.jpg.png`), preto = ignorar.
@@ -350,9 +429,17 @@ pub fn write_colmap_masks(images: &Path, masks: &Path, out: &Path) -> Result<()>
 pub mod chroma {
     use super::*;
 
+    /// Distância RGB até a cor-chave, aceitando a chave mais clara (até 1,6x):
+    /// telas costumam ser mais iluminadas no meio que nas bordas, de onde vem
+    /// a cor detectada. Mais escura não: a base de um objeto à sombra, tingida
+    /// pelo reflexo verde, seria confundida com fundo.
     pub fn dist(px: &[u8], key: [u8; 3]) -> f32 {
-        let d: [f32; 3] = std::array::from_fn(|i| px[i] as f32 - key[i] as f32);
-        (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
+        let k: [f32; 3] = key.map(|v| v as f32);
+        let dot = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+        let p = [px[0] as f32, px[1] as f32, px[2] as f32];
+        let s = (dot(p, k) / dot(k, k).max(1.0)).clamp(1.0, 1.6);
+        let d: [f32; 3] = std::array::from_fn(|i| p[i] - s * k[i]);
+        dot(d, d).sqrt()
     }
 
     /// Mediana por canal dos pixels da borda (robusta a um canto "sujo").
@@ -485,6 +572,9 @@ pub enum ModelKind {
     BiRefNet,
     /// MODNet: menor lado 512 (múltiplos de 32), normalização [-1, 1], saída 0–1.
     Modnet,
+    /// RMBG-1.4: entrada fixa 1024², `x - 0.5`, saída 0–1 esticada entre o
+    /// mínimo e o máximo do frame (como no `utilities.py` da BRIA).
+    Rmbg,
 }
 
 impl ModelKind {
@@ -492,13 +582,14 @@ impl ModelKind {
         match self {
             ModelKind::BiRefNet => "BiRefNet",
             ModelKind::Modnet => "MODNet",
+            ModelKind::Rmbg => "RMBG-1.4",
         }
     }
 
     /// Tamanho (largura, altura) de entrada do modelo para um frame.
     pub fn input_size(self, w: u32, h: u32) -> (u32, u32) {
         match self {
-            ModelKind::BiRefNet => (1024, 1024),
+            ModelKind::BiRefNet | ModelKind::Rmbg => (1024, 1024),
             ModelKind::Modnet => {
                 let s = 512.0 / w.min(h) as f32;
                 let r = |v: u32| (((v as f32 * s) / 32.0).round() as u32 * 32).max(32);
@@ -514,6 +605,7 @@ impl ModelKind {
         let (mean, std) = match self {
             ModelKind::BiRefNet => ([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
             ModelKind::Modnet => ([0.5; 3], [0.5; 3]),
+            ModelKind::Rmbg => ([0.5; 3], [1.0; 3]),
         };
         let plane = (iw * ih) as usize;
         let mut out = vec![0f32; 3 * plane];
@@ -527,9 +619,19 @@ impl ModelKind {
 
     /// Saída do modelo → máscara do tamanho original.
     pub fn postprocess(self, out: &[f32], (iw, ih): (u32, u32), width: u32, height: u32) -> GrayImage {
+        // RMBG: estica o resultado entre o mínimo e o máximo do frame, salvo
+        // quando quase não há sujeito (esticar só amplificaria ruído).
+        let (lo, scale) = match self {
+            ModelKind::Rmbg => {
+                let (lo, hi) = out.iter().fold((f32::MAX, f32::MIN), |(a, b), &v| (a.min(v), b.max(v)));
+                if hi - lo > 0.5 { (lo, 1.0 / (hi - lo)) } else { (0.0, 1.0) }
+            }
+            _ => (0.0, 1.0),
+        };
         let to_u8 = |v: f32| match self {
             ModelKind::BiRefNet => (255.0 / (1.0 + (-v).exp())).round() as u8,
             ModelKind::Modnet => (v.clamp(0.0, 1.0) * 255.0).round() as u8,
+            ModelKind::Rmbg => (((v - lo) * scale).clamp(0.0, 1.0) * 255.0).round() as u8,
         };
         let bytes: Vec<u8> = out.iter().map(|&v| to_u8(v)).collect();
         let m = GrayImage::from_raw(iw, ih, bytes).expect("saída do modelo com tamanho inesperado");
@@ -537,7 +639,7 @@ impl ModelKind {
     }
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, all(target_os = "macos", target_arch = "aarch64")))]
 mod onnx {
     use super::*;
     use ort::{ep, session::Session, value::Tensor};
@@ -547,27 +649,52 @@ mod onnx {
         anyhow::anyhow!("{e}")
     }
 
+    #[cfg(windows)]
+    const GPU: &str = "DirectML";
+    #[cfg(target_os = "macos")]
+    const GPU: &str = "CoreML · GPU";
+
+    #[cfg(windows)]
+    fn gpu_provider() -> ort::ep::ExecutionProviderDispatch {
+        ep::DirectML::default().build().error_on_failure()
+    }
+
+    /// GPU sem o Neural Engine: compilar redes grandes para o ANE já travou o
+    /// `ANECompilerService` do sistema por mais de uma hora (BiRefNet).
+    #[cfg(target_os = "macos")]
+    fn gpu_provider() -> ort::ep::ExecutionProviderDispatch {
+        use ep::coreml::{ComputeUnits, ModelFormat};
+        ep::CoreML::default()
+            .with_compute_units(ComputeUnits::CPUAndGPU)
+            .with_model_format(ModelFormat::MLProgram)
+            .with_static_input_shapes(true)
+            .build()
+            .error_on_failure()
+    }
+
     fn session(model: &Path, gpu: bool) -> Result<Session> {
-        // DirectML exige execução sequencial e sem padrão de memória.
+        // DirectML exige execução sequencial e sem padrão de memória. Lote
+        // fixo em 1: com ele dinâmico o CoreML só aceita parte do grafo e o
+        // RMBG fica 3x mais lento.
         let mut b = Session::builder()
             .map_err(ort_err)?
             .with_parallel_execution(false)
             .map_err(ort_err)?
             .with_memory_pattern(false)
+            .map_err(ort_err)?
+            .with_dimension_override("batch_size", 1)
             .map_err(ort_err)?;
         if gpu {
-            b = b
-                .with_execution_providers([ep::DirectML::default().build().error_on_failure()])
-                .map_err(ort_err)?;
+            b = b.with_execution_providers([gpu_provider()]).map_err(ort_err)?;
         }
         b.commit_from_file(model).map_err(ort_err)
     }
 
     pub fn run(model: &Path, kind: ModelKind, images: &Path, masks: &Path, cancel: &CancellationToken, tx: &Tx) -> Result<String> {
         let (mut sess, device) = match session(model, true) {
-            Ok(s) => (s, "DirectML"),
+            Ok(s) => (s, GPU),
             Err(e) => {
-                let _ = tx.send(Msg::Log(format!("DirectML indisponível ({e:#}); usando CPU")));
+                let _ = tx.send(Msg::Log(format!("{GPU} indisponível ({e:#}); usando CPU")));
                 (session(model, false)?, "CPU")
             }
         };
@@ -592,7 +719,7 @@ mod onnx {
                 || -> Result<Vec<f32>> {
                     let t = Tensor::from_array((shape, data))?;
                     let out = sess.run(ort::inputs![input.as_str() => t])?;
-                    // BiRefNet: última saída é a final; MODNet tem uma só.
+                    // BiRefNet: última saída é a final; MODNet e RMBG têm uma só.
                     let (_, v) = out[out.len() - 1].try_extract_tensor::<f32>()?;
                     Ok(v.to_vec())
                 },
@@ -652,17 +779,104 @@ mod tests {
         let m = chroma::mask(&img, key, &ChromaOptions { contiguous: false, ..o.clone() });
         assert_eq!(m.get_pixel(20, 20)[0], 0, "sem contíguo, o furo some");
 
-        // Despill: pixel esverdeado perto da chave perde o excesso de verde.
-        let d = Despill::from_chroma(key, &o).unwrap();
-        let mask_edge = near_background(&m, 2);
-        assert!(mask_edge[(10 * 40 + 10) as usize], "canto do quadrado encosta no fundo");
-        assert!(!mask_edge[(20 * 40 + 15) as usize], "interior longe do fundo");
-        let mut px = [90u8, 170, 80];
-        d.apply(&mut px);
-        assert_eq!(px, [90, 90, 80]);
-        // Cor bem diferente da chave fica intacta.
-        let mut skin = [200u8, 150, 120];
-        d.apply(&mut skin);
-        assert_eq!(skin, [200, 150, 120]);
+        // Tela mais iluminada que a chave ainda é fundo; um objeto escuro
+        // tingido de verde (base de uma bola à sombra) não.
+        assert!(chroma::dist(&[30, 250, 45], [20, 200, 30]) < 15.0);
+        assert!(chroma::dist(&[30, 80, 40], [30, 200, 40]) > 100.0);
+
+    }
+
+    /// Despill: a luz verde rebatida numa superfície cinza some no sujeito
+    /// inteiro, sem escurecer; amarelo e pele ficam intactos.
+    #[test]
+    fn despill_removes_green_spill_everywhere() {
+        let d = Despill::new([30, 200, 40], 100.0).expect("tela verde");
+        // Base de uma bola cinza iluminada pelo chão verde.
+        let mut ball = [30u8, 80, 40];
+        d.apply(&mut ball);
+        assert!(ball[1] <= ball[0].max(ball[2]), "sem verde dominante: {ball:?}");
+        let luma = |p: [u8; 3]| (0..3).map(|i| p[i] as f32 * LUMA[i]).sum::<f32>();
+        assert!(luma(ball) > 50.0, "luminância preservada: {ball:?}");
+        for keep in [[200u8, 150, 120], [220, 220, 30], [60, 60, 60]] {
+            let mut p = keep;
+            d.apply(&mut p);
+            assert_eq!(p, keep);
+        }
+        // Meia intensidade tira metade do excesso.
+        let mut half = [40u8, 140, 40];
+        Despill::new([30, 200, 40], 50.0).unwrap().apply(&mut half);
+        assert!(half[1] > half[0] && half[1] < 140, "{half:?}");
+
+        // Azul também; fundos pouco saturados ou avermelhados não.
+        assert_eq!(Despill::new([20, 60, 210], 100.0).map(|d| d.channel), Some(2));
+        assert!(Despill::new([150, 190, 150], 100.0).is_none(), "verde-claro de parede");
+        assert!(Despill::new([210, 120, 60], 100.0).is_none(), "fundo laranja");
+        assert!(Despill::new([30, 200, 40], 0.0).is_none());
+    }
+
+    #[test]
+    fn rmbg_pre_and_post_processing() {
+        let (t, shape) = ModelKind::Rmbg.preprocess(&RgbImage::from_pixel(64, 48, image::Rgb([255, 0, 128])));
+        assert_eq!(shape, [1, 3, 1024, 1024]);
+        let plane = 1024 * 1024;
+        assert!((t[0] - 0.5).abs() < 1e-3 && (t[plane] + 0.5).abs() < 1e-3 && t[2 * plane].abs() < 0.01);
+        // Saída esticada entre mínimo e máximo do frame.
+        let mut out = vec![0.1f32; plane];
+        out[..plane / 2].fill(0.9);
+        let m = ModelKind::Rmbg.postprocess(&out, (1024, 1024), 1024, 1024);
+        assert_eq!((m.get_pixel(0, 0)[0], m.get_pixel(0, 1023)[0]), (255, 0));
+        // Sem sujeito: nada é esticado.
+        let m = ModelKind::Rmbg.postprocess(&vec![0.02; plane], (1024, 1024), 64, 48);
+        assert!(m.pixels().all(|p| p[0] == 5));
+    }
+
+    /// Recorte real com um modelo ONNX, medindo o tempo:
+    /// `SPLATFORGE_TEST_MODEL=rmbg14.onnx SPLATFORGE_TEST_FRAMES=<pasta>
+    ///  cargo test --release onnx_model_on_frames -- --ignored --nocapture`
+    #[cfg(any(windows, all(target_os = "macos", target_arch = "aarch64")))]
+    #[test]
+    #[ignore]
+    fn onnx_model_on_frames() {
+        let model = PathBuf::from(std::env::var("SPLATFORGE_TEST_MODEL").expect("SPLATFORGE_TEST_MODEL"));
+        let frames = PathBuf::from(std::env::var("SPLATFORGE_TEST_FRAMES").expect("SPLATFORGE_TEST_FRAMES"));
+        let kind = match model.file_name().unwrap().to_string_lossy() {
+            n if n.contains("rmbg") => ModelKind::Rmbg,
+            n if n.contains("modnet") => ModelKind::Modnet,
+            _ => ModelKind::BiRefNet,
+        };
+        let out = frames.with_file_name("masks_test");
+        let _ = std::fs::remove_dir_all(&out);
+        std::fs::create_dir_all(&out).unwrap();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let t0 = std::time::Instant::now();
+        let backend = onnx::run(&model, kind, &frames, &out, &CancellationToken::new(), &tx).unwrap();
+        let n = list_images(&out).unwrap().len();
+        while let Ok(Msg::Log(l)) = rx.try_recv() {
+            println!("{l}");
+        }
+        println!("{backend}: {n} frames em {:.1} s ({:.0} ms/frame) → {}", t0.elapsed().as_secs_f32(),
+            t0.elapsed().as_secs_f32() * 1000.0 / n as f32, out.display());
+    }
+
+    /// Cor de fundo pela máscara e dataset com despill aplicado.
+    #[test]
+    fn background_color_from_masks() {
+        let dir = std::env::temp_dir().join(format!("splatforge_bgcolor_{}", std::process::id()));
+        let (images, masks) = (dir.join("images"), dir.join("masks"));
+        std::fs::create_dir_all(&images).unwrap();
+        std::fs::create_dir_all(&masks).unwrap();
+        let mut img = RgbImage::from_pixel(64, 64, image::Rgb([20, 190, 40]));
+        let mut mask = GrayImage::new(64, 64);
+        for y in 16..48 {
+            for x in 16..48 {
+                img.put_pixel(x, y, image::Rgb([90, 140, 90]));
+                mask.put_pixel(x, y, image::Luma([255]));
+            }
+        }
+        img.save(images.join("00000.png")).unwrap();
+        mask.save(masks.join("00000.png")).unwrap();
+        let key = background_color(&[images.join("00000.png")], &masks).unwrap();
+        assert_eq!(key, Some([20, 190, 40]));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

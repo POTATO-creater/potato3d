@@ -92,16 +92,29 @@ sem paredes, pessoas ao fundo ou os riscos em volta.
 | IA (Vision) | macOS 14+ | Recorte nativo do sistema, na GPU, via o sidecar `splatforge_mask` (compilado pelo `build.rs`) | ~40 ms/frame num M4 |
 | Pessoas | Windows | MODNet (Apache 2.0) com ONNX Runtime + DirectML | 144 ms/frame na CPU de um M4; GPU não medida |
 | Objetos | Windows | BiRefNet-lite (MIT) com ONNX Runtime + DirectML | ~4 s/frame numa RTX 4070 Ti Super |
-| Cor sólida | todos | Chroma key em Rust: distância RGB à cor de fundo (detectada pela mediana das bordas ou escolhida), tolerância, suavização, preenchimento a partir das bordas e despill só na borda do recorte | 120 frames em 0,09 s |
+| RMBG | Windows, macOS (Apple Silicon) | RMBG-1.4 (BRIA AI, **não comercial**) com ONNX Runtime + DirectML / CoreML na GPU | ~0,4 s/frame num M4 (+~5 s para compilar no CoreML) |
+| Cor sólida | todos | Chroma key em Rust: distância RGB à cor de fundo (detectada pela mediana das bordas ou escolhida; áreas mais iluminadas da tela também contam), tolerância, suavização e preenchimento a partir das bordas | 120 frames em 0,09 s |
 
 O BiRefNet é lento em qualquer GPU porque as convoluções deformáveis viram
 ~16 mil operações minúsculas no ONNX; o MODNet é uma rede convolucional
 simples e, nos frames testados (pessoas de frente e de costas), recortou tão
-bem quanto ele. O RMBG-1.4 seria uma opção rápida para objetos, mas a licença
-é não comercial.
+bem quanto ele. O RMBG-1.4 tem bordas mais limpas que o Vision (sem o halo
+claro em volta do cabelo), mas a licença é não comercial: por isso ele só é
+baixado (176 MB, por **"Instalar ferramentas"**) quando escolhido. No macOS
+roda no CoreML só com CPU e GPU: compilar para o Neural Engine pode travar o
+`ANECompilerService` do sistema.
 
 No Windows os modelos (MODNet 26 MB, BiRefNet 224 MB) são baixados por
 **"Instalar ferramentas"** e o `DirectML.dll` 1.15.4 vai dentro do instalador.
+
+**Despill** (qualquer método): com fundo verde ou azul, a luz rebatida pela
+tela tinge o sujeito inteiro, não só a borda. A cor do fundo é a mediana dos
+pixels que a máscara marca como fundo; em todo o sujeito o canal dessa cor é
+limitado ao maior dos outros dois e a luminância tirada volta como cinza (o
+sujeito não escurece; amarelos e cianos ficam intactos). Fundos pouco
+saturados ou de outra cor são ignorados. Numa tela verde com sujeito de cor
+parecida, **RMBG + despill** dá o melhor resultado: a IA faz o recorte e o
+despill tira o verde.
 
 Opcionalmente as máscaras também vão para o COLMAP ("Usar o recorte também
 nas poses"): ajuda quando o fundo muda entre frames, mas tira pontos de apoio

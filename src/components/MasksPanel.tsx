@@ -10,16 +10,27 @@ function methods(os: Os | undefined): { value: MaskMethod; label: string; hint: 
   const chroma = {
     value: "chroma" as const,
     label: "Cor sólida",
-    hint: "Chroma key: instantâneo. Para vídeos com fundo de cor única (tela verde, azul…).",
+    hint:
+      "Chroma key: instantâneo. Para fundo de cor única (tela verde, azul…). Se o sujeito tiver partes " +
+      "da cor do fundo, prefira o RMBG com o despill ligado.",
+  };
+  const rmbg = {
+    value: "rmbg" as const,
+    label: "RMBG",
+    hint:
+      "RMBG-1.4 na GPU: bordas mais limpas, qualquer sujeito. Baixa 176 MB na primeira vez. " +
+      "Licença da BRIA AI só para uso não comercial.",
   };
   if (os === "windows") {
     return [
       { value: "people", label: "Pessoas", hint: "MODNet na GPU: rápido, mas só reconhece pessoas." },
       { value: "general", label: "Objetos", hint: "BiRefNet: qualquer sujeito, bem mais lento." },
+      rmbg,
       chroma,
     ];
   }
-  return [{ value: "auto", label: "IA (Vision)", hint: "Recorte nativo do macOS, na GPU: qualquer sujeito." }, chroma];
+  const vision = { value: "auto" as const, label: "Vision", hint: "Recorte nativo do macOS, na GPU: qualquer sujeito." };
+  return os === "macos" ? [vision, rmbg, chroma] : [vision, chroma];
 }
 
 export function MasksPanel({
@@ -87,11 +98,24 @@ export function MasksPanel({
                 checked={c.contiguous}
                 onChange={(v) => setChroma({ contiguous: v })}
               />
-              <Toggle
-                label="Remover reflexo da cor (despill)"
-                hint="tira a franja colorida na borda do sujeito"
-                checked={c.despill}
-                onChange={(v) => setChroma({ despill: v })}
+            </fieldset>
+          )}
+
+          <Toggle
+            label="Remover reflexo do fundo verde/azul (despill)"
+            hint="tira do sujeito inteiro a luz rebatida pela tela; desligue se ele tiver a cor do fundo"
+            checked={masks.despill}
+            disabled={locked}
+            onChange={(v) => onMasks({ ...masks, method, despill: v })}
+          />
+          {masks.despill && (
+            <fieldset className="chroma" disabled={locked}>
+              <Slider
+                label="Intensidade do despill"
+                value={masks.despillStrength}
+                min={0}
+                max={100}
+                onChange={(v) => onMasks({ ...masks, method, despillStrength: v })}
               />
             </fieldset>
           )}

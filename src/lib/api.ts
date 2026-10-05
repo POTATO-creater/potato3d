@@ -15,6 +15,8 @@ export interface Tools {
   /** Windows: modelos de recorte baixados pelo instalador. */
   birefnetModel: string | null;
   modnetModel: string | null;
+  /** Windows e macOS (Apple Silicon): RMBG-1.4, baixado sob demanda. */
+  rmbgModel: string | null;
   os: "macos" | "windows" | "linux";
 }
 
@@ -34,8 +36,8 @@ export interface FrameOptions {
   trimEnd: number | null;
 }
 
-/** auto: Vision (macOS) / MODNet (Windows) · people: MODNet · general: BiRefNet · chroma: cor sólida */
-export type MaskMethod = "auto" | "people" | "general" | "chroma";
+/** auto: Vision (macOS) / MODNet (Windows) · people: MODNet · general: BiRefNet · rmbg: RMBG-1.4 · chroma: cor sólida */
+export type MaskMethod = "auto" | "people" | "general" | "rmbg" | "chroma";
 
 export interface ChromaOptions {
   autoColor: boolean;
@@ -45,7 +47,6 @@ export interface ChromaOptions {
   /** 0–100 */
   softness: number;
   contiguous: boolean;
-  despill: boolean;
 }
 
 export const DEFAULT_CHROMA: ChromaOptions = {
@@ -54,7 +55,6 @@ export const DEFAULT_CHROMA: ChromaOptions = {
   tolerance: 12,
   softness: 6,
   contiguous: true,
-  despill: true,
 };
 
 export interface MaskOptions {
@@ -63,6 +63,10 @@ export interface MaskOptions {
   forPoses: boolean;
   method: MaskMethod;
   chroma: ChromaOptions;
+  /** Tira do sujeito o reflexo de um fundo verde ou azul (qualquer método). */
+  despill: boolean;
+  /** 0–100 */
+  despillStrength: number;
 }
 
 export interface MaskStats {
@@ -226,12 +230,13 @@ export const api = {
     channel.onmessage = onProgress;
     return invoke<ExportStats>("export_splat", { projectDir, options, onProgress: channel });
   },
-  installPlan: () => invoke<InstallPlan>("install_plan"),
+  /** `rmbg`: incluir o modelo RMBG-1.4 (só baixado quando escolhido). */
+  installPlan: (rmbg: boolean) => invoke<InstallPlan>("install_plan", { rmbg }),
   cancelInstall: () => invoke<void>("cancel_install"),
-  installTools: (onEvent: (e: InstallEvent) => void) => {
+  installTools: (rmbg: boolean, onEvent: (e: InstallEvent) => void) => {
     const channel = new Channel<InstallEvent>();
     channel.onmessage = onEvent;
-    return invoke<void>("install_tools", { onEvent: channel });
+    return invoke<void>("install_tools", { rmbg, onEvent: channel });
   },
   startJob: (config: JobConfig, onEvent: (e: JobEvent) => void) => {
     const channel = new Channel<JobEvent>();

@@ -62,6 +62,8 @@ async function fakeExport(channel: Channel<any>, projectDir: string) {
 let cancelled = false;
 // `?missing=1` simula o primeiro uso (ferramentas ausentes até "instalar").
 let toolsInstalled = params.get("missing") !== "1";
+// `?rmbg=0`: o modelo RMBG-1.4 ainda não foi baixado.
+let rmbgInstalled = params.get("rmbg") !== "0";
 
 async function fakeInstall(channel: Channel<any>) {
   cancelled = false;
@@ -81,6 +83,7 @@ async function fakeInstall(channel: Channel<any>) {
     channel.onmessage({ type: "done", id: p.id });
   }
   toolsInstalled = true;
+  rmbgInstalled = true;
   channel.onmessage({ type: "finished" });
 }
 
@@ -128,6 +131,7 @@ export function installMock() {
             masker: params.get("os") === "windows" ? null : "mock",
             birefnetModel: params.get("os") === "windows" && toolsInstalled ? "mock" : null,
             modnetModel: params.get("os") === "windows" && toolsInstalled ? "mock" : null,
+            rmbgModel: rmbgInstalled ? "mock" : null,
             os: params.get("os") ?? "macos",
           };
         case "probe_video":
@@ -157,6 +161,13 @@ export function installMock() {
           replay(args.onEvent, args.config.fromStage);
           return null;
         case "install_plan":
+          if (params.get("os") !== "windows")
+            return {
+              packages: args.rmbg ? [{ id: "rmbg", label: "Recorte RMBG-1.4", file: "model.onnx", size: 176_153_355 }] : [],
+              totalBytes: args.rmbg ? 176_153_355 : 0,
+              cuda: false,
+              note: "No macOS instale pelo Homebrew: brew install ffmpeg colmap",
+            };
           return {
             packages: [
               { id: "colmap", label: "COLMAP 4.2.1 (CUDA)", file: "colmap-x64-windows-cuda.zip", size: 414_666_626 },

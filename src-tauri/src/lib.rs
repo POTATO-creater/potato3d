@@ -130,14 +130,14 @@ fn cancel_job(state: State<'_, AppState>) {
 }
 
 #[tauri::command]
-async fn install_plan() -> CmdResult<installer::Plan> {
-    installer::plan().await.map_err(|e| format!("{e:#}"))
+async fn install_plan(rmbg: bool) -> CmdResult<installer::Plan> {
+    installer::plan(rmbg).await.map_err(|e| format!("{e:#}"))
 }
 
 /// O plano é recalculado aqui (URLs e hashes nunca vêm da interface).
 #[tauri::command]
-async fn install_tools(on_event: Channel<installer::InstallEvent>, state: State<'_, AppState>) -> CmdResult<()> {
-    let plan = installer::plan().await.map_err(|e| format!("{e:#}"))?;
+async fn install_tools(rmbg: bool, on_event: Channel<installer::InstallEvent>, state: State<'_, AppState>) -> CmdResult<()> {
+    let plan = installer::plan(rmbg).await.map_err(|e| format!("{e:#}"))?;
     let mut slot = state.install.lock().unwrap();
     if slot.as_ref().is_some_and(|t| !t.is_cancelled()) {
         return Err("a instalação já está em andamento".into());

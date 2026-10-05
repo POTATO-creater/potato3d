@@ -32,13 +32,21 @@ const STORE_KEY = "splatforge.settings.v3";
 const MASKS_KEY = "splatforge.masks.v1";
 
 function loadMasks(): MaskOptions {
-  const base: MaskOptions = { enabled: false, forPoses: false, method: "auto", chroma: DEFAULT_CHROMA };
+  const base: MaskOptions = {
+    enabled: false,
+    forPoses: false,
+    method: "auto",
+    chroma: DEFAULT_CHROMA,
+    despill: true,
+    despillStrength: 100,
+  };
   try {
     const raw = localStorage.getItem(MASKS_KEY);
-    // Mescla com o padrão: versões antigas não tinham método nem chroma.
+    // Mescla com o padrão: versões antigas não tinham método nem chroma, e o
+    // despill ficava dentro do chroma.
     if (raw) {
-      const saved = JSON.parse(raw);
-      return { ...base, ...saved, chroma: { ...DEFAULT_CHROMA, ...saved.chroma } };
+      const { chroma: { despill, ...chroma } = {} as never, ...saved } = JSON.parse(raw);
+      return { ...base, despill: despill ?? base.despill, ...saved, chroma: { ...DEFAULT_CHROMA, ...chroma } };
     }
   } catch {
     /* armazenamento indisponível */
@@ -65,6 +73,7 @@ function matchPreset(s: Settings): PresetId | "custom" {
 
 /** O recorte por IA tem o que precisa neste sistema? */
 function maskToolReady(tools: Tools, m: MaskOptions) {
+  if (m.method === "rmbg") return !!tools.rmbgModel;
   if (tools.os !== "windows") return !!tools.masker;
   return m.method === "general" ? !!tools.birefnetModel : !!tools.modnetModel;
 }
@@ -257,7 +266,7 @@ export default function App() {
           { name: "Brush", key: "brush", ok: !!tools.brush },
           // O recorte só é exigido quando ativado.
           {
-            name: tools.os === "windows" ? "Modelo de recorte" : "Recortador",
+            name: tools.os === "windows" || maskOpts.method === "rmbg" ? "Modelo de recorte" : "Recortador",
             key: "model",
             ok: !maskOpts.enabled || maskOpts.method === "chroma" || maskToolReady(tools, maskOpts),
           },
@@ -358,7 +367,12 @@ export default function App() {
         </div>
 
         {tools && missing.length > 0 && (
-          <ToolsSetup tools={tools} missing={[...missing]} onInstalled={() => api.detectTools().then(setTools)} />
+          <ToolsSetup
+            tools={tools}
+            missing={[...missing]}
+            rmbg={maskOpts.enabled && maskOpts.method === "rmbg"}
+            onInstalled={() => api.detectTools().then(setTools)}
+          />
         )}
         {videoError && <div className="banner error">Não foi possível ler o vídeo: {videoError}</div>}
         {job.error && (

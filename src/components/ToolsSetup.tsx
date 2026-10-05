@@ -14,20 +14,35 @@ interface PackageState {
 const mb = (n: number) => `${(n / 1e6).toFixed(0)} MB`;
 
 /** Primeiro uso: lista o que falta e, no Windows, instala com um clique. */
-export function ToolsSetup({ tools, missing, onInstalled }: { tools: Tools; missing: Missing; onInstalled: () => void }) {
+export function ToolsSetup({
+  tools,
+  missing,
+  rmbg,
+  onInstalled,
+}: {
+  tools: Tools;
+  missing: Missing;
+  /** O RMBG-1.4 foi escolhido: entra no plano de download. */
+  rmbg: boolean;
+  onInstalled: () => void;
+}) {
   const [plan, setPlan] = useState<InstallPlan | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [pkgs, setPkgs] = useState<Record<string, PackageState>>({});
   const [error, setError] = useState<string | null>(null);
 
-  const canInstall = tools.os === "windows" && missing.some((m) => m.key !== "brush");
-  const macMasker = tools.os === "macos" && missing.some((m) => m.key === "model");
+  const modelMissing = missing.some((m) => m.key === "model");
+  // No macOS o app só baixa o RMBG; o resto vem do Homebrew.
+  const canInstall =
+    (tools.os === "windows" && missing.some((m) => m.key !== "brush")) || (tools.os === "macos" && rmbg && modelMissing);
+  const macMasker = tools.os === "macos" && modelMissing && !rmbg;
+  const brewTools = tools.os !== "windows" ? missing.filter((m) => m.key === "ffmpeg" || m.key === "colmap") : [];
 
   useEffect(() => {
     if (!canInstall) return;
-    api.installPlan().then(setPlan, (e) => setPlanError(String(e)));
-  }, [canInstall]);
+    api.installPlan(rmbg).then(setPlan, (e) => setPlanError(String(e)));
+  }, [canInstall, rmbg]);
 
   function onEvent(e: InstallEvent) {
     switch (e.type) {
@@ -67,7 +82,7 @@ export function ToolsSetup({ tools, missing, onInstalled }: { tools: Tools; miss
     );
     setRunning(true);
     try {
-      await api.installTools(onEvent);
+      await api.installTools(rmbg, onEvent);
     } catch (e) {
       setRunning(false);
       setError(String(e));
@@ -99,9 +114,12 @@ export function ToolsSetup({ tools, missing, onInstalled }: { tools: Tools; miss
                 ))}
               </ul>
               <p className="help">
-                {plan.cuda
-                  ? "GPU NVIDIA detectada: o COLMAP com CUDA usa a placa para extrair e casar features."
-                  : "Nenhuma GPU NVIDIA detectada: o COLMAP roda na CPU."}{" "}
+                {tools.os === "windows" &&
+                  (plan.cuda
+                    ? "GPU NVIDIA detectada: o COLMAP com CUDA usa a placa para extrair e casar features. "
+                    : "Nenhuma GPU NVIDIA detectada: o COLMAP roda na CPU. ")}
+                {plan.packages.some((p) => p.id === "rmbg") &&
+                  "O RMBG-1.4 é da BRIA AI, com licença só para uso não comercial. "}
                 Os arquivos são conferidos por SHA-256 e ficam na pasta de dados do usuário.
               </p>
               <button className="btn-primary setup-btn" onClick={install}>
@@ -144,6 +162,15 @@ export function ToolsSetup({ tools, missing, onInstalled }: { tools: Tools; miss
             <p className="help">
               O Brush deveria vir junto com o app. Em desenvolvimento, rode <code>pnpm setup:tools</code>.
             </p>
+          )}
+          {brewTools.length > 0 && (
+            <div className="setup-cmds">
+              {brewTools.map((m) => (
+                <span key={m.name}>
+                  {m.name} → <code>{installCommand(m.key, tools.os)}</code>
+                </span>
+              ))}
+            </div>
           )}
         </>
       ) : (

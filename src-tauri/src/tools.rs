@@ -24,6 +24,8 @@ pub struct Tools {
     /// Windows: modelos de recorte baixados pelo instalador de ferramentas.
     pub birefnet_model: Option<PathBuf>,
     pub modnet_model: Option<PathBuf>,
+    /// Windows e macOS (Apple Silicon): RMBG-1.4, baixado sob demanda.
+    pub rmbg_model: Option<PathBuf>,
     /// "macos" | "windows" | "linux"
     pub os: &'static str,
 }
@@ -39,8 +41,9 @@ impl Tools {
             colmap_cuda,
             brush: find_sidecar("brush_app", "SPLATFORGE_BRUSH"),
             masker: if cfg!(target_os = "macos") { find_sidecar("splatforge_mask", "SPLATFORGE_MASKER") } else { None },
-            birefnet_model: model_if_windows(BIREFNET_FILE),
-            modnet_model: model_if_windows(MODNET_FILE),
+            birefnet_model: model_if(cfg!(windows), BIREFNET_FILE),
+            modnet_model: model_if(cfg!(windows), MODNET_FILE),
+            rmbg_model: model_if(ONNX_AVAILABLE, RMBG_FILE),
             os: std::env::consts::OS,
         }
     }
@@ -57,7 +60,7 @@ pub fn install_hint(tool: &str) -> &'static str {
         ("macos", "ffmpeg") => "Instale com: brew install ffmpeg",
         ("macos", "colmap") => "Instale com: brew install colmap",
         (_, "brush") => "Rode `pnpm setup:tools` para baixar o Brush.",
-        ("windows", "model") => "Use \"Instalar ferramentas\" no app para baixar o modelo de recorte.",
+        ("windows" | "macos", "model") => "Use \"Instalar ferramentas\" no app para baixar o modelo de recorte.",
         ("windows", _) => "Rode `pnpm setup:tools` para baixar as ferramentas.",
         (_, "ffmpeg") => "Instale o ffmpeg pelo gerenciador de pacotes do sistema.",
         _ => "Instale o COLMAP 4.x (https://colmap.github.io).",
@@ -80,14 +83,18 @@ pub fn tools_root() -> Option<PathBuf> {
 
 pub const BIREFNET_FILE: &str = "birefnet_lite.onnx";
 pub const MODNET_FILE: &str = "modnet.onnx";
+pub const RMBG_FILE: &str = "rmbg14.onnx";
 
-/// Onde o instalador grava os modelos de recorte (Windows).
+/// Este build traz o ONNX Runtime (Windows; macOS em Apple Silicon).
+pub const ONNX_AVAILABLE: bool = cfg!(any(windows, all(target_os = "macos", target_arch = "aarch64")));
+
+/// Onde o instalador grava os modelos de recorte.
 pub fn models_dir() -> Option<PathBuf> {
     tools_root().map(|r| r.join("models"))
 }
 
-fn model_if_windows(file: &str) -> Option<PathBuf> {
-    if !cfg!(windows) {
+fn model_if(supported: bool, file: &str) -> Option<PathBuf> {
+    if !supported {
         return None;
     }
     models_dir().map(|d| d.join(file)).filter(|p| p.is_file())

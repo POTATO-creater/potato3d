@@ -339,14 +339,13 @@ async fn run_inner(
     let train_dataset = if cfg.masks.enabled {
         rep.progress(0.0, "Montando frames com fundo transparente");
         let (dataset, masks_dir, out) = (layout.dataset(), layout.masks(), layout.alpha_dataset());
-        // Despill só faz sentido no chroma key, com a cor usada no recorte.
-        let despill = state
-            .masks
-            .as_ref()
-            .and_then(|m| m.key_color)
-            .filter(|_| cfg.masks.method == masks::MaskMethod::Chroma)
-            .and_then(|key| masks::Despill::from_chroma(key, &cfg.masks.chroma));
-        tokio::task::spawn_blocking(move || masks::build_alpha_dataset(&dataset, &masks_dir, &out, despill)).await??;
+        let despill = cfg.masks.despill.then_some(cfg.masks.despill_strength);
+        let key = tokio::task::spawn_blocking(move || masks::build_alpha_dataset(&dataset, &masks_dir, &out, despill)).await??;
+        match key {
+            Some(k) => rep.log(&format!("despill: reflexo de #{:02x}{:02x}{:02x} removido do sujeito", k[0], k[1], k[2])),
+            None if despill.is_some() => rep.log("despill: o fundo não é verde nem azul; cores mantidas"),
+            None => {}
+        }
         layout.alpha_dataset()
     } else {
         let _ = std::fs::remove_dir_all(layout.alpha_dataset());

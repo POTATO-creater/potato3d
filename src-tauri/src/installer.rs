@@ -3,7 +3,7 @@
 //! No Windows baixa o COLMAP (com CUDA se houver GPU NVIDIA) e o ffmpeg para
 //! a pasta de ferramentas do app, conferindo o SHA-256. O Brush já vem
 //! dentro do instalador (sidecar). No macOS/Linux as ferramentas vêm do
-//! gerenciador de pacotes, então o plano é vazio.
+//! gerenciador de pacotes; o app só baixa o modelo RMBG-1.4, se pedido.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -40,6 +40,13 @@ const MODNET: (&str, &str, u64) = (
     "https://huggingface.co/Xenova/modnet/resolve/fa2fa546052fba4c08921230a26cc69a333fca12/onnx/model.onnx",
     "07c308cf0fc7e6e8b2065a12ed7fc07e1de8febb7dc7839d7b7f15dd66584df9",
     25_888_640,
+);
+/// RMBG-1.4 (BRIA, licença não comercial), revisão fixa do briaai/RMBG-1.4.
+/// Só é baixado quando o usuário escolhe esse método.
+const RMBG: (&str, &str, u64) = (
+    "https://huggingface.co/briaai/RMBG-1.4/resolve/2ceba5a5efaec153162aedea169f76caf9b46cf8/onnx/model.onnx",
+    "8cafcf770b06757c4eaced21b1a88e57fd2b66de01b8045f35f01535ba742e0f",
+    176_153_355,
 );
 /// Builds estáveis do ffmpeg (LGPL) do BtbN. A tag "latest" é refeita
 /// diariamente, então o arquivo e o hash são resolvidos pela API do GitHub.
@@ -140,17 +147,34 @@ async fn ffmpeg_package(client: &reqwest::Client) -> Result<Package> {
     })
 }
 
-/// O que falta instalar neste computador.
-pub async fn plan() -> Result<Plan> {
+fn model_package(id: &str, label: &str, (url, sha, size): (&str, &str, u64), file: &str) -> Package {
+    Package {
+        id: id.into(),
+        label: label.into(),
+        file: "model.onnx".into(),
+        url: url.into(),
+        sha256: sha.into(),
+        size,
+        exe: file.into(),
+        archive: false,
+    }
+}
+
+/// O que falta instalar neste computador. `rmbg`: incluir o RMBG-1.4.
+pub async fn plan(rmbg: bool) -> Result<Plan> {
+    let tools = Tools::detect();
+    let rmbg = (rmbg && crate::tools::ONNX_AVAILABLE && tools.rmbg_model.is_none())
+        .then(|| model_package("rmbg", "Recorte RMBG-1.4", RMBG, crate::tools::RMBG_FILE));
     if !cfg!(windows) {
         let note = if cfg!(target_os = "macos") {
             "No macOS instale pelo Homebrew: brew install ffmpeg colmap"
         } else {
             "No Linux instale ffmpeg e COLMAP 4.x pelo gerenciador de pacotes."
         };
-        return Ok(Plan { packages: vec![], total_bytes: 0, cuda: false, note: Some(note.into()) });
+        let packages: Vec<Package> = rmbg.into_iter().collect();
+        let total_bytes = packages.iter().map(|p| p.size).sum();
+        return Ok(Plan { packages, total_bytes, cuda: false, note: Some(note.into()) });
     }
-    let tools = Tools::detect();
     let cuda = has_nvidia_gpu();
     let client = client()?;
     let mut packages = Vec::new();
@@ -174,20 +198,12 @@ pub async fn plan() -> Result<Plan> {
         (tools.modnet_model.is_none(), "modnet", "Recorte de pessoas (MODNet)", MODNET, crate::tools::MODNET_FILE),
         (tools.birefnet_model.is_none(), "birefnet", "Recorte de objetos (BiRefNet)", BIREFNET, crate::tools::BIREFNET_FILE),
     ];
-    for (missing, id, label, (url, sha, size), file) in models {
+    for (missing, id, label, model, file) in models {
         if missing {
-            packages.push(Package {
-                id: id.into(),
-                label: label.into(),
-                file: "model.onnx".into(),
-                url: url.into(),
-                sha256: sha.into(),
-                size,
-                exe: file.into(),
-                archive: false,
-            });
+            packages.push(model_package(id, label, model, file));
         }
     }
+    packages.extend(rmbg);
     let total_bytes = packages.iter().map(|p| p.size).sum();
     Ok(Plan { packages, total_bytes, cuda, note: None })
 }
