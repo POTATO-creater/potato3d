@@ -5,7 +5,8 @@ import { SparkRenderer, SplatFileType, SplatMesh } from "@sparkjsdev/spark";
 import { fileUrl, type SceneFrame } from "../lib/api";
 
 interface Props {
-  splat: { path: string; iter: number | null; version: number } | null;
+  /** `label` substitui o rótulo padrão (ex.: arquivo exportado). */
+  splat: { path: string; iter: number | null; version: number; label?: string } | null;
   frame: SceneFrame | null;
   placeholder?: React.ReactNode;
 }
@@ -199,7 +200,8 @@ export function Viewer({ splat, frame, placeholder }: Props) {
     let stale = false;
     setLoading(true);
     setLoadError(null);
-    const mesh = new SplatMesh({ url: fileUrl(splat.path, splat.version), fileType: SplatFileType.PLY });
+    const fileType = splat.path.toLowerCase().endsWith(".sog") ? SplatFileType.PCSOGSZIP : SplatFileType.PLY;
+    const mesh = new SplatMesh({ url: fileUrl(splat.path, splat.version), fileType });
     mesh.initialized
       .then(() => {
         if (stale || !ctx.current) {
@@ -261,7 +263,7 @@ export function Viewer({ splat, frame, placeholder }: Props) {
       <div className="viewer-hud">
         {splat && (
           <span className="chip">
-            {splat.iter != null ? `Prévia · passo ${splat.iter.toLocaleString("pt-BR")}` : "Resultado final"}
+            {splat.label ?? (splat.iter != null ? `Prévia · passo ${splat.iter.toLocaleString("pt-BR")}` : "Resultado final")}
           </span>
         )}
         {loading && <span className="chip chip-pulse">Carregando splat…</span>}

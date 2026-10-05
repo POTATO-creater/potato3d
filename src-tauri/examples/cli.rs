@@ -2,8 +2,10 @@
 //!
 //!   cargo run --release --example cli -- config.json
 //!   cargo run --release --example cli -- scene <projeto>   # enquadramento em JSON
+//!   cargo run --release --example cli -- export <projeto> [opcoes.json]
 //!
-//! `config.json` tem o mesmo formato do `JobConfig` enviado pela interface.
+//! `config.json` tem o mesmo formato do `JobConfig` enviado pela interface;
+//! `opcoes.json`, o do `ExportOptions` (padrão: .sog sem outras reduções).
 //! Os eventos saem em stdout, um JSON por linha.
 
 use std::sync::Arc;
@@ -19,6 +21,16 @@ async fn main() -> anyhow::Result<()> {
         let dir = args.get(1).expect("uso: cli scene <projeto>");
         let frame = splatforge_lib::scene::read(&pipeline::Layout::new(dir).model())?;
         println!("{}", serde_json::to_string(&frame)?);
+        return Ok(());
+    }
+    if args.first().map(String::as_str) == Some("export") {
+        let dir = args.get(1).expect("uso: cli export <projeto> [opcoes.json]");
+        let opts: splatforge_lib::export::ExportOptions = match args.get(2) {
+            Some(p) => serde_json::from_slice(&std::fs::read(p)?)?,
+            None => Default::default(),
+        };
+        let stats = pipeline::export_project(dir, &opts, |f, m| eprintln!("{:>3.0}% {m}", f * 100.0))?;
+        println!("{}", serde_json::to_string(&stats)?);
         return Ok(());
     }
     let path = args.first().expect("uso: cli <config.json>");

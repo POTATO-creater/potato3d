@@ -1,5 +1,6 @@
 pub mod brush;
 pub mod colmap;
+pub mod export;
 pub mod frames;
 pub mod installer;
 pub mod masks;
@@ -22,6 +23,7 @@ use tools::Tools;
 struct AppState {
     job: Mutex<Option<CancellationToken>>,
     install: Mutex<Option<CancellationToken>>,
+    exporting: std::sync::atomic::AtomicBool,
 }
 
 type CmdResult<T> = Result<T, String>;
@@ -57,10 +59,54 @@ fn scene_frame(project_dir: String) -> CmdResult<scene::SceneFrame> {
 }
 
 #[tauri::command]
+fn splat_info(path: String) -> CmdResult<export::SplatInfo> {
+    export::info(&PathBuf::from(path)).map_err(|e| format!("{e:#}"))
+}
+
+#[derive(Clone, serde::Serialize)]
+struct ExportProgress {
+    fraction: f32,
+    message: String,
+}
+
+/// Roda fora do runtime assíncrono: é CPU pura (rayon) e leva de décimos de
+/// segundo a ~15 s (SOG com SH grau 3 e 1M de gaussianas).
+#[tauri::command]
+async fn export_splat(
+    project_dir: String,
+    options: export::ExportOptions,
+    on_progress: Channel<ExportProgress>,
+    state: State<'_, AppState>,
+) -> CmdResult<export::ExportStats> {
+    if state.job.lock().unwrap().as_ref().is_some_and(|t| !t.is_cancelled()) {
+        return Err("espere o processamento terminar para exportar".into());
+    }
+    if state.exporting.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return Err("já existe uma exportação em andamento".into());
+    }
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let mut last = std::time::Instant::now() - std::time::Duration::from_secs(1);
+        pipeline::export_project(&project_dir, &options, |fraction, message| {
+            // ~15 atualizações por segundo bastam para a barra.
+            if last.elapsed().as_millis() >= 66 || fraction >= 1.0 {
+                last = std::time::Instant::now();
+                let _ = on_progress.send(ExportProgress { fraction, message: message.to_string() });
+            }
+        })
+    })
+    .await;
+    state.exporting.store(false, std::sync::atomic::Ordering::SeqCst);
+    result.map_err(err)?.map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
 fn start_job(config: JobConfig, on_event: Channel<JobEvent>, state: State<'_, AppState>) -> CmdResult<()> {
     let mut job = state.job.lock().unwrap();
     if job.as_ref().is_some_and(|t| !t.is_cancelled()) {
         return Err("já existe um processamento em andamento".into());
+    }
+    if state.exporting.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err("espere a exportação terminar".into());
     }
     let token = CancellationToken::new();
     *job = Some(token.clone());
@@ -127,6 +173,8 @@ pub fn run() {
             default_project_dir,
             load_project,
             scene_frame,
+            splat_info,
+            export_splat,
             start_job,
             cancel_job,
             install_plan,

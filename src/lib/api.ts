@@ -102,6 +102,35 @@ export interface ProjectState {
   poses: ModelStats | null;
   finalPly: string | null;
   lastPsnr: number | null;
+  lastExport?: ExportStats | null;
+}
+
+export interface ExportOptions {
+  format: "sog" | "ply";
+  /** Fração removida por fusão de gaussianas parecidas (0–0,9). */
+  decimate: number;
+  /** Opacidade mínima (0–1; 0 desliga a poda). */
+  minOpacity: number;
+  /** Grau SH na saída; null mantém o do treino. */
+  shDegree: number | null;
+}
+
+export interface ExportStats {
+  path: string;
+  inputCount: number;
+  /** Depois da poda por opacidade. */
+  prunedCount: number;
+  outputCount: number;
+  inputBytes: number;
+  outputBytes: number;
+  shDegree: number;
+  seconds: number;
+}
+
+export interface SplatInfo {
+  count: number;
+  shDegree: number;
+  bytes: number;
 }
 
 export interface SceneFrame {
@@ -162,6 +191,12 @@ export const api = {
   loadProject: (projectDir: string) => invoke<ProjectState>("load_project", { projectDir }),
   sceneFrame: (projectDir: string) => invoke<SceneFrame>("scene_frame", { projectDir }),
   cancelJob: () => invoke<void>("cancel_job"),
+  splatInfo: (path: string) => invoke<SplatInfo>("splat_info", { path }),
+  exportSplat: (projectDir: string, options: ExportOptions, onProgress: (p: { fraction: number; message: string }) => void) => {
+    const channel = new Channel<{ fraction: number; message: string }>();
+    channel.onmessage = onProgress;
+    return invoke<ExportStats>("export_splat", { projectDir, options, onProgress: channel });
+  },
   installPlan: () => invoke<InstallPlan>("install_plan"),
   cancelInstall: () => invoke<void>("cancel_install"),
   installTools: (onEvent: (e: InstallEvent) => void) => {

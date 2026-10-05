@@ -6,6 +6,9 @@
 //   VITE_MOCK_VIDEO   caminho de um vídeo de teste
 //   VITE_MOCK_EVENTS  arquivo .jsonl com os eventos gravados
 //   VITE_MOCK_SCENE   JSON de `cli scene <projeto>`
+//
+// `?project=<pasta>` abre um projeto real (project.json); a exportação é
+// simulada e devolve o `lastExport` gravado nele (`cli export <projeto>`).
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import type { Channel } from "@tauri-apps/api/core";
 import type { JobEvent } from "../lib/api";
@@ -16,6 +19,7 @@ const env = {
   VITE_MOCK_VIDEO: params.get("video") ?? import.meta.env.VITE_MOCK_VIDEO,
   VITE_MOCK_EVENTS: params.get("events") ?? import.meta.env.VITE_MOCK_EVENTS,
   VITE_MOCK_SCENE: params.get("scene") ?? import.meta.env.VITE_MOCK_SCENE,
+  project: params.get("project"),
 };
 const fsUrl = (p: string) => `/@fs${p}`;
 
@@ -32,6 +36,27 @@ async function readEvents(): Promise<JobEvent[]> {
     .split("\n")
     .filter(Boolean)
     .map((l) => JSON.parse(l));
+}
+
+/** Cabeçalho de um .ply servido pelo Vite: contagem e grau SH. */
+async function plyInfo(path: string) {
+  const r = await fetch(fsUrl(path));
+  const bytes = new Uint8Array(await r.arrayBuffer());
+  const head = new TextDecoder().decode(bytes.subarray(0, 4096));
+  const count = Number(/element vertex (\d+)/.exec(head)?.[1] ?? 0);
+  const rest = (head.match(/property float f_rest_/g) ?? []).length;
+  return { count, shDegree: [0, 9, 24, 45].indexOf(rest), bytes: bytes.length };
+}
+
+async function fakeExport(channel: Channel<any>, projectDir: string) {
+  const project = await readJson<any>(`${projectDir}/project.json`);
+  const steps = ["Lendo o .ply", "Fundindo gaussianas parecidas", "Agrupando as bandas SH (k-means)", "Comprimindo as texturas (WebP)"];
+  for (let i = 0; i <= 20; i++) {
+    channel.onmessage({ fraction: i / 20, message: steps[Math.min(steps.length - 1, Math.floor(i / 6))] });
+    await new Promise((r) => setTimeout(r, 70));
+  }
+  if (!project?.lastExport) throw new Error("projeto sem lastExport (rode `cli export` antes)");
+  return project.lastExport;
 }
 
 let cancelled = false;
@@ -106,10 +131,22 @@ export function installMock() {
           };
         case "probe_video":
           return { width: 960, height: 540, fps: 24, duration: 10, codec: "h264" };
-        case "default_project_dir":
-          return args.videoPath.replace(/\.[^.]+$/, "_splat");
         case "load_project":
-          return { videoPath: null, frames: [], poses: null, finalPly: null, lastPsnr: null };
+          return (
+            (env.project && (await readJson(`${env.project}/project.json`))) ?? {
+              videoPath: null,
+              frames: [],
+              poses: null,
+              finalPly: null,
+              lastPsnr: null,
+            }
+          );
+        case "default_project_dir":
+          return env.project ?? args.videoPath.replace(/\.[^.]+$/, "_splat");
+        case "splat_info":
+          return plyInfo(args.path);
+        case "export_splat":
+          return fakeExport(args.onProgress, args.projectDir);
         case "scene_frame": {
           const f = await readJson(env.VITE_MOCK_SCENE);
           if (!f) throw new Error("sem poses");

@@ -11,6 +11,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::brush::{self, TrainEvent, TrainOptions};
 use crate::colmap::{self, ModelStats, PoseOptions};
+use crate::export::{self, ExportOptions, ExportStats};
 use crate::frames::{self, FrameInfo, FrameOptions, VideoInfo};
 use crate::masks::{self, MaskOptions, MaskStats};
 use crate::proc::is_cancelled;
@@ -72,6 +73,9 @@ pub struct ProjectState {
     pub poses: Option<ModelStats>,
     pub final_ply: Option<String>,
     pub last_psnr: Option<f64>,
+    /// Última exportação otimizada (some quando o splat é retreinado).
+    #[serde(default)]
+    pub last_export: Option<ExportStats>,
 }
 
 pub struct Layout {
@@ -120,6 +124,10 @@ impl Layout {
     }
     fn final_ply(&self) -> PathBuf {
         self.root.join("splat.ply")
+    }
+    /// Exportações otimizadas (.sog/.ply), fora de `dataset/`.
+    fn exports(&self) -> PathBuf {
+        self.root.join("export")
     }
 
     pub fn load(&self) -> ProjectState {
@@ -314,6 +322,7 @@ async fn run_inner(
         state.poses = Some(stats.clone());
         state.final_ply = None;
         state.last_psnr = None;
+        state.last_export = None;
         layout.save(&state)?;
         emit(JobEvent::PosesReady { stats });
         emit(JobEvent::StageDone { stage: Stage::Poses, seconds: t0.elapsed().as_secs_f64() });
@@ -365,6 +374,7 @@ async fn run_inner(
     let ply = final_ply.to_string_lossy().into_owned();
     state.final_ply = Some(ply.clone());
     state.last_psnr = last_psnr;
+    state.last_export = None;
     layout.save(&state)?;
     emit(JobEvent::StageDone { stage: Stage::Train, seconds: t0.elapsed().as_secs_f64() });
     Ok(ply)
@@ -376,6 +386,21 @@ fn fmt_count(n: u64) -> String {
         n if n >= 1_000 => format!("{:.0}k", n as f64 / 1e3),
         n => n.to_string(),
     }
+}
+
+/// Exporta o splat final do projeto com os ajustes de otimização e guarda o
+/// resultado no `project.json`.
+pub fn export_project(project_dir: &str, opts: &ExportOptions, progress: impl FnMut(f32, &str)) -> Result<ExportStats> {
+    let layout = Layout::new(project_dir);
+    let input = layout.final_ply();
+    if !input.exists() {
+        anyhow::bail!("este projeto ainda não tem um splat treinado");
+    }
+    let stats = export::run(&input, &layout.exports(), opts, progress)?;
+    let mut state = layout.load();
+    state.last_export = Some(stats.clone());
+    layout.save(&state)?;
+    Ok(stats)
 }
 
 pub fn default_project_dir(video: &Path) -> PathBuf {

@@ -2,7 +2,17 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { api, type JobEvent, type MaskOptions, type SceneFrame, type Settings, type Stage, type Tools, type VideoInfo } from "./lib/api";
+import {
+  api,
+  type ExportStats,
+  type JobEvent,
+  type MaskOptions,
+  type SceneFrame,
+  type Settings,
+  type Stage,
+  type Tools,
+  type VideoInfo,
+} from "./lib/api";
 import { initialJob, jobReducer } from "./lib/job";
 import { fmtDuration } from "./lib/format";
 import { fileManager } from "./lib/platform";
@@ -12,6 +22,8 @@ import { Sidebar } from "./components/Sidebar";
 import { Viewer } from "./components/Viewer";
 import { StageStrip } from "./components/StageStrip";
 import { FramesGrid, LogView } from "./components/FramesGrid";
+import { ExportPanel } from "./components/ExportPanel";
+import { basename } from "./lib/platform";
 import "./styles.css";
 
 const VIDEO_EXT = ["mp4", "mov", "m4v", "webm", "mkv", "avi"];
@@ -61,6 +73,9 @@ export default function App() {
   const [tab, setTab] = useState<Tab>("viewer");
   const [job, dispatch] = useReducer(jobReducer, initialJob);
   const [framesVersion, setFramesVersion] = useState(0);
+  const [lastExport, setLastExport] = useState<ExportStats | null>(null);
+  /** Mostra a exportação no 3D em vez do splat do treino. */
+  const [previewExport, setPreviewExport] = useState<{ version: number } | null>(null);
 
   // Logs ficam num ref e só re-renderizam a cada 250 ms.
   const logs = useRef<string[]>([]);
@@ -114,6 +129,8 @@ export default function App() {
       setProjectDir(dir);
       const project = await api.loadProject(dir);
       dispatch({ type: "load", project });
+      setLastExport(project.lastExport ?? null);
+      setPreviewExport(null);
       setFramesVersion(Date.now());
       setFromStage(project.poses ? "train" : project.frames.length ? "poses" : "frames");
       if (project.poses) await refreshFrame(dir);
@@ -187,6 +204,9 @@ export default function App() {
     if (!videoPath || !projectDir) return;
     if (fromStage !== "train") setFrame(null);
     dispatch({ type: "start", from: fromStage });
+    // Um novo treino invalida a exportação (o backend também a esquece).
+    setLastExport(null);
+    setPreviewExport(null);
     setTab(fromStage === "frames" ? "frames" : "viewer");
     try {
       await api.startJob(
@@ -211,6 +231,11 @@ export default function App() {
     if (job.stages.train.status === "running" && tab === "frames") setTab("viewer");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [job.stages.train.status]);
+
+  const viewerSplat =
+    previewExport && lastExport
+      ? { path: lastExport.path, iter: null, version: previewExport.version, label: `Exportado · ${basename(lastExport.path)}` }
+      : job.splat;
 
   const missing = tools
     ? (
@@ -270,6 +295,29 @@ export default function App() {
         canRun={!!videoPath && !!projectDir && !!video && missing.length === 0}
         onRun={run}
         onCancel={() => api.cancelJob()}
+        exportPanel={
+          projectDir &&
+          job.finalPly &&
+          !job.running && (
+            <ExportPanel
+              os={tools?.os}
+              projectDir={projectDir}
+              finalPly={job.finalPly}
+              lastExport={lastExport}
+              onExported={(stats) => {
+                setLastExport(stats);
+                // Mostra o resultado na hora para comparar com o original.
+                setPreviewExport({ version: Date.now() });
+                setTab("viewer");
+              }}
+              previewing={!!previewExport}
+              onPreview={(on) => {
+                setPreviewExport(on ? { version: Date.now() } : null);
+                if (on) setTab("viewer");
+              }}
+            />
+          )
+        }
       />
 
       <main className="main">
@@ -311,7 +359,7 @@ export default function App() {
         <div className="content">
           <div className={`pane ${tab === "viewer" ? "" : "hidden"}`}>
             <Viewer
-              splat={job.splat}
+              splat={viewerSplat}
               frame={frame}
               placeholder={
                 <div className="placeholder">

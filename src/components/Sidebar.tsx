@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useRef, type ReactNode } from "react";
 import { fileUrl, type MaskOptions, type Settings, type Stage, type VideoInfo } from "../lib/api";
 import { PRESETS, type PresetId } from "../lib/presets";
 import { Field, NumField, Segmented, Toggle } from "./fields";
@@ -28,6 +28,8 @@ interface Props {
   canRun: boolean;
   onRun: () => void;
   onCancel: () => void;
+  /** Painel de exportação (só aparece com um splat treinado). */
+  exportPanel?: ReactNode;
 }
 
 const fmtTime = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, "0")}`;
@@ -272,6 +274,8 @@ export function Sidebar(p: Props) {
             </fieldset>
           </details>
         </section>
+
+        {p.exportPanel}
       </div>
 
       <footer className="run">

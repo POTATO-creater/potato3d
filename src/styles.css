@@ -387,6 +387,44 @@ button:disabled {
   background: transparent;
 }
 
+/* ---------- exportação ---------- */
+
+.small {
+  font-size: 11px;
+}
+.export-fields {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+.export-run {
+  width: 100%;
+  height: 30px;
+  margin-top: 4px;
+}
+.export-progress {
+  margin-top: 6px;
+}
+.export-error {
+  color: var(--bad);
+  user-select: text;
+  -webkit-user-select: text;
+}
+.export-result {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.export-result .file-name {
+  margin-top: 0;
+}
+.btn-sm.on {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
 .path {
   font-family: var(--mono);
   font-size: 11.5px;

@@ -113,8 +113,35 @@ Assim frames e poses são reaproveitados.
 ├── dataset_alpha/      com recorte: PNGs RGBA + images.bin com nomes .png
 ├── colmap/             database.db, pairs.txt, modelos brutos
 ├── training/           snapshots intermediários (mantém os 2 últimos)
-└── splat.ply           resultado final
+├── splat.ply           resultado final
+└── export/             exportações otimizadas (.sog / .ply)
 ```
+
+### Exportação otimizada
+
+Com o splat treinado, o painel **Exportação** gera uma versão menor sem
+retreinar (dá para testar ajustes e alternar **Ver no 3D / Ver original**):
+
+| Ajuste | O que faz |
+|---|---|
+| **SOG comprimido** | Formato do PlayCanvas (v2): texturas WebP sem perdas com posições em 16 bits, quatérnios "smallest three", escalas e cores em codebooks de 256 e as bandas SH numa paleta k-means de até 64k vetores. Abre no Spark (o visualizador do app), PlayCanvas e SuperSplat. |
+| **Reduzir** | Funde gaussianas parecidas (vizinhas, de forma e cor próximas) até remover a porcentagem pedida. A opacidade conserva a "tinta" (opacidade × área), então as superfícies não abrem buracos. |
+| **Opacidade mín.** | Descarta splats quase invisíveis. |
+| **Bandas SH** | Corta o brilho dependente do ângulo; cada grau a menos encolhe bastante o .ply. |
+
+Port do que o WebGaussian faz no navegador, em Rust com rayon. Medido num M4:
+
+| Entrada | Saída | Tempo |
+|---|---|---|
+| 111k splats, SH 1, 10,3 MB | `.sog` 2,1 MB (4,9×) | 2,5 s |
+| idem, −50%, opac. ≥ 2%, SH 0 | `.sog` 0,69 MB (14,9×) | 0,2 s |
+| 1M splats, SH 3, 236 MB | `.sog` 18 MB (12,8×) | 15,7 s |
+| idem, −50% | `.ply` 118 MB | 1,2 s |
+
+O `.sog` foi conferido com o leitor de referência (`splat-transform` da
+PlayCanvas): erro de posição de 5×10⁻⁵ da extensão da cena, rotação abaixo de
+1,2° (p99) e coeficientes SH com erro mediano de 0,001. O WebP sai do libwebp
+(compilado do fonte pelo `libwebp-sys`), ~18% menor que o encoder em Rust puro.
 
 ### Linha de comando (lote)
 
@@ -124,7 +151,11 @@ O mesmo pipeline roda sem interface, com eventos em JSON por linha:
 cd src-tauri
 cargo run --release --example cli -- config.json      # formato de JobConfig
 cargo run --release --example cli -- scene <projeto>  # enquadramento da cena
+cargo run --release --example cli -- export <projeto> [opcoes.json]
 ```
+
+`opcoes.json` segue o `ExportOptions`, por exemplo
+`{"format": "sog", "decimate": 0.5, "minOpacity": 0.02, "shDegree": 0}`.
 
 ## Por que esse pipeline
 
@@ -157,7 +188,10 @@ VITE_MOCK_SCENE=/caminho/scene.json       # saída de `cli scene`
 ```
 
 Na URL, `?os=windows` simula a interface do Windows e `?events=…&scene=…`
-troca os arquivos sem editar o `.env.local`.
+troca os arquivos sem editar o `.env.local`. `?project=<pasta>` abre um projeto
+real; a exportação é simulada e devolve o `lastExport` gravado nele por
+`cli export`. Use uma pasta fora de `~/Downloads`/`~/Documents`: o macOS pode
+bloquear o acesso do Vite a elas e o servidor trava.
 
 ## Testes
 
