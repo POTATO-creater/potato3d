@@ -220,6 +220,9 @@ export function Sidebar(p: Props) {
               </div>
               <Toggle label="Órbita fechada (360°)" hint="casa o fim com o começo" checked={s.poses.closedLoop}
                 onChange={(v) => set("poses", { closedLoop: v })} />
+              <Toggle label="Forçar órbita plana" hint="câmeras na mesma altura; só para vídeos que giram em nível"
+                checked={s.poses.flatOrbit ?? false}
+                onChange={(v) => set("poses", { flatOrbit: v })} />
 
               <h3>Treino (Brush)</h3>
               <div className="grid2">

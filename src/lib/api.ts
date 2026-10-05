@@ -78,6 +78,8 @@ export interface PoseOptions {
   cameraModel: "SIMPLE_PINHOLE" | "PINHOLE";
   matchWindow: number;
   closedLoop: boolean;
+  /** Câmeras forçadas no mesmo plano. Ausente em configurações antigas. */
+  flatOrbit?: boolean;
 }
 
 export interface TrainOptions {

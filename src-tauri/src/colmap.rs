@@ -7,7 +7,8 @@
 //! - calibração do grafo de vistas + mapeador global (ex-GLOMAP);
 //! - se o SIFT comum registrar menos de 95% das câmeras, nova tentativa com
 //!   SIFT "reforçado" (texturas pobres: cabelo, pele, fundo desfocado);
-//! - fallback para o mapeador incremental se ainda assim registrar pouco.
+//! - fallback para o mapeador incremental se ainda assim registrar pouco;
+//! - opcional: órbita forçada num plano, para vídeos que giram em nível.
 
 use std::path::{Path, PathBuf};
 
@@ -78,6 +79,9 @@ pub struct PoseOptions {
     pub match_window: u32,
     /// A órbita dá a volta completa (casa o fim com o começo).
     pub closed_loop: bool,
+    /// Força todas as câmeras no mesmo plano (vídeo que gira em nível).
+    #[serde(default)]
+    pub flat_orbit: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -313,6 +317,39 @@ async fn attempt(
     best_model(colmap, &global_dir).await
 }
 
+/// Achata a órbita (ver `scene::flatten_orbit`) e reajusta só os pontos 3D
+/// com as poses e a intrínseca fixas, para que continuem coerentes com as
+/// novas câmeras. Na falha, `model` fica intocado. Retorna o desvio corrigido
+/// (fração do raio) e o novo erro de reprojeção.
+async fn flatten(
+    colmap: &Path,
+    work: &Path,
+    model: &Path,
+    cancel: &CancellationToken,
+    on_log: &mut impl FnMut(&str),
+) -> Result<(f64, Option<f64>)> {
+    let flat = work.join("flat");
+    let adjusted = work.join("flat_ba");
+    for d in [&flat, &adjusted] {
+        if d.exists() {
+            std::fs::remove_dir_all(d)?;
+        }
+    }
+    let dev = crate::scene::flatten_orbit(model, &flat)?;
+    std::fs::create_dir_all(&adjusted)?;
+    let mut cmd = base(colmap, "bundle_adjuster");
+    cmd.arg("--input_path").arg(&flat)
+        .arg("--output_path").arg(&adjusted)
+        .args(["--BundleAdjustment.refine_rig_from_world", "0"])
+        .args(["--BundleAdjustment.refine_focal_length", "0"])
+        .args(["--BundleAdjustment.refine_extra_params", "0"]);
+    run_streaming(cmd, cancel, |l| on_log(strip_glog(l))).await.context("falha no bundle adjustment")?;
+    let (_, _, err) = analyze(colmap, &adjusted).await?;
+    std::fs::remove_dir_all(model)?;
+    std::fs::rename(&adjusted, model)?;
+    Ok((dev, err))
+}
+
 pub async fn run(
     paths: Paths<'_>,
     opts: &PoseOptions,
@@ -401,13 +438,28 @@ pub async fn run(
     std::fs::create_dir_all(model_out.parent().unwrap())?;
     std::fs::rename(&model, model_out)?;
 
+    let mut label = format!("{mapper} · {}", features.label());
+    let mut err = err;
+    if opts.flat_orbit {
+        on_progress(0.98, "Forçando órbita plana");
+        match flatten(colmap, work, model_out, cancel, &mut on_log).await {
+            Ok((dev, e)) => {
+                on_log(&format!("órbita plana: maior desvio de altura corrigido {:.2}% do raio", dev * 100.0));
+                label.push_str(" · órbita plana");
+                err = e.or(err);
+            }
+            Err(e) if crate::proc::is_cancelled(&e) => return Err(e),
+            Err(e) => on_log(&format!("órbita plana não aplicada: {e:#}")),
+        }
+    }
+
     on_progress(1.0, &format!("Poses prontas · {}", features.label()));
     Ok(ModelStats {
         registered,
         total,
         points,
         reprojection_error: err,
-        mapper: format!("{mapper} · {}", features.label()),
+        mapper: label,
     })
 }
 
