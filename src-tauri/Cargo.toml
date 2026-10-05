@@ -1,0 +1,44 @@
+[package]
+name = "splatforge"
+version = "0.1.0"
+description = "Vídeo orbital → Gaussian Splatting, 100% local"
+authors = ["Bryan Diniz"]
+edition = "2021"
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+name = "splatforge_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["protocol-asset"] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+tokio = { version = "1", features = ["process", "io-util", "macros", "rt-multi-thread", "sync", "time", "fs", "signal"] }
+tokio-util = "0.7"
+rayon = "1"
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
+# TLS nativo (SChannel no Windows, Security.framework no macOS): nada de C
+# para compilar na máquina de build.
+reqwest = { version = "0.13.5", default-features = false, features = ["native-tls", "http2", "charset", "system-proxy", "stream", "json"] }
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
+sha2 = "0.10"
+futures-util = "0.3.34"
+
+# Frame decoding/sharpness runs on every candidate frame; keep it fast in dev builds too.
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true

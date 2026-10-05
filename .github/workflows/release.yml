@@ -1,0 +1,56 @@
+# Gera os instaladores (Windows: NSIS .exe · macOS: .dmg) e publica numa
+# release de rascunho. Dispare criando uma tag `v*` ou pelo botão
+# "Run workflow" na aba Actions.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+          - platform: macos-latest # Apple Silicon
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - run: pnpm install --frozen-lockfile
+
+      # O Brush vai dentro do instalador como sidecar. COLMAP e ffmpeg são
+      # baixados pelo próprio app no primeiro uso (Windows).
+      - run: pnpm setup:tools --only brush
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_type == 'tag' && github.ref_name || format('build-{0}', github.run_number) }}
+          releaseName: SplatForge ${{ github.ref_type == 'tag' && github.ref_name || format('build {0}', github.run_number) }}
+          releaseBody: |
+            Windows: baixe o `*-setup.exe`. Na primeira execução o app oferece
+            instalar COLMAP e ffmpeg (≈ 590 MB com CUDA).
+            macOS: baixe o `.dmg` e instale as dependências com `brew install ffmpeg colmap`.
+          releaseDraft: true
+          prerelease: false

@@ -1,0 +1,317 @@
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { api, type JobEvent, type SceneFrame, type Settings, type Stage, type Tools, type VideoInfo } from "./lib/api";
+import { initialJob, jobReducer } from "./lib/job";
+import { fmtDuration } from "./lib/format";
+import { fileManager } from "./lib/platform";
+import { ToolsSetup } from "./components/ToolsSetup";
+import { PRESETS, presetById, type PresetId } from "./lib/presets";
+import { Sidebar } from "./components/Sidebar";
+import { Viewer } from "./components/Viewer";
+import { StageStrip } from "./components/StageStrip";
+import { FramesGrid, LogView } from "./components/FramesGrid";
+import "./styles.css";
+
+const VIDEO_EXT = ["mp4", "mov", "m4v", "webm", "mkv", "avi"];
+const STORE_KEY = "splatforge.settings.v3";
+
+type Tab = "viewer" | "frames" | "log";
+
+function loadStored(): { preset: PresetId | "custom"; settings: Settings } {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {
+    /* armazenamento indisponível: usa o padrão */
+  }
+  return { preset: "balanced", settings: presetById("balanced").settings };
+}
+
+function matchPreset(s: Settings): PresetId | "custom" {
+  const json = JSON.stringify(s);
+  return PRESETS.find((p) => JSON.stringify(p.settings) === json)?.id ?? "custom";
+}
+
+export default function App() {
+  const stored = useRef(loadStored()).current;
+  const [tools, setTools] = useState<Tools | null>(null);
+  const [videoPath, setVideoPath] = useState<string | null>(null);
+  const [video, setVideo] = useState<VideoInfo | null>(null);
+  const [videoError, setVideoError] = useState<string | null>(null);
+  const [trim, setTrim] = useState<{ start: number; end: number | null }>({ start: 0, end: null });
+  const [projectDir, setProjectDir] = useState<string | null>(null);
+  const [preset, setPreset] = useState<PresetId | "custom">(stored.preset);
+  const [settings, setSettings] = useState<Settings>(stored.settings);
+  const [fromStage, setFromStage] = useState<Stage>("frames");
+  const [frame, setFrame] = useState<SceneFrame | null>(null);
+  const [tab, setTab] = useState<Tab>("viewer");
+  const [job, dispatch] = useReducer(jobReducer, initialJob);
+  const [framesVersion, setFramesVersion] = useState(0);
+
+  // Logs ficam num ref e só re-renderizam a cada 250 ms.
+  const logs = useRef<string[]>([]);
+  const [logLines, setLogLines] = useState<string[]>([]);
+  const logTimer = useRef<number | null>(null);
+  const pushLog = useCallback((line: string) => {
+    logs.current.push(line);
+    if (logs.current.length > 5000) logs.current.splice(0, logs.current.length - 4000);
+    if (logTimer.current == null) {
+      logTimer.current = window.setTimeout(() => {
+        logTimer.current = null;
+        setLogLines([...logs.current]);
+      }, 250);
+    }
+  }, []);
+
+  useEffect(() => {
+    api.detectTools().then((t) => {
+      setTools(t);
+      // Ajustes de layout por sistema (ex.: espaço dos botões da janela no macOS).
+      document.documentElement.dataset.os = t.os;
+    });
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORE_KEY, JSON.stringify({ preset, settings }));
+    } catch {
+      /* ignora */
+    }
+  }, [preset, settings]);
+
+  const refreshFrame = useCallback(async (dir: string) => {
+    try {
+      setFrame(await api.sceneFrame(dir));
+    } catch {
+      setFrame(null);
+    }
+  }, []);
+
+  const openProject = useCallback(
+    async (dir: string) => {
+      setProjectDir(dir);
+      const project = await api.loadProject(dir);
+      dispatch({ type: "load", project });
+      setFramesVersion(Date.now());
+      setFromStage(project.poses ? "train" : project.frames.length ? "poses" : "frames");
+      if (project.poses) await refreshFrame(dir);
+      else setFrame(null);
+    },
+    [refreshFrame],
+  );
+
+  const chooseVideo = useCallback(
+    async (path: string) => {
+      setVideoPath(path);
+      setVideo(null);
+      setVideoError(null);
+      setTrim({ start: 0, end: null });
+      logs.current = [];
+      setLogLines([]);
+      try {
+        setVideo(await api.probeVideo(path));
+      } catch (e) {
+        setVideoError(String(e));
+      }
+      await openProject(await api.defaultProjectDir(path));
+    },
+    [openProject],
+  );
+
+  // Arrastar e soltar um vídeo em qualquer lugar da janela.
+  useEffect(() => {
+    const un = getCurrentWebview().onDragDropEvent((e) => {
+      if (e.payload.type !== "drop" || job.running) return;
+      const p = e.payload.paths.find((x) => VIDEO_EXT.includes(x.split(".").pop()?.toLowerCase() ?? ""));
+      if (p) chooseVideo(p);
+    });
+    return () => {
+      un.then((f) => f());
+    };
+  }, [chooseVideo, job.running]);
+
+  async function pickVideo() {
+    const p = await open({ multiple: false, filters: [{ name: "Vídeo", extensions: VIDEO_EXT }] });
+    if (typeof p === "string") chooseVideo(p);
+  }
+
+  async function pickProject() {
+    const p = await open({ directory: true, multiple: false, defaultPath: projectDir ?? undefined });
+    if (typeof p === "string") openProject(p);
+  }
+
+  function onEvent(e: JobEvent) {
+    dispatch({ type: "event", event: e });
+    switch (e.type) {
+      case "log":
+        pushLog(`[${e.stage}] ${e.line}`);
+        break;
+      case "stageStarted":
+        pushLog(`── ${e.stage} ──`);
+        break;
+      case "framesReady":
+        setFramesVersion(Date.now());
+        break;
+      case "posesReady":
+        if (projectDir) refreshFrame(projectDir);
+        break;
+      case "failed":
+        pushLog(`ERRO: ${e.error}`);
+        break;
+    }
+  }
+
+  async function run() {
+    if (!videoPath || !projectDir) return;
+    if (fromStage !== "train") setFrame(null);
+    dispatch({ type: "start", from: fromStage });
+    setTab(fromStage === "frames" ? "frames" : "viewer");
+    try {
+      await api.startJob(
+        {
+          videoPath,
+          projectDir,
+          fromStage,
+          frames: { ...settings.frames, trimStart: trim.start, trimEnd: trim.end },
+          poses: settings.poses,
+          train: settings.train,
+        },
+        onEvent,
+      );
+    } catch (e) {
+      dispatch({ type: "event", event: { type: "failed", stage: null, error: String(e) } });
+    }
+  }
+
+  // Ao terminar os frames, leva a atenção para o 3D quando o treino começa.
+  useEffect(() => {
+    if (job.stages.train.status === "running" && tab === "frames") setTab("viewer");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [job.stages.train.status]);
+
+  const missing = tools
+    ? (
+        [
+          { name: "ffmpeg", key: "ffmpeg", ok: !!tools.ffmpeg && !!tools.ffprobe },
+          { name: "COLMAP", key: "colmap", ok: !!tools.colmap },
+          { name: "Brush", key: "brush", ok: !!tools.brush },
+        ] as const
+      ).filter((t) => !t.ok)
+    : [];
+
+  const available: Record<Stage, boolean> = {
+    frames: true,
+    poses: job.frames.length > 0,
+    train: !!job.poses,
+  };
+
+  return (
+    <div className="app">
+      <Sidebar
+        os={tools?.os}
+        videoPath={videoPath}
+        video={video}
+        trim={trim}
+        onTrim={setTrim}
+        onPickVideo={pickVideo}
+        projectDir={projectDir}
+        onPickProject={pickProject}
+        onRevealProject={() => projectDir && revealItemInDir(job.finalPly ?? projectDir)}
+        preset={preset}
+        onPreset={(id) => {
+          setPreset(id);
+          setSettings(presetById(id).settings);
+        }}
+        settings={settings}
+        onSettings={(s) => {
+          setSettings(s);
+          setPreset(matchPreset(s));
+        }}
+        fromStage={fromStage}
+        onFromStage={setFromStage}
+        available={available}
+        running={job.running}
+        canRun={!!videoPath && !!projectDir && !!video && missing.length === 0}
+        onRun={run}
+        onCancel={() => api.cancelJob()}
+      />
+
+      <main className="main">
+        <div className="topbar" data-tauri-drag-region>
+          <nav className="tabs">
+            <button className={tab === "viewer" ? "active" : ""} onClick={() => setTab("viewer")}>
+              3D
+            </button>
+            <button className={tab === "frames" ? "active" : ""} onClick={() => setTab("frames")}>
+              Frames{job.frames.length ? ` (${job.frames.length})` : ""}
+            </button>
+            <button className={tab === "log" ? "active" : ""} onClick={() => setTab("log")}>
+              Log
+            </button>
+          </nav>
+          {job.totalSeconds != null && (
+            <span className="done-note">
+              Pronto em {fmtDuration(job.totalSeconds)}
+            </span>
+          )}
+          {job.finalPly && (
+            <button className="btn-sm" onClick={() => revealItemInDir(job.finalPly!)}>
+              Mostrar .ply no {fileManager(tools?.os)}
+            </button>
+          )}
+        </div>
+
+        {tools && missing.length > 0 && (
+          <ToolsSetup tools={tools} missing={[...missing]} onInstalled={() => api.detectTools().then(setTools)} />
+        )}
+        {videoError && <div className="banner error">Não foi possível ler o vídeo: {videoError}</div>}
+        {job.error && (
+          <div className="banner error">
+            <strong>Falhou{job.error.stage ? ` na etapa ${job.error.stage}` : ""}.</strong>
+            <pre>{job.error.message}</pre>
+          </div>
+        )}
+
+        <div className="content">
+          <div className={`pane ${tab === "viewer" ? "" : "hidden"}`}>
+            <Viewer
+              splat={job.splat}
+              frame={frame}
+              placeholder={
+                <div className="placeholder">
+                  <h1>Vídeo orbital → Gaussian Splatting</h1>
+                  <ol>
+                    <li>
+                      <strong>Frames</strong>: ffmpeg decodifica por hardware e escolhe os frames mais nítidos.
+                    </li>
+                    <li>
+                      <strong>Poses</strong>: COLMAP com matching circular (fecha a órbita) e mapeador global.
+                    </li>
+                    <li>
+                      <strong>Treino</strong>: Brush na GPU, com prévias ao vivo aqui.
+                    </li>
+                  </ol>
+                  {!videoPath && <p className="muted">Arraste um vídeo para a janela para começar.</p>}
+                </div>
+              }
+            />
+          </div>
+          {tab === "frames" && (
+            <div className="pane scroll">
+              <FramesGrid frames={job.frames} version={framesVersion} />
+            </div>
+          )}
+          {tab === "log" && (
+            <div className="pane scroll">
+              <LogView lines={logLines} />
+            </div>
+          )}
+        </div>
+
+        <StageStrip job={job} totalSteps={settings.train.totalSteps} tools={tools} />
+      </main>
+    </div>
+  );
+}
