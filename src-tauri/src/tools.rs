@@ -21,8 +21,9 @@ pub struct Tools {
     pub brush: Option<PathBuf>,
     /// macOS: recortador Vision (sidecar `splatforge_mask`).
     pub masker: Option<PathBuf>,
-    /// Windows: modelo BiRefNet baixado pelo instalador de ferramentas.
-    pub mask_model: Option<PathBuf>,
+    /// Windows: modelos de recorte baixados pelo instalador de ferramentas.
+    pub birefnet_model: Option<PathBuf>,
+    pub modnet_model: Option<PathBuf>,
     /// "macos" | "windows" | "linux"
     pub os: &'static str,
 }
@@ -38,7 +39,8 @@ impl Tools {
             colmap_cuda,
             brush: find_sidecar("brush_app", "SPLATFORGE_BRUSH"),
             masker: if cfg!(target_os = "macos") { find_sidecar("splatforge_mask", "SPLATFORGE_MASKER") } else { None },
-            mask_model: if cfg!(windows) { mask_model_path().filter(|p| p.is_file()) } else { None },
+            birefnet_model: model_if_windows(BIREFNET_FILE),
+            modnet_model: model_if_windows(MODNET_FILE),
             os: std::env::consts::OS,
         }
     }
@@ -76,9 +78,19 @@ pub fn tools_root() -> Option<PathBuf> {
     base.map(|b| b.join("SplatForge").join("tools"))
 }
 
-/// Onde o instalador grava o modelo de recorte (Windows).
-pub fn mask_model_path() -> Option<PathBuf> {
-    tools_root().map(|r| r.join("models").join("birefnet_lite.onnx"))
+pub const BIREFNET_FILE: &str = "birefnet_lite.onnx";
+pub const MODNET_FILE: &str = "modnet.onnx";
+
+/// Onde o instalador grava os modelos de recorte (Windows).
+pub fn models_dir() -> Option<PathBuf> {
+    tools_root().map(|r| r.join("models"))
+}
+
+fn model_if_windows(file: &str) -> Option<PathBuf> {
+    if !cfg!(windows) {
+        return None;
+    }
+    models_dir().map(|d| d.join(file)).filter(|p| p.is_file())
 }
 
 fn search_dirs() -> Vec<PathBuf> {

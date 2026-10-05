@@ -87,15 +87,21 @@ Com **"Isolar o sujeito"** ligado, cada frame ganha uma máscara do sujeito e o
 Brush treina com o fundo transparente: o splat sai só com a pessoa ou objeto,
 sem paredes, pessoas ao fundo ou os riscos em volta.
 
-| Sistema | Como | Velocidade medida |
-|---|---|---|
-| macOS 14+ | Framework Vision (o "copiar sujeito" do Fotos), na GPU, via o sidecar `splatforge_mask` compilado pelo `build.rs` | ~40 ms/frame num M4 (107 frames em 5,8 s) |
-| Windows | BiRefNet-lite (MIT) com ONNX Runtime + DirectML; CPU se não houver GPU DirectX 12 | não medido |
+| Método | Sistema | Como | Medido |
+|---|---|---|---|
+| IA (Vision) | macOS 14+ | Recorte nativo do sistema, na GPU, via o sidecar `splatforge_mask` (compilado pelo `build.rs`) | ~40 ms/frame num M4 |
+| Pessoas | Windows | MODNet (Apache 2.0) com ONNX Runtime + DirectML | 144 ms/frame na CPU de um M4; GPU não medida |
+| Objetos | Windows | BiRefNet-lite (MIT) com ONNX Runtime + DirectML | ~4 s/frame numa RTX 4070 Ti Super |
+| Cor sólida | todos | Chroma key em Rust: distância RGB à cor de fundo (detectada pela mediana das bordas ou escolhida), tolerância, suavização, preenchimento a partir das bordas e despill só na borda do recorte | 120 frames em 0,09 s |
 
-No Windows o modelo (224 MB) é baixado por **"Instalar ferramentas"** e o
-`DirectML.dll` 1.15.4 vai dentro do instalador. Descartados no caminho: BiRefNet
-na CPU do Mac (~7 s/frame), via CoreML (compilação de 20+ min) e via WebGPU do
-ONNX Runtime (o grafo cai quase todo para a CPU).
+O BiRefNet é lento em qualquer GPU porque as convoluções deformáveis viram
+~16 mil operações minúsculas no ONNX; o MODNet é uma rede convolucional
+simples e, nos frames testados (pessoas de frente e de costas), recortou tão
+bem quanto ele. O RMBG-1.4 seria uma opção rápida para objetos, mas a licença
+é não comercial.
+
+No Windows os modelos (MODNet 26 MB, BiRefNet 224 MB) são baixados por
+**"Instalar ferramentas"** e o `DirectML.dll` 1.15.4 vai dentro do instalador.
 
 Opcionalmente as máscaras também vão para o COLMAP ("Usar o recorte também
 nas poses"): ajuda quando o fundo muda entre frames, mas tira pontos de apoio

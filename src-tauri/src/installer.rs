@@ -35,6 +35,12 @@ const BIREFNET: (&str, &str, u64) = (
     "5600024376f572a557870a5eb0afb1e5961636bef4e1e22132025467d0f03333",
     224_005_088,
 );
+/// MODNet (Apache 2.0), revisão fixa do Xenova/modnet no Hugging Face.
+const MODNET: (&str, &str, u64) = (
+    "https://huggingface.co/Xenova/modnet/resolve/fa2fa546052fba4c08921230a26cc69a333fca12/onnx/model.onnx",
+    "07c308cf0fc7e6e8b2065a12ed7fc07e1de8febb7dc7839d7b7f15dd66584df9",
+    25_888_640,
+);
 /// Builds estáveis do ffmpeg (LGPL) do BtbN. A tag "latest" é refeita
 /// diariamente, então o arquivo e o hash são resolvidos pela API do GitHub.
 const FFMPEG_RELEASE: &str = "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest";
@@ -49,8 +55,8 @@ pub struct Package {
     pub url: String,
     pub sha256: String,
     pub size: u64,
-    /// Zip: executável procurado em `bin/<exe>`. Arquivo único: nome final
-    /// dentro de `tools_root()/<id>/`.
+    /// Zip: executável procurado em `bin/<exe>`. Arquivo único (modelo):
+    /// nome final dentro de `tools_root()/models/`.
     pub exe: String,
     pub archive: bool,
 }
@@ -164,18 +170,23 @@ pub async fn plan() -> Result<Plan> {
     if tools.ffmpeg.is_none() || tools.ffprobe.is_none() {
         packages.push(ffmpeg_package(&client).await?);
     }
-    if tools.mask_model.is_none() {
-        let (url, sha, size) = BIREFNET;
-        packages.push(Package {
-            id: "models".into(),
-            label: "Modelo de recorte (BiRefNet)".into(),
-            file: "model.onnx".into(),
-            url: url.into(),
-            sha256: sha.into(),
-            size,
-            exe: "birefnet_lite.onnx".into(),
-            archive: false,
-        });
+    let models = [
+        (tools.modnet_model.is_none(), "modnet", "Recorte de pessoas (MODNet)", MODNET, crate::tools::MODNET_FILE),
+        (tools.birefnet_model.is_none(), "birefnet", "Recorte de objetos (BiRefNet)", BIREFNET, crate::tools::BIREFNET_FILE),
+    ];
+    for (missing, id, label, (url, sha, size), file) in models {
+        if missing {
+            packages.push(Package {
+                id: id.into(),
+                label: label.into(),
+                file: "model.onnx".into(),
+                url: url.into(),
+                sha256: sha.into(),
+                size,
+                exe: file.into(),
+                archive: false,
+            });
+        }
     }
     let total_bytes = packages.iter().map(|p| p.size).sum();
     Ok(Plan { packages, total_bytes, cuda, note: None })
@@ -265,7 +276,7 @@ async fn download_and_place(
     }
 
     if !pkg.archive {
-        let dir = root.join(&pkg.id);
+        let dir = root.join("models");
         std::fs::create_dir_all(&dir)?;
         std::fs::rename(&archive, dir.join(&pkg.exe))?;
         emit(InstallEvent::Done { id });

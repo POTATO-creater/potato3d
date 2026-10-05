@@ -1,15 +1,22 @@
-import type { Stage, Tools } from "./api";
+import type { MaskOptions, Stage, Tools } from "./api";
 
 export type Os = Tools["os"];
 
 /** Rótulo curto da ferramenta de cada etapa, conforme o sistema e a GPU. */
-export function stageToolLabels(tools: Tools | null): Record<Stage, string> {
+export function stageToolLabels(tools: Tools | null, masks?: MaskOptions): Record<Stage, string> {
   const os = tools?.os ?? "macos";
   const decode = os === "macos" ? "VideoToolbox" : "decodificação por hardware";
   const gpu = os === "macos" ? "Metal" : os === "windows" ? "Vulkan/DX12" : "Vulkan";
   return {
     frames: `ffmpeg · ${decode}`,
-    masks: os === "macos" ? "Vision · GPU" : "BiRefNet · DirectML",
+    masks:
+      masks?.method === "chroma"
+        ? "cor sólida"
+        : os !== "windows"
+          ? "Vision · GPU"
+          : masks?.method === "general"
+            ? "BiRefNet · DirectML"
+            : "MODNet · DirectML",
     poses: `COLMAP · ${tools?.colmapCuda ? "CUDA" : "CPU"} · mapeador global`,
     train: `Brush · ${gpu}`,
   };

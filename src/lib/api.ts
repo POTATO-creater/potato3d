@@ -12,8 +12,9 @@ export interface Tools {
   brush: string | null;
   /** macOS: recortador Vision (sidecar). */
   masker: string | null;
-  /** Windows: modelo BiRefNet baixado pelo instalador. */
-  maskModel: string | null;
+  /** Windows: modelos de recorte baixados pelo instalador. */
+  birefnetModel: string | null;
+  modnetModel: string | null;
   os: "macos" | "windows" | "linux";
 }
 
@@ -33,10 +34,35 @@ export interface FrameOptions {
   trimEnd: number | null;
 }
 
+/** auto: Vision (macOS) / MODNet (Windows) · people: MODNet · general: BiRefNet · chroma: cor sólida */
+export type MaskMethod = "auto" | "people" | "general" | "chroma";
+
+export interface ChromaOptions {
+  autoColor: boolean;
+  color: [number, number, number];
+  /** 0–100 */
+  tolerance: number;
+  /** 0–100 */
+  softness: number;
+  contiguous: boolean;
+  despill: boolean;
+}
+
+export const DEFAULT_CHROMA: ChromaOptions = {
+  autoColor: true,
+  color: [0, 255, 0],
+  tolerance: 12,
+  softness: 6,
+  contiguous: true,
+  despill: true,
+};
+
 export interface MaskOptions {
   enabled: boolean;
   /** Também usa as máscaras no COLMAP (ignora features do fundo). */
   forPoses: boolean;
+  method: MaskMethod;
+  chroma: ChromaOptions;
 }
 
 export interface MaskStats {
@@ -44,6 +70,7 @@ export interface MaskStats {
   noSubject: number;
   meanCoverage: number;
   backend: string;
+  keyColor?: [number, number, number] | null;
 }
 
 export interface PoseOptions {

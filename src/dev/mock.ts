@@ -126,7 +126,8 @@ export function installMock() {
             colmapCuda: params.get("os") === "windows",
             brush: "mock",
             masker: params.get("os") === "windows" ? null : "mock",
-            maskModel: params.get("os") === "windows" && toolsInstalled ? "mock" : null,
+            birefnetModel: params.get("os") === "windows" && toolsInstalled ? "mock" : null,
+            modnetModel: params.get("os") === "windows" && toolsInstalled ? "mock" : null,
             os: params.get("os") ?? "macos",
           };
         case "probe_video":

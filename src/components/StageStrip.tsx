@@ -1,4 +1,4 @@
-import type { Stage, Tools } from "../lib/api";
+import type { MaskOptions, Stage, Tools } from "../lib/api";
 import { stageToolLabels } from "../lib/platform";
 import type { JobState, StageState } from "../lib/job";
 import { fmtCount, fmtDuration as fmtSecs } from "../lib/format";
@@ -34,9 +34,19 @@ function Metric({ label, value, tone }: { label: string; value: string; tone?: "
   );
 }
 
-export function StageStrip({ job, totalSteps, tools }: { job: JobState; totalSteps: number; tools: Tools | null }) {
+export function StageStrip({
+  job,
+  totalSteps,
+  tools,
+  masks: maskOpts,
+}: {
+  job: JobState;
+  totalSteps: number;
+  tools: Tools | null;
+  masks: MaskOptions;
+}) {
   const { stages, frames, masks, poses, train, evals } = job;
-  const labels = stageToolLabels(tools);
+  const labels = stageToolLabels(tools, maskOpts);
 
   const medianSharp = (() => {
     if (!frames.length) return null;
@@ -83,6 +93,15 @@ export function StageStrip({ job, totalSteps, tools }: { job: JobState; totalSte
                   <Metric label="Recortes" value={String(masks.count)} />
                   <Metric label="Sujeito ocupa" value={`${Math.round(masks.meanCoverage * 100)}%`} />
                   {masks.noSubject > 0 && <Metric label="Sem sujeito" value={String(masks.noSubject)} tone="warn" />}
+                  {masks.keyColor && (
+                    <div className="metric">
+                      <span className="metric-label">Fundo</span>
+                      <span className="metric-value key-swatch">
+                        <i style={{ background: `rgb(${masks.keyColor.join(",")})` }} />
+                        {"#" + masks.keyColor.map((v) => v.toString(16).padStart(2, "0")).join("")}
+                      </span>
+                    </div>
+                  )}
                 </>
               )}
               {st === "poses" && poses && (

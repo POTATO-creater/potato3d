@@ -3,6 +3,7 @@ import { fileUrl, type MaskOptions, type Settings, type Stage, type VideoInfo } 
 import { PRESETS, type PresetId } from "../lib/presets";
 import { Field, NumField, Segmented, Toggle } from "./fields";
 import { VideoPlayer } from "./VideoPlayer";
+import { MasksPanel } from "./MasksPanel";
 import { basename, fileManager, type Os } from "../lib/platform";
 
 interface Props {
@@ -151,27 +152,7 @@ export function Sidebar(p: Props) {
           </div>
         </section>
 
-        <section className="panel">
-          <header className="panel-head">
-            <h2>Recorte do sujeito</h2>
-          </header>
-          <Toggle
-            label="Isolar o sujeito (remover o fundo)"
-            hint="o splat sai só com a pessoa ou objeto, sem paredes e riscos em volta"
-            checked={p.masks.enabled}
-            disabled={locked}
-            onChange={(v) => p.onMasks({ ...p.masks, enabled: v })}
-          />
-          {p.masks.enabled && (
-            <Toggle
-              label="Usar o recorte também nas poses"
-              hint="ajuda se o fundo muda entre frames; atrapalha em sujeitos com pouca textura"
-              checked={p.masks.forPoses}
-              disabled={locked}
-              onChange={(v) => p.onMasks({ ...p.masks, forPoses: v })}
-            />
-          )}
-        </section>
+        <MasksPanel os={p.os} masks={p.masks} onMasks={p.onMasks} locked={locked} />
 
         <section className="panel">
           <header className="panel-head">

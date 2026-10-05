@@ -4,6 +4,7 @@ import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import {
   api,
+  DEFAULT_CHROMA,
   type ExportStats,
   type JobEvent,
   type MaskOptions,
@@ -31,13 +32,18 @@ const STORE_KEY = "splatforge.settings.v3";
 const MASKS_KEY = "splatforge.masks.v1";
 
 function loadMasks(): MaskOptions {
+  const base: MaskOptions = { enabled: false, forPoses: false, method: "auto", chroma: DEFAULT_CHROMA };
   try {
     const raw = localStorage.getItem(MASKS_KEY);
-    if (raw) return JSON.parse(raw);
+    // Mescla com o padrão: versões antigas não tinham método nem chroma.
+    if (raw) {
+      const saved = JSON.parse(raw);
+      return { ...base, ...saved, chroma: { ...DEFAULT_CHROMA, ...saved.chroma } };
+    }
   } catch {
     /* armazenamento indisponível */
   }
-  return { enabled: false, forPoses: false };
+  return base;
 }
 
 type Tab = "viewer" | "frames" | "log";
@@ -55,6 +61,12 @@ function loadStored(): { preset: PresetId | "custom"; settings: Settings } {
 function matchPreset(s: Settings): PresetId | "custom" {
   const json = JSON.stringify(s);
   return PRESETS.find((p) => JSON.stringify(p.settings) === json)?.id ?? "custom";
+}
+
+/** O recorte por IA tem o que precisa neste sistema? */
+function maskToolReady(tools: Tools, m: MaskOptions) {
+  if (tools.os !== "windows") return !!tools.masker;
+  return m.method === "general" ? !!tools.birefnetModel : !!tools.modnetModel;
 }
 
 export default function App() {
@@ -247,7 +259,7 @@ export default function App() {
           {
             name: tools.os === "windows" ? "Modelo de recorte" : "Recortador",
             key: "model",
-            ok: !maskOpts.enabled || (tools.os === "windows" ? !!tools.maskModel : !!tools.masker),
+            ok: !maskOpts.enabled || maskOpts.method === "chroma" || maskToolReady(tools, maskOpts),
           },
         ] as const
       ).filter((t) => !t.ok)
@@ -395,7 +407,7 @@ export default function App() {
           )}
         </div>
 
-        <StageStrip job={job} totalSteps={settings.train.totalSteps} tools={tools} />
+        <StageStrip job={job} totalSteps={settings.train.totalSteps} tools={tools} masks={maskOpts} />
       </main>
     </div>
   );

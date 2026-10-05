@@ -88,3 +88,31 @@ export function Segmented<T extends string>(props: {
     </div>
   );
 }
+
+export function Slider(props: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  onChange: (v: number) => void;
+}) {
+  const pct = ((props.value - props.min) / (props.max - props.min)) * 100;
+  return (
+    <label className="slider">
+      <span className="slider-head">
+        <span>{props.label}</span>
+        <span className="mono">{props.value}</span>
+      </span>
+      <input
+        type="range"
+        min={props.min}
+        max={props.max}
+        step={props.step ?? 1}
+        value={props.value}
+        style={{ "--fill": `${pct}%` } as React.CSSProperties}
+        onChange={(e) => props.onChange(e.currentTarget.valueAsNumber)}
+      />
+    </label>
+  );
+}
