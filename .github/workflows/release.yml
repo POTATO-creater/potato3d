@@ -41,6 +41,8 @@ jobs:
       # Vai dentro do instalador: Brush (sidecar) e, no Windows, DirectML.dll.
       # COLMAP, ffmpeg e o modelo de recorte são baixados pelo app no primeiro uso.
       - run: pnpm setup:tools --only bundle
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: tauri-apps/tauri-action@v0
         env:

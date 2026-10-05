@@ -21,7 +21,27 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const BRUSH = { repo: "ArthurBrussee/brush", tag: "v0.3.0" };
+// URLs e SHA-256 fixos: não depende da API do GitHub, cujo limite anônimo
+// (60/h por IP) estoura nos runners compartilhados do CI.
+const BRUSH = {
+  tag: "v0.3.0",
+  assets: {
+    "aarch64-apple-darwin": ["brush-app-aarch64-apple-darwin.tar.xz", 41447012, "65b2631398c839be3c1d4d7160fe2326389dec87830aac0710985e6690a1048c"],
+    "x86_64-pc-windows-msvc": ["brush-app-x86_64-pc-windows-msvc.zip", 158791348, "b68e3e9cf052d51bf3ee30776fa5a364de7f2ba13b58443128ff797bb7bcfcd6"],
+    "x86_64-unknown-linux-gnu": ["brush-app-x86_64-unknown-linux-gnu.tar.xz", 44242224, "4f0f9a8785d1951c62df26aae247c02c5bba32b00f40b06df4e1c9b867399e20"],
+  },
+};
+const COLMAP_ASSETS = {
+  cuda: ["colmap-x64-windows-cuda.zip", 414666626, "e9c5cbd84c2ea986d2e970a2473fc2d2e6b34a2cdcf5d3df2765c319a63af881"],
+  cpu: ["colmap-x64-windows-nocuda.zip", 127731595, "c493d88cb4a43f21afba42cb55bf786e5434a0420e73db0ba1454c5d8b3686ae"],
+};
+
+const pinned = (repo, tag, [name, size, sha256]) => ({
+  name,
+  size,
+  sha256,
+  url: `https://github.com/${repo}/releases/download/${tag}/${name}`,
+});
 // Mesma versão que o ONNX Runtime 1.28 (crate `ort`) espera; hashes conferidos.
 const DIRECTML = {
   url: "https://api.nuget.org/v3-flatcontainer/microsoft.ai.directml/1.15.4/microsoft.ai.directml.1.15.4.nupkg",
@@ -31,6 +51,15 @@ const DIRECTML = {
   dllSha256: "9c9e6d822561c6c41b90e6994b3e8857cf1d66dbfb1e0c4c799c7c89b4e92da1",
 };
 const COLMAP = { repo: "colmap/colmap", tag: "4.2.1" };
+// Só o ffmpeg ("latest", refeito todo dia) ainda consulta a API; no CI o
+// GITHUB_TOKEN eleva o limite.
+const ghHeaders = {
+  Accept: "application/vnd.github+json",
+  "User-Agent": "splatforge-setup",
+  ...((process.env.GITHUB_TOKEN || process.env.GH_TOKEN) && {
+    Authorization: `Bearer ${process.env.GITHUB_TOKEN || process.env.GH_TOKEN}`,
+  }),
+};
 // BtbN publica builds estáveis do ffmpeg na tag "latest"; o nome inclui a versão.
 const FFMPEG = { repo: "BtbN/FFmpeg-Builds", tag: "latest", pattern: /^ffmpeg-n([\d.]+)-latest-win64-lgpl-[\d.]+\.zip$/ };
 
@@ -60,7 +89,7 @@ function has(cmd, argv = ["-version"]) {
 
 async function releaseAsset(repo, tag, match) {
   const url = `https://api.github.com/repos/${repo}/releases/tags/${tag}`;
-  const res = await fetch(url, { headers: { Accept: "application/vnd.github+json", "User-Agent": "splatforge-setup" } });
+  const res = await fetch(url, { headers: ghHeaders });
   if (!res.ok) throw new Error(`GitHub respondeu ${res.status} para ${url}`);
   const release = await res.json();
   const assets = release.assets.filter((a) => (typeof match === "string" ? a.name === match : match.test(a.name)));
@@ -135,15 +164,11 @@ async function setupBrush() {
   const ext = isWin ? ".exe" : "";
   const dest = join(root, "src-tauri", "binaries", `brush_app-${triple}${ext}`);
   if (existsSync(dest) && !force) return console.log(`✓ Brush já instalado (${dest})`);
-  const assetName = {
-    "aarch64-apple-darwin": "brush-app-aarch64-apple-darwin.tar.xz",
-    "x86_64-pc-windows-msvc": "brush-app-x86_64-pc-windows-msvc.zip",
-    "x86_64-unknown-linux-gnu": "brush-app-x86_64-unknown-linux-gnu.tar.xz",
-  }[triple];
-  if (!assetName) throw new Error(`sem binário pronto do Brush para ${triple}; compile a partir do código-fonte`);
+  const asset = BRUSH.assets[triple];
+  if (!asset) throw new Error(`sem binário pronto do Brush para ${triple}; compile a partir do código-fonte`);
   console.log(`→ Brush ${BRUSH.tag}`);
   await withTemp(async (tmp) => {
-    const archive = await download(await releaseAsset(BRUSH.repo, BRUSH.tag, assetName), tmp);
+    const archive = await download(pinned("ArthurBrussee/brush", BRUSH.tag, asset), tmp);
     extract(archive, tmp);
     const bin = await findFile(tmp, `brush_app${ext}`);
     if (!bin) throw new Error("brush_app não encontrado no pacote");
@@ -207,9 +232,9 @@ async function setupWinPackage(name, label, asset, exe) {
 
 async function setupWindowsTools() {
   const cuda = !args.has("--cpu") && has("nvidia-smi", ["-L"]);
-  const colmapAsset = cuda ? "colmap-x64-windows-cuda.zip" : "colmap-x64-windows-nocuda.zip";
+  const colmapAsset = pinned(COLMAP.repo, COLMAP.tag, COLMAP_ASSETS[cuda ? "cuda" : "cpu"]);
   console.log(cuda ? "GPU NVIDIA detectada: COLMAP com CUDA." : "Sem GPU NVIDIA (ou --cpu): COLMAP sem CUDA.");
-  await setupWinPackage("colmap", `COLMAP ${COLMAP.tag}`, await releaseAsset(COLMAP.repo, COLMAP.tag, colmapAsset), "colmap.exe");
+  await setupWinPackage("colmap", `COLMAP ${COLMAP.tag}`, colmapAsset, "colmap.exe");
   await setupWinPackage("ffmpeg", "ffmpeg", await releaseAsset(FFMPEG.repo, FFMPEG.tag, FFMPEG.pattern), "ffmpeg.exe");
 }
 
