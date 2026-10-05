@@ -2,6 +2,7 @@ pub mod brush;
 pub mod colmap;
 pub mod frames;
 pub mod installer;
+pub mod masks;
 pub mod pipeline;
 pub mod proc;
 pub mod scene;

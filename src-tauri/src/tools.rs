@@ -19,6 +19,10 @@ pub struct Tools {
     /// COLMAP compilado com CUDA: extração, matching e bundle adjustment na GPU.
     pub colmap_cuda: bool,
     pub brush: Option<PathBuf>,
+    /// macOS: recortador Vision (sidecar `splatforge_mask`).
+    pub masker: Option<PathBuf>,
+    /// Windows: modelo BiRefNet baixado pelo instalador de ferramentas.
+    pub mask_model: Option<PathBuf>,
     /// "macos" | "windows" | "linux"
     pub os: &'static str,
 }
@@ -32,7 +36,9 @@ impl Tools {
             ffprobe: find("ffprobe", "SPLATFORGE_FFPROBE"),
             colmap,
             colmap_cuda,
-            brush: find_brush(),
+            brush: find_sidecar("brush_app", "SPLATFORGE_BRUSH"),
+            masker: if cfg!(target_os = "macos") { find_sidecar("splatforge_mask", "SPLATFORGE_MASKER") } else { None },
+            mask_model: if cfg!(windows) { mask_model_path().filter(|p| p.is_file()) } else { None },
             os: std::env::consts::OS,
         }
     }
@@ -49,6 +55,7 @@ pub fn install_hint(tool: &str) -> &'static str {
         ("macos", "ffmpeg") => "Instale com: brew install ffmpeg",
         ("macos", "colmap") => "Instale com: brew install colmap",
         (_, "brush") => "Rode `pnpm setup:tools` para baixar o Brush.",
+        ("windows", "model") => "Use \"Instalar ferramentas\" no app para baixar o modelo de recorte.",
         ("windows", _) => "Rode `pnpm setup:tools` para baixar as ferramentas.",
         (_, "ffmpeg") => "Instale o ffmpeg pelo gerenciador de pacotes do sistema.",
         _ => "Instale o COLMAP 4.x (https://colmap.github.io).",
@@ -67,6 +74,11 @@ pub fn tools_root() -> Option<PathBuf> {
             .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
     };
     base.map(|b| b.join("SplatForge").join("tools"))
+}
+
+/// Onde o instalador grava o modelo de recorte (Windows).
+pub fn mask_model_path() -> Option<PathBuf> {
+    tools_root().map(|r| r.join("models").join("birefnet_lite.onnx"))
 }
 
 fn search_dirs() -> Vec<PathBuf> {
@@ -129,21 +141,20 @@ fn find(name: &str, env_override: &str) -> Option<PathBuf> {
         .find(|p| is_executable(p))
 }
 
-/// O Brush é empacotado como sidecar (`externalBin`), que o Tauri copia para
-/// junto do executável do app tanto em dev quanto no bundle.
-fn find_brush() -> Option<PathBuf> {
-    if let Some(p) = std::env::var_os("SPLATFORGE_BRUSH").map(PathBuf::from) {
+/// Sidecars (`externalBin`) ficam junto do executável do app, em dev e no bundle.
+fn find_sidecar(name: &str, env_override: &str) -> Option<PathBuf> {
+    if let Some(p) = std::env::var_os(env_override).map(PathBuf::from) {
         if is_executable(&p) {
             return Some(p);
         }
     }
     if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)) {
-        let p = dir.join(exe("brush_app"));
+        let p = dir.join(exe(name));
         if is_executable(&p) {
             return Some(p);
         }
     }
-    find("brush_app", "SPLATFORGE_BRUSH")
+    find(name, env_override)
 }
 
 /// A primeira linha de `colmap help` diz "with CUDA" ou "without GPU support".

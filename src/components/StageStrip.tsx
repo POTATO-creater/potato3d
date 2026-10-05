@@ -3,7 +3,7 @@ import { stageToolLabels } from "../lib/platform";
 import type { JobState, StageState } from "../lib/job";
 import { fmtCount, fmtDuration as fmtSecs } from "../lib/format";
 
-const TITLES: Record<Stage, string> = { frames: "Frames", poses: "Poses de câmera", train: "Treino do splat" };
+const TITLES: Record<Stage, string> = { frames: "Frames", masks: "Recorte", poses: "Poses de câmera", train: "Treino do splat" };
 
 
 function StatusDot({ status }: { status: StageState["status"] }) {
@@ -35,7 +35,7 @@ function Metric({ label, value, tone }: { label: string; value: string; tone?: "
 }
 
 export function StageStrip({ job, totalSteps, tools }: { job: JobState; totalSteps: number; tools: Tools | null }) {
-  const { stages, frames, poses, train, evals } = job;
+  const { stages, frames, masks, poses, train, evals } = job;
   const labels = stageToolLabels(tools);
 
   const medianSharp = (() => {
@@ -53,7 +53,7 @@ export function StageStrip({ job, totalSteps, tools }: { job: JobState; totalSte
 
   return (
     <div className="stages">
-      {(["frames", "poses", "train"] as Stage[]).map((st) => {
+      {(["frames", "masks", "poses", "train"] as Stage[]).map((st) => {
         const s = stages[st];
         return (
           <div key={st} className={`stage stage-${s.status}`}>
@@ -76,6 +76,13 @@ export function StageStrip({ job, totalSteps, tools }: { job: JobState; totalSte
                 <>
                   <Metric label="Selecionados" value={String(frames.length)} />
                   {medianSharp != null && <Metric label="Nitidez mediana" value={medianSharp.toFixed(0)} />}
+                </>
+              )}
+              {st === "masks" && masks && (
+                <>
+                  <Metric label="Recortes" value={String(masks.count)} />
+                  <Metric label="Sujeito ocupa" value={`${Math.round(masks.meanCoverage * 100)}%`} />
+                  {masks.noSubject > 0 && <Metric label="Sem sujeito" value={String(masks.noSubject)} tone="warn" />}
                 </>
               )}
               {st === "poses" && poses && (

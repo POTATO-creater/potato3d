@@ -29,6 +29,12 @@ const COLMAP_CPU: (&str, &str, u64) = (
     "c493d88cb4a43f21afba42cb55bf786e5434a0420e73db0ba1454c5d8b3686ae",
     127_731_595,
 );
+/// BiRefNet-lite (MIT), revisão fixa do onnx-community no Hugging Face.
+const BIREFNET: (&str, &str, u64) = (
+    "https://huggingface.co/onnx-community/BiRefNet_lite-ONNX/resolve/de15b22ba131738a16dff04aab8bdf8dc32e3ac1/onnx/model.onnx",
+    "5600024376f572a557870a5eb0afb1e5961636bef4e1e22132025467d0f03333",
+    224_005_088,
+);
 /// Builds estáveis do ffmpeg (LGPL) do BtbN. A tag "latest" é refeita
 /// diariamente, então o arquivo e o hash são resolvidos pela API do GitHub.
 const FFMPEG_RELEASE: &str = "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest";
@@ -43,7 +49,10 @@ pub struct Package {
     pub url: String,
     pub sha256: String,
     pub size: u64,
+    /// Zip: executável procurado em `bin/<exe>`. Arquivo único: nome final
+    /// dentro de `tools_root()/<id>/`.
     pub exe: String,
+    pub archive: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -121,6 +130,7 @@ async fn ffmpeg_package(client: &reqwest::Client) -> Result<Package> {
         sha256: sha256.into(),
         size: a["size"].as_u64().unwrap_or(0),
         exe: "ffmpeg.exe".into(),
+        archive: true,
     })
 }
 
@@ -148,10 +158,24 @@ pub async fn plan() -> Result<Plan> {
             sha256: sha.into(),
             size,
             exe: "colmap.exe".into(),
+            archive: true,
         });
     }
     if tools.ffmpeg.is_none() || tools.ffprobe.is_none() {
         packages.push(ffmpeg_package(&client).await?);
+    }
+    if tools.mask_model.is_none() {
+        let (url, sha, size) = BIREFNET;
+        packages.push(Package {
+            id: "models".into(),
+            label: "Modelo de recorte (BiRefNet)".into(),
+            file: "model.onnx".into(),
+            url: url.into(),
+            sha256: sha.into(),
+            size,
+            exe: "birefnet_lite.onnx".into(),
+            archive: false,
+        });
     }
     let total_bytes = packages.iter().map(|p| p.size).sum();
     Ok(Plan { packages, total_bytes, cuda, note: None })
@@ -240,6 +264,14 @@ async fn download_and_place(
         bail!("SHA-256 de {} não confere (esperado {}, obtido {got})", pkg.file, pkg.sha256);
     }
 
+    if !pkg.archive {
+        let dir = root.join(&pkg.id);
+        std::fs::create_dir_all(&dir)?;
+        std::fs::rename(&archive, dir.join(&pkg.exe))?;
+        emit(InstallEvent::Done { id });
+        return Ok(());
+    }
+
     // Extração (bloqueante) e troca atômica da pasta final.
     emit(InstallEvent::Extracting { id: id.clone() });
     let (root, staging, pkg2) = (root.to_path_buf(), staging.to_path_buf(), pkg.clone());
@@ -297,6 +329,7 @@ mod tests {
             sha256: sha.into(),
             size,
             exe: "colmap.exe".into(),
+            archive: true,
         };
         let root = std::env::temp_dir().join("splatforge_install_test");
         let _ = std::fs::remove_dir_all(&root);
@@ -329,6 +362,7 @@ mod tests {
             sha256: "0".repeat(64),
             size,
             exe: file.into(),
+            archive: true,
         };
         let root = std::env::temp_dir().join("splatforge_install_badsum");
         let _ = std::fs::remove_dir_all(&root);

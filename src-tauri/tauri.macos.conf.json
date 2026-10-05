@@ -1,0 +1,9 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "externalBin": ["binaries/brush_app", "binaries/splatforge_mask"],
+    "macOS": {
+      "minimumSystemVersion": "14.0"
+    }
+  }
+}

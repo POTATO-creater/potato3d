@@ -4,9 +4,11 @@
 //   pnpm setup:tools            instala o que falta
 //   pnpm setup:tools --force    baixa tudo de novo
 //   pnpm setup:tools --cpu      (Windows) COLMAP sem CUDA mesmo com GPU NVIDIA
-//   pnpm setup:tools --only brush
+//   pnpm setup:tools --only bundle   só o que vai dentro do instalador (CI)
 //
 // - Brush (todas as plataformas): sidecar do Tauri em src-tauri/binaries/.
+// - Windows: DirectML.dll 1.15.4 (NuGet da Microsoft), usado pelo ONNX
+//   Runtime no recorte; vai junto do .exe no instalador.
 // - Windows: COLMAP (com CUDA se houver GPU NVIDIA) e ffmpeg na pasta de
 //   ferramentas do app, onde o backend procura (ver src-tauri/src/tools.rs).
 // - macOS/Linux: COLMAP e ffmpeg vêm do gerenciador de pacotes.
@@ -20,6 +22,14 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const BRUSH = { repo: "ArthurBrussee/brush", tag: "v0.3.0" };
+// Mesma versão que o ONNX Runtime 1.28 (crate `ort`) espera; hashes conferidos.
+const DIRECTML = {
+  url: "https://api.nuget.org/v3-flatcontainer/microsoft.ai.directml/1.15.4/microsoft.ai.directml.1.15.4.nupkg",
+  name: "microsoft.ai.directml.1.15.4.nupkg",
+  size: 202292617,
+  sha256: "4e7cb7ddce8cf837a7a75dc029209b520ca0101470fcdf275c1f49736a3615b9",
+  dllSha256: "9c9e6d822561c6c41b90e6994b3e8857cf1d66dbfb1e0c4c799c7c89b4e92da1",
+};
 const COLMAP = { repo: "colmap/colmap", tag: "4.2.1" };
 // BtbN publica builds estáveis do ffmpeg na tag "latest"; o nome inclui a versão.
 const FFMPEG = { repo: "BtbN/FFmpeg-Builds", tag: "latest", pattern: /^ffmpeg-n([\d.]+)-latest-win64-lgpl-[\d.]+\.zip$/ };
@@ -145,6 +155,32 @@ async function setupBrush() {
   console.log(`✓ Brush em ${dest}`);
 }
 
+async function sha256File(path) {
+  const { createReadStream } = await import("node:fs");
+  const hash = createHash("sha256");
+  for await (const chunk of createReadStream(path)) hash.update(chunk);
+  return hash.digest("hex");
+}
+
+async function setupDirectML() {
+  const dest = join(root, "src-tauri", "binaries", "DirectML.dll");
+  if (existsSync(dest) && !force && (await sha256File(dest)) === DIRECTML.dllSha256) {
+    return console.log(`✓ DirectML.dll já presente (${dest})`);
+  }
+  console.log("→ DirectML 1.15.4 (NuGet)");
+  await withTemp(async (tmp) => {
+    const pkg = await download(DIRECTML, tmp);
+    const out = join(tmp, "x");
+    await mkdir(out);
+    extract(pkg, out);
+    const dll = join(out, "bin", "x64-win", "DirectML.dll");
+    if ((await sha256File(dll)) !== DIRECTML.dllSha256) throw new Error("SHA-256 do DirectML.dll não confere");
+    await mkdir(dirname(dest), { recursive: true });
+    await copyFile(dll, dest);
+  });
+  console.log(`✓ DirectML.dll em ${dest}`);
+}
+
 /** Instala um pacote cujo conteúdo tem `bin/<exe>` em `<toolsRoot>/<name>`. */
 async function setupWinPackage(name, label, asset, exe) {
   const target = join(toolsRoot(), name);
@@ -185,7 +221,8 @@ function checkPackageManagerTools() {
 }
 
 try {
-  if (!only || only === "brush") await setupBrush();
+  if (!only || only === "brush" || only === "bundle") await setupBrush();
+  if (isWin && (!only || only === "bundle")) await setupDirectML();
   if (!only || only === "deps") {
     if (isWin) await setupWindowsTools();
     else checkPackageManagerTools();

@@ -150,6 +150,29 @@ pub fn read(model: &Path) -> Result<SceneFrame> {
     Ok(SceneFrame { center, up, radius, cameras, frame_indices })
 }
 
+/// Copia `images.bin` trocando o nome de cada imagem (o resto é preservado
+/// byte a byte).
+pub fn rewrite_image_names(src: &Path, dst: &Path, rename: impl Fn(&str) -> String) -> Result<()> {
+    use std::io::Write;
+    let mut r = open(src)?;
+    let mut w = std::io::BufWriter::new(std::fs::File::create(dst)?);
+    let n = r.u64()?;
+    w.write_all(&n.to_le_bytes())?;
+    for _ in 0..n {
+        // image_id u32 + qvec 4×f64 + tvec 3×f64 + camera_id u32
+        let head: [u8; 4 + 32 + 24 + 4] = r.bytes()?;
+        w.write_all(&head)?;
+        let name = r.cstr()?;
+        w.write_all(rename(&name).as_bytes())?;
+        w.write_all(&[0])?;
+        let n2d = r.u64()?;
+        w.write_all(&n2d.to_le_bytes())?;
+        std::io::copy(&mut (&mut r.0).take(n2d * 24), &mut w)?;
+    }
+    w.flush()?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     /// Roda com `SPLATFORGE_TEST_MODEL=<dataset>/sparse/0 cargo test -- --ignored`.

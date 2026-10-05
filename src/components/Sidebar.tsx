@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import { fileUrl, type Settings, type Stage, type VideoInfo } from "../lib/api";
+import { fileUrl, type MaskOptions, type Settings, type Stage, type VideoInfo } from "../lib/api";
 import { PRESETS, type PresetId } from "../lib/presets";
 import { Field, NumField, Segmented, Toggle } from "./fields";
 import { VideoPlayer } from "./VideoPlayer";
@@ -19,6 +19,8 @@ interface Props {
   onPreset: (p: PresetId) => void;
   settings: Settings;
   onSettings: (s: Settings) => void;
+  masks: MaskOptions;
+  onMasks: (m: MaskOptions) => void;
   fromStage: Stage;
   onFromStage: (s: Stage) => void;
   available: Record<Stage, boolean>;
@@ -149,6 +151,28 @@ export function Sidebar(p: Props) {
 
         <section className="panel">
           <header className="panel-head">
+            <h2>Recorte do sujeito</h2>
+          </header>
+          <Toggle
+            label="Isolar o sujeito (remover o fundo)"
+            hint="o splat sai só com a pessoa ou objeto, sem paredes e riscos em volta"
+            checked={p.masks.enabled}
+            disabled={locked}
+            onChange={(v) => p.onMasks({ ...p.masks, enabled: v })}
+          />
+          {p.masks.enabled && (
+            <Toggle
+              label="Usar o recorte também nas poses"
+              hint="ajuda se o fundo muda entre frames; atrapalha em sujeitos com pouca textura"
+              checked={p.masks.forPoses}
+              disabled={locked}
+              onChange={(v) => p.onMasks({ ...p.masks, forPoses: v })}
+            />
+          )}
+        </section>
+
+        <section className="panel">
+          <header className="panel-head">
             <h2>Qualidade</h2>
             {p.preset === "custom" && <span className="badge">personalizado</span>}
           </header>
@@ -258,8 +282,14 @@ export function Sidebar(p: Props) {
             disabled={locked}
             options={[
               { value: "frames", label: "Frames" },
+              {
+                value: "masks",
+                label: "Recorte",
+                disabled: !p.available.masks || !p.masks.enabled,
+                title: p.masks.enabled ? "Requer frames extraídos" : "Ative o recorte do sujeito",
+              },
               { value: "poses", label: "Poses", disabled: !p.available.poses, title: "Requer frames extraídos" },
-              { value: "train", label: "Treino", disabled: !p.available.train, title: "Requer poses calculadas" },
+              { value: "train", label: "Treino", disabled: !p.available.train, title: "Requer poses (e recortes, se ativados)" },
             ]}
           />
         </Field>

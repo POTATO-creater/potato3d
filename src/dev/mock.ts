@@ -61,9 +61,18 @@ async function fakeInstall(channel: Channel<any>) {
 
 async function replay(channel: Channel<JobEvent>, from: string) {
   cancelled = false;
-  const order = ["frames", "poses", "train"];
+  const order = ["frames", "masks", "poses", "train"];
   const events = (await readEvents()).filter((e) => {
-    const stage = "stage" in e ? e.stage : e.type === "framesReady" ? "frames" : e.type === "posesReady" ? "poses" : "train";
+    const stage =
+      "stage" in e
+        ? e.stage
+        : e.type === "framesReady"
+          ? "frames"
+          : e.type === "masksReady"
+            ? "masks"
+            : e.type === "posesReady"
+              ? "poses"
+              : "train";
     return !stage || order.indexOf(stage) >= order.indexOf(from);
   });
   for (const e of events) {
@@ -91,6 +100,8 @@ export function installMock() {
             colmap: toolsInstalled ? "/opt/homebrew/bin/colmap" : null,
             colmapCuda: params.get("os") === "windows",
             brush: "mock",
+            masker: params.get("os") === "windows" ? null : "mock",
+            maskModel: params.get("os") === "windows" && toolsInstalled ? "mock" : null,
             os: params.get("os") ?? "macos",
           };
         case "probe_video":

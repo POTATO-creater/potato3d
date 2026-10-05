@@ -2,7 +2,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { api, type JobEvent, type SceneFrame, type Settings, type Stage, type Tools, type VideoInfo } from "./lib/api";
+import { api, type JobEvent, type MaskOptions, type SceneFrame, type Settings, type Stage, type Tools, type VideoInfo } from "./lib/api";
 import { initialJob, jobReducer } from "./lib/job";
 import { fmtDuration } from "./lib/format";
 import { fileManager } from "./lib/platform";
@@ -16,6 +16,17 @@ import "./styles.css";
 
 const VIDEO_EXT = ["mp4", "mov", "m4v", "webm", "mkv", "avi"];
 const STORE_KEY = "splatforge.settings.v3";
+const MASKS_KEY = "splatforge.masks.v1";
+
+function loadMasks(): MaskOptions {
+  try {
+    const raw = localStorage.getItem(MASKS_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {
+    /* armazenamento indisponível */
+  }
+  return { enabled: false, forPoses: false };
+}
 
 type Tab = "viewer" | "frames" | "log";
 
@@ -44,6 +55,7 @@ export default function App() {
   const [projectDir, setProjectDir] = useState<string | null>(null);
   const [preset, setPreset] = useState<PresetId | "custom">(stored.preset);
   const [settings, setSettings] = useState<Settings>(stored.settings);
+  const [maskOpts, setMaskOpts] = useState<MaskOptions>(loadMasks);
   const [fromStage, setFromStage] = useState<Stage>("frames");
   const [frame, setFrame] = useState<SceneFrame | null>(null);
   const [tab, setTab] = useState<Tab>("viewer");
@@ -80,6 +92,14 @@ export default function App() {
       /* ignora */
     }
   }, [preset, settings]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(MASKS_KEY, JSON.stringify(maskOpts));
+    } catch {
+      /* ignora */
+    }
+  }, [maskOpts]);
 
   const refreshFrame = useCallback(async (dir: string) => {
     try {
@@ -175,6 +195,7 @@ export default function App() {
           projectDir,
           fromStage,
           frames: { ...settings.frames, trimStart: trim.start, trimEnd: trim.end },
+          masks: maskOpts,
           poses: settings.poses,
           train: settings.train,
         },
@@ -197,14 +218,21 @@ export default function App() {
           { name: "ffmpeg", key: "ffmpeg", ok: !!tools.ffmpeg && !!tools.ffprobe },
           { name: "COLMAP", key: "colmap", ok: !!tools.colmap },
           { name: "Brush", key: "brush", ok: !!tools.brush },
+          // O recorte só é exigido quando ativado.
+          {
+            name: tools.os === "windows" ? "Modelo de recorte" : "Recortador",
+            key: "model",
+            ok: !maskOpts.enabled || (tools.os === "windows" ? !!tools.maskModel : !!tools.masker),
+          },
         ] as const
       ).filter((t) => !t.ok)
     : [];
 
   const available: Record<Stage, boolean> = {
     frames: true,
-    poses: job.frames.length > 0,
-    train: !!job.poses,
+    masks: job.frames.length > 0,
+    poses: job.frames.length > 0 && (!maskOpts.enabled || !maskOpts.forPoses || !!job.masks),
+    train: !!job.poses && (!maskOpts.enabled || !!job.masks),
   };
 
   return (
@@ -223,6 +251,12 @@ export default function App() {
         onPreset={(id) => {
           setPreset(id);
           setSettings(presetById(id).settings);
+        }}
+        masks={maskOpts}
+        onMasks={(m) => {
+          setMaskOpts(m);
+          // Desativar o recorte não deixa "Recorte" selecionado como ponto de partida.
+          if (!m.enabled && fromStage === "masks") setFromStage("poses");
         }}
         settings={settings}
         onSettings={(s) => {
@@ -287,6 +321,9 @@ export default function App() {
                       <strong>Frames</strong>: ffmpeg decodifica por hardware e escolhe os frames mais nítidos.
                     </li>
                     <li>
+                      <strong>Recorte</strong> (opcional): isola o sujeito para o splat sair sem o fundo.
+                    </li>
+                    <li>
                       <strong>Poses</strong>: COLMAP com matching circular (fecha a órbita) e mapeador global.
                     </li>
                     <li>
@@ -300,7 +337,7 @@ export default function App() {
           </div>
           {tab === "frames" && (
             <div className="pane scroll">
-              <FramesGrid frames={job.frames} version={framesVersion} />
+              <FramesGrid frames={job.frames} version={framesVersion} masksDir={job.masksDir} />
             </div>
           )}
           {tab === "log" && (

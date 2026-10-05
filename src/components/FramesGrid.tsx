@@ -1,10 +1,39 @@
 import { useMemo, useState } from "react";
 import { fileUrl, type FrameInfo } from "../lib/api";
 
+const stemOf = (p: string) => (p.split(/[\\/]/).pop() ?? p).replace(/\.[^.]+$/, "");
+
 /** Miniaturas dos frames escolhidos, com a nitidez relativa de cada um.
- *  Frames bem abaixo da mediana costumam virar borrão no splat. */
-export function FramesGrid({ frames, version }: { frames: FrameInfo[]; version: number }) {
+ *  Frames bem abaixo da mediana costumam virar borrão no splat. Com recorte,
+ *  a máscara é aplicada por CSS (luminância) sobre um xadrez. */
+export function FramesGrid({
+  frames,
+  version,
+  masksDir,
+}: {
+  frames: FrameInfo[];
+  version: number;
+  masksDir: { path: string; version: number } | null;
+}) {
   const [open, setOpen] = useState<number | null>(null);
+  const [showCut, setShowCut] = useState(true);
+  const cut = showCut && !!masksDir;
+  const maskStyle = (f: FrameInfo): React.CSSProperties | undefined => {
+    if (!cut || !masksDir) return undefined;
+    const url = `url("${fileUrl(`${masksDir.path}/${stemOf(f.path)}.png`, masksDir.version)}")`;
+    // Mesmo enquadramento da <img> (object-fit: cover, centralizada).
+    return {
+      maskImage: url,
+      WebkitMaskImage: url,
+      maskMode: "luminance",
+      maskSize: "cover",
+      WebkitMaskSize: "cover",
+      maskPosition: "center",
+      WebkitMaskPosition: "center",
+      maskRepeat: "no-repeat",
+      WebkitMaskRepeat: "no-repeat",
+    } as React.CSSProperties;
+  };
   const median = useMemo(() => {
     const v = frames.map((f) => f.sharpness).sort((a, b) => a - b);
     return v[Math.floor(v.length / 2)] || 1;
@@ -26,13 +55,18 @@ export function FramesGrid({ frames, version }: { frames: FrameInfo[]; version: 
         ) : (
           <span className="good">Nitidez uniforme</span>
         )}
+        {masksDir && (
+          <button className={`btn-sm ${showCut ? "" : "ghost"}`} onClick={() => setShowCut((v) => !v)}>
+            {showCut ? "Mostrando recorte" : "Mostrar recorte"}
+          </button>
+        )}
       </div>
       <div className="frames-grid">
         {frames.map((f, i) => {
           const weak = f.sharpness < median * 0.5;
           return (
-            <button key={f.path} className={`thumb ${weak ? "weak" : ""}`} onClick={() => setOpen(i)}>
-              <img src={fileUrl(f.path, version)} loading="lazy" decoding="async" alt={`frame ${i}`} />
+            <button key={f.path} className={`thumb ${weak ? "weak" : ""} ${cut ? "cut" : ""}`} onClick={() => setOpen(i)}>
+              <img src={fileUrl(f.path, version)} loading="lazy" decoding="async" alt={`frame ${i}`} style={maskStyle(f)} />
               <span className="thumb-meta mono">
                 #{i} · {f.time.toFixed(2)} s
               </span>
@@ -42,8 +76,8 @@ export function FramesGrid({ frames, version }: { frames: FrameInfo[]; version: 
         })}
       </div>
       {open != null && (
-        <div className="lightbox" onClick={() => setOpen(null)}>
-          <img src={fileUrl(frames[open].path, version)} alt="" />
+        <div className={`lightbox ${cut ? "cut" : ""}`} onClick={() => setOpen(null)}>
+          <img src={fileUrl(frames[open].path, version)} alt="" style={maskStyle(frames[open])} />
           <span className="mono">
             #{open} · {frames[open].time.toFixed(2)} s · nitidez {frames[open].sharpness.toFixed(0)}
           </span>

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api, type InstallEvent, type InstallPlan, type Tools } from "../lib/api";
 import { installCommand } from "../lib/platform";
 
-type Missing = { name: string; key: "ffmpeg" | "colmap" | "brush" }[];
+type Missing = { name: string; key: "ffmpeg" | "colmap" | "brush" | "model" }[];
 
 interface PackageState {
   label: string;
@@ -22,6 +22,7 @@ export function ToolsSetup({ tools, missing, onInstalled }: { tools: Tools; miss
   const [error, setError] = useState<string | null>(null);
 
   const canInstall = tools.os === "windows" && missing.some((m) => m.key !== "brush");
+  const macMasker = tools.os === "macos" && missing.some((m) => m.key === "model");
 
   useEffect(() => {
     if (!canInstall) return;
@@ -147,11 +148,14 @@ export function ToolsSetup({ tools, missing, onInstalled }: { tools: Tools; miss
         </>
       ) : (
         <div className="setup-cmds">
-          {missing.map((m) => (
-            <span key={m.name}>
-              {m.name} → <code>{installCommand(m.key, tools.os)}</code>
-            </span>
-          ))}
+          {missing
+            .filter((m) => m.key !== "model")
+            .map((m) => (
+              <span key={m.name}>
+                {m.name} → <code>{installCommand(m.key, tools.os)}</code>
+              </span>
+            ))}
+          {macMasker && <span>O recortador (Vision) vem com o app e exige macOS 14 ou superior.</span>}
         </div>
       )}
       {error && <pre className="setup-error">{error}</pre>}

@@ -5,11 +5,11 @@ gerados por IA — em **Gaussian Splatting**, 100% local, no macOS (Apple
 Silicon) e no Windows (com aceleração CUDA no COLMAP quando há GPU NVIDIA).
 
 ```
-vídeo ──► Frames ──────────► Poses ───────────────────► Treino ──────────► splat.ply
-          ffmpeg             COLMAP 4                     Brush
-          decodificação      SIFT reforçado,              wgpu (Metal,
-          por hardware +     matching circular,           Vulkan/DX12),
-          nitidez (Rust)     mapeador global              prévias ao vivo
+vídeo ──► Frames ─────────► Recorte ─────────► Poses ──────────────► Treino ─────────► splat.ply
+          ffmpeg            (opcional)          COLMAP 4              Brush
+          decodificação     Vision (macOS),     SIFT reforçado,       wgpu (Metal,
+          por hardware +    BiRefNet+DirectML   matching circular,    Vulkan/DX12),
+          nitidez (Rust)    (Windows)           mapeador global       prévias ao vivo
 ```
 
 ## Instalação
@@ -81,6 +81,26 @@ Ou dispare manualmente em **Actions → release → Run workflow**.
    **Início aqui / Fim aqui**.
 3. Escolha um preset e clique em **Gerar splat**.
 
+### Recorte do sujeito
+
+Com **"Isolar o sujeito"** ligado, cada frame ganha uma máscara do sujeito e o
+Brush treina com o fundo transparente: o splat sai só com a pessoa ou objeto,
+sem paredes, pessoas ao fundo ou os riscos em volta.
+
+| Sistema | Como | Velocidade medida |
+|---|---|---|
+| macOS 14+ | Framework Vision (o "copiar sujeito" do Fotos), na GPU, via o sidecar `splatforge_mask` compilado pelo `build.rs` | ~40 ms/frame num M4 (107 frames em 5,8 s) |
+| Windows | BiRefNet-lite (MIT) com ONNX Runtime + DirectML; CPU se não houver GPU DirectX 12 | não medido |
+
+No Windows o modelo (224 MB) é baixado por **"Instalar ferramentas"** e o
+`DirectML.dll` 1.15.4 vai dentro do instalador. Descartados no caminho: BiRefNet
+na CPU do Mac (~7 s/frame), via CoreML (compilação de 20+ min) e via WebGPU do
+ONNX Runtime (o grafo cai quase todo para a CPU).
+
+Opcionalmente as máscaras também vão para o COLMAP ("Usar o recorte também
+nas poses"): ajuda quando o fundo muda entre frames, mas tira pontos de apoio
+de sujeitos com pouca textura, por isso vem desligado.
+
 Cada vídeo ganha uma pasta de projeto (`<video>_splat/` por padrão). Para
 mudar só os parâmetros de treino, escolha **Executar a partir de → Treino**.
 Assim frames e poses são reaproveitados.
@@ -89,6 +109,8 @@ Assim frames e poses são reaproveitados.
 <video>_splat/
 ├── project.json        estado (frames, métricas, resultado)
 ├── dataset/            entrada do Brush: images/ + sparse/0/
+├── masks/              recortes (cinza, 255 = sujeito)
+├── dataset_alpha/      com recorte: PNGs RGBA + images.bin com nomes .png
 ├── colmap/             database.db, pairs.txt, modelos brutos
 ├── training/           snapshots intermediários (mantém os 2 últimos)
 └── splat.ply           resultado final

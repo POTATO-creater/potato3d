@@ -1,6 +1,6 @@
 [package]
 name = "splatforge"
-version = "0.1.0"
+version = "0.2.0"
 description = "Vídeo orbital → Gaussian Splatting, 100% local"
 authors = ["Bryan Diniz"]
 edition = "2021"
@@ -24,13 +24,17 @@ anyhow = "1"
 tokio = { version = "1", features = ["process", "io-util", "macros", "rt-multi-thread", "sync", "time", "fs", "signal"] }
 tokio-util = "0.7"
 rayon = "1"
-image = { version = "0.25", default-features = false, features = ["jpeg"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "rayon"] }
 # TLS nativo (SChannel no Windows, Security.framework no macOS): nada de C
 # para compilar na máquina de build.
 reqwest = { version = "0.13.5", default-features = false, features = ["native-tls", "http2", "charset", "system-proxy", "stream", "json"] }
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 sha2 = "0.10"
 futures-util = "0.3.34"
+
+# Recorte no Windows: BiRefNet com ONNX Runtime (estático) + DirectML.dll.
+[target.'cfg(windows)'.dependencies]
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "download-binaries", "copy-dylibs", "tls-native", "directml", "api-27"] }
 
 # Frame decoding/sharpness runs on every candidate frame; keep it fast in dev builds too.
 [profile.dev.package."*"]

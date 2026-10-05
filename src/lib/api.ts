@@ -1,7 +1,7 @@
 import { Channel, convertFileSrc, invoke } from "@tauri-apps/api/core";
 
-export type Stage = "frames" | "poses" | "train";
-export const STAGES: Stage[] = ["frames", "poses", "train"];
+export type Stage = "frames" | "masks" | "poses" | "train";
+export const STAGES: Stage[] = ["frames", "masks", "poses", "train"];
 
 export interface Tools {
   ffmpeg: string | null;
@@ -10,6 +10,10 @@ export interface Tools {
   /** COLMAP com CUDA: extração, matching e bundle adjustment na GPU. */
   colmapCuda: boolean;
   brush: string | null;
+  /** macOS: recortador Vision (sidecar). */
+  masker: string | null;
+  /** Windows: modelo BiRefNet baixado pelo instalador. */
+  maskModel: string | null;
   os: "macos" | "windows" | "linux";
 }
 
@@ -27,6 +31,19 @@ export interface FrameOptions {
   oversample: number;
   trimStart: number;
   trimEnd: number | null;
+}
+
+export interface MaskOptions {
+  enabled: boolean;
+  /** Também usa as máscaras no COLMAP (ignora features do fundo). */
+  forPoses: boolean;
+}
+
+export interface MaskStats {
+  count: number;
+  noSubject: number;
+  meanCoverage: number;
+  backend: string;
 }
 
 export interface PoseOptions {
@@ -60,6 +77,7 @@ export interface JobConfig extends Omit<Settings, "frames"> {
   projectDir: string;
   fromStage: Stage;
   frames: FrameOptions;
+  masks: MaskOptions;
 }
 
 export interface FrameInfo {
@@ -79,6 +97,8 @@ export interface ModelStats {
 export interface ProjectState {
   videoPath: string | null;
   frames: FrameInfo[];
+  masks: MaskStats | null;
+  masksDir: string | null;
   poses: ModelStats | null;
   finalPly: string | null;
   lastPsnr: number | null;
@@ -103,6 +123,8 @@ export type JobEvent =
   | { type: "progress"; stage: Stage; fraction: number; message: string }
   | { type: "log"; stage: Stage; line: string }
   | { type: "framesReady"; frames: FrameInfo[] }
+  | { type: "masksReady"; stats: MaskStats; dir: string }
+  | { type: "stageSkipped"; stage: Stage; reason: string }
   | { type: "posesReady"; stats: ModelStats }
   | { type: "train"; event: TrainEvent }
   | { type: "stageDone"; stage: Stage; seconds: number }

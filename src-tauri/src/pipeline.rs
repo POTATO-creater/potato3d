@@ -1,4 +1,4 @@
-//! Orquestra as três etapas, persiste o estado do projeto em disco e envia
+//! Orquestra as etapas (frames → recorte → poses → treino), persiste o estado do projeto em disco e envia
 //! eventos de progresso para a interface por um `Channel` do Tauri.
 
 use std::path::{Path, PathBuf};
@@ -12,6 +12,7 @@ use tokio_util::sync::CancellationToken;
 use crate::brush::{self, TrainEvent, TrainOptions};
 use crate::colmap::{self, ModelStats, PoseOptions};
 use crate::frames::{self, FrameInfo, FrameOptions, VideoInfo};
+use crate::masks::{self, MaskOptions, MaskStats};
 use crate::proc::is_cancelled;
 use crate::tools::{install_hint, Tools};
 
@@ -19,6 +20,7 @@ use crate::tools::{install_hint, Tools};
 #[serde(rename_all = "lowercase")]
 pub enum Stage {
     Frames,
+    Masks,
     Poses,
     Train,
 }
@@ -30,6 +32,8 @@ pub struct JobConfig {
     pub project_dir: String,
     pub from_stage: Stage,
     pub frames: FrameOptions,
+    #[serde(default)]
+    pub masks: MaskOptions,
     pub poses: PoseOptions,
     pub train: TrainOptions,
 }
@@ -41,7 +45,10 @@ pub enum JobEvent {
     Progress { stage: Stage, fraction: f32, message: String },
     Log { stage: Stage, line: String },
     FramesReady { frames: Vec<FrameInfo> },
+    MasksReady { stats: MaskStats, dir: String },
     PosesReady { stats: ModelStats },
+    /// Etapa pulada (desativada ou resultado anterior reaproveitado).
+    StageSkipped { stage: Stage, reason: String },
     Train { event: TrainEvent },
     StageDone { stage: Stage, seconds: f64 },
     Finished { ply: String, seconds: f64 },
@@ -58,6 +65,10 @@ pub type Emit = Arc<dyn Fn(JobEvent) + Send + Sync>;
 pub struct ProjectState {
     pub video_path: Option<String>,
     pub frames: Vec<FrameInfo>,
+    #[serde(default)]
+    pub masks: Option<MaskStats>,
+    #[serde(default)]
+    pub masks_dir: Option<String>,
     pub poses: Option<ModelStats>,
     pub final_ply: Option<String>,
     pub last_psnr: Option<f64>,
@@ -90,6 +101,19 @@ impl Layout {
     }
     fn colmap_work(&self) -> PathBuf {
         self.root.join("colmap")
+    }
+    /// Fora de `dataset/`: o Brush trataria `dataset/masks` como máscara de
+    /// "ignorar" automaticamente.
+    pub fn masks(&self) -> PathBuf {
+        self.root.join("masks")
+    }
+    /// Fora de `colmap/`, que a etapa de poses recria do zero.
+    fn colmap_masks(&self) -> PathBuf {
+        self.root.join("colmap_masks")
+    }
+    /// Dataset de treino com fundo transparente (PNG RGBA).
+    fn alpha_dataset(&self) -> PathBuf {
+        self.root.join("dataset_alpha")
     }
     fn train_out(&self) -> PathBuf {
         self.root.join("training")
@@ -217,6 +241,7 @@ async fn run_inner(
 
         // Etapas seguintes ficam inválidas.
         let _ = std::fs::remove_dir_all(layout.dataset().join("sparse"));
+        let _ = std::fs::remove_dir_all(layout.masks());
         state = ProjectState {
             video_path: Some(cfg.video_path.clone()),
             frames: picked.clone(),
@@ -229,8 +254,38 @@ async fn run_inner(
         anyhow::bail!("não há frames extraídos neste projeto; rode a partir da etapa de frames");
     }
 
-    // ---------- 2. Poses ----------
-    if cfg.from_stage <= Stage::Poses {
+    // ---------- 2. Recorte (opcional) ----------
+    let masks_ready = |state: &ProjectState| state.masks.is_some() && layout.masks().is_dir();
+    if cfg.from_stage <= Stage::Masks {
+        if cfg.masks.enabled {
+            *current = Some(Stage::Masks);
+            let t0 = Instant::now();
+            let rep = Reporter::new(emit, Stage::Masks);
+            rep.progress(0.0, "Detectando o sujeito");
+            let stats = masks::run(tools, &layout.images(), &layout.masks(), cancel, |f, m| rep.progress(f, m), |l| rep.log(l)).await?;
+            rep.progress(1.0, &format!("{} recortes · {}", stats.count, stats.backend));
+            state.masks = Some(stats.clone());
+            state.masks_dir = Some(layout.masks().to_string_lossy().into_owned());
+            layout.save(&state)?;
+            emit(JobEvent::MasksReady { stats, dir: layout.masks().to_string_lossy().into_owned() });
+            emit(JobEvent::StageDone { stage: Stage::Masks, seconds: t0.elapsed().as_secs_f64() });
+        } else {
+            emit(JobEvent::StageSkipped { stage: Stage::Masks, reason: "Recorte desativado".into() });
+        }
+    }
+    if cfg.masks.enabled && !masks_ready(&state) {
+        anyhow::bail!("não há recortes neste projeto; rode a partir da etapa de recorte");
+    }
+
+    // ---------- 3. Poses ----------
+    // Recortar de novo sem usar as máscaras no COLMAP não muda as poses.
+    let reuse_poses = cfg.from_stage == Stage::Masks
+        && !(cfg.masks.enabled && cfg.masks.for_poses)
+        && layout.model().join("images.bin").exists()
+        && state.poses.is_some();
+    if reuse_poses {
+        emit(JobEvent::StageSkipped { stage: Stage::Poses, reason: "Poses anteriores reaproveitadas".into() });
+    } else if cfg.from_stage <= Stage::Poses {
         *current = Some(Stage::Poses);
         let t0 = Instant::now();
         let colmap_bin = Tools::require(&tools.colmap, "COLMAP", install_hint("colmap"))?;
@@ -242,6 +297,12 @@ async fn run_inner(
                 work: &layout.colmap_work(),
                 model_out: &layout.model(),
                 use_gpu: tools.colmap_cuda,
+                masks: if cfg.masks.enabled && cfg.masks.for_poses {
+                    masks::write_colmap_masks(&layout.images(), &layout.masks(), &layout.colmap_masks())?;
+                    Some(layout.colmap_masks())
+                } else {
+                    None
+                },
             },
             &cfg.poses,
             cancel,
@@ -260,17 +321,26 @@ async fn run_inner(
         anyhow::bail!("não há poses calculadas neste projeto; rode a partir da etapa de poses");
     }
 
-    // ---------- 3. Treino ----------
+    // ---------- 4. Treino ----------
     *current = Some(Stage::Train);
     let t0 = Instant::now();
     let brush_bin = Tools::require(&tools.brush, "Brush", install_hint("brush"))?;
     let rep = Reporter::new(emit, Stage::Train);
     let total = cfg.train.total_steps.max(1);
+    let train_dataset = if cfg.masks.enabled {
+        rep.progress(0.0, "Montando frames com fundo transparente");
+        let (dataset, masks_dir, out) = (layout.dataset(), layout.masks(), layout.alpha_dataset());
+        tokio::task::spawn_blocking(move || masks::build_alpha_dataset(&dataset, &masks_dir, &out)).await??;
+        layout.alpha_dataset()
+    } else {
+        let _ = std::fs::remove_dir_all(layout.alpha_dataset());
+        layout.dataset()
+    };
     rep.progress(0.0, "Carregando dataset na GPU");
     let mut last_psnr = None;
     let last_ply = brush::run(
         &brush_bin,
-        &layout.dataset(),
+        &train_dataset,
         &layout.train_out(),
         &cfg.train,
         cancel,

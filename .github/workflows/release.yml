@@ -38,9 +38,9 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # O Brush vai dentro do instalador como sidecar. COLMAP e ffmpeg são
-      # baixados pelo próprio app no primeiro uso (Windows).
-      - run: pnpm setup:tools --only brush
+      # Vai dentro do instalador: Brush (sidecar) e, no Windows, DirectML.dll.
+      # COLMAP, ffmpeg e o modelo de recorte são baixados pelo app no primeiro uso.
+      - run: pnpm setup:tools --only bundle
 
       - uses: tauri-apps/tauri-action@v0
         env:

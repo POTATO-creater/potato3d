@@ -25,3 +25,8 @@ dist-ssr
 
 # Sidecar do Brush, baixado por `pnpm setup:tools`
 src-tauri/binaries/brush_app-*
+
+# Recortador do macOS, compilado pelo build.rs
+src-tauri/binaries/splatforge_mask-*
+# DirectML do NuGet, baixado por `pnpm setup:tools`
+src-tauri/binaries/DirectML.dll

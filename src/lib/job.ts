@@ -1,6 +1,6 @@
-import { STAGES, type FrameInfo, type JobEvent, type ModelStats, type ProjectState, type Stage } from "./api";
+import { STAGES, type FrameInfo, type JobEvent, type MaskStats, type ModelStats, type ProjectState, type Stage } from "./api";
 
-export type StageStatus = "idle" | "queued" | "running" | "done" | "error" | "kept";
+export type StageStatus = "idle" | "queued" | "running" | "done" | "error" | "kept" | "skipped";
 
 export interface StageState {
   status: StageStatus;
@@ -21,6 +21,9 @@ export interface JobState {
   running: boolean;
   stages: Record<Stage, StageState>;
   frames: FrameInfo[];
+  masks: MaskStats | null;
+  /** Pasta das máscaras + versão (cache-buster das miniaturas). */
+  masksDir: { path: string; version: number } | null;
   poses: ModelStats | null;
   train: TrainProgress | null;
   evals: { iter: number; psnr: number; ssim: number }[];
@@ -35,8 +38,10 @@ const idle = (): StageState => ({ status: "idle", fraction: 0, message: "" });
 
 export const initialJob: JobState = {
   running: false,
-  stages: { frames: idle(), poses: idle(), train: idle() },
+  stages: { frames: idle(), masks: idle(), poses: idle(), train: idle() },
   frames: [],
+  masks: null,
+  masksDir: null,
   poses: null,
   train: null,
   evals: [],
@@ -61,10 +66,13 @@ export function jobReducer(s: JobState, a: JobAction): JobState {
         ...initialJob,
         stages: {
           frames: kept(p.frames.length > 0),
+          masks: kept(!!p.masks),
           poses: kept(!!p.poses),
           train: kept(!!p.finalPly),
         },
         frames: p.frames,
+        masks: p.masks,
+        masksDir: p.masks && p.masksDir ? { path: p.masksDir, version: Date.now() } : null,
         poses: p.poses,
         evals: p.lastPsnr != null ? [{ iter: 0, psnr: p.lastPsnr, ssim: 0 }] : [],
         finalPly: p.finalPly,
@@ -85,7 +93,10 @@ export function jobReducer(s: JobState, a: JobAction): JobState {
         error: null,
         totalSeconds: null,
         frames: from <= 0 ? [] : s.frames,
-        poses: from <= 1 ? null : s.poses,
+        masks: from <= 1 ? null : s.masks,
+        masksDir: from <= 1 ? null : s.masksDir,
+        // Partindo do recorte, as poses podem ser reaproveitadas (stageSkipped).
+        poses: from === 0 || from === 2 ? null : s.poses,
         train: null,
         evals: [],
         finalPly: null,
@@ -111,6 +122,13 @@ function applyEvent(s: JobState, e: JobEvent): JobState {
       return s;
     case "framesReady":
       return { ...s, frames: e.frames };
+    case "masksReady":
+      return { ...s, masks: e.stats, masksDir: { path: e.dir, version: Date.now() } };
+    case "stageSkipped": {
+      // Poses reaproveitadas continuam valendo; recorte desativado some.
+      const next = patchStage(s, e.stage, { status: "skipped", fraction: 1, message: e.reason });
+      return e.stage === "masks" ? { ...next, masks: null, masksDir: null } : next;
+    }
     case "posesReady":
       return { ...s, poses: e.stats };
     case "stageDone":

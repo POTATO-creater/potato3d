@@ -99,6 +99,8 @@ pub struct Paths<'a> {
     /// COLMAP com CUDA. O SIFT reforçado (forma afim/DSP) continua na CPU:
     /// o próprio COLMAP faz esse fallback; o matching vai para a GPU.
     pub use_gpu: bool,
+    /// Máscaras `<imagem>.png` (preto = ignorar features do fundo).
+    pub masks: Option<PathBuf>,
 }
 
 fn gpu_flag(on: bool) -> &'static str {
@@ -217,6 +219,7 @@ type Best = (PathBuf, u32, u64, Option<f64>);
 async fn attempt(
     colmap: &Path,
     images: &Path,
+    masks: Option<&Path>,
     use_gpu: bool,
     dir: &Path,
     opts: &PoseOptions,
@@ -241,6 +244,9 @@ async fn attempt(
         .args(["--ImageReader.camera_model", &opts.camera_model])
         .args(["--FeatureExtraction.use_gpu", gpu_flag(use_gpu)])
         .args(features.extractor_args());
+    if let Some(m) = masks {
+        cmd.arg("--ImageReader.mask_path").arg(m);
+    }
     run_streaming(cmd, cancel, |l| {
         let l = strip_glog(l);
         if l.starts_with("Processed file") {
@@ -314,7 +320,7 @@ pub async fn run(
     mut on_progress: impl FnMut(f32, &str),
     mut on_log: impl FnMut(&str),
 ) -> Result<ModelStats> {
-    let Paths { colmap, images, work, model_out, use_gpu } = paths;
+    let Paths { colmap, images, work, model_out, use_gpu, masks } = paths;
     if work.exists() {
         std::fs::remove_dir_all(work)?;
     }
@@ -323,7 +329,8 @@ pub async fn run(
     let ratio = |b: &Option<Best>| b.as_ref().map_or(0.0, |b| b.1 as f32 / total.max(1) as f32);
 
     let mut features = opts.features;
-    let mut best = attempt(colmap, images, use_gpu, &work.join("attempt1"), opts, features, cancel, &mut on_progress, &mut on_log).await?;
+    let masks = masks.as_deref();
+    let mut best = attempt(colmap, images, masks, use_gpu, &work.join("attempt1"), opts, features, cancel, &mut on_progress, &mut on_log).await?;
     let mut mapper = "global";
     let mut db_dir = work.join("attempt1");
 
@@ -337,6 +344,7 @@ pub async fn run(
         let retry = attempt(
             colmap,
             images,
+            masks,
             use_gpu,
             &dir,
             &retry_opts,

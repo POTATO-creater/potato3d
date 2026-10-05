@@ -892,7 +892,7 @@ button:disabled {
 .stages {
   flex: none;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 1px;
   background: var(--border);
   border-top: 1px solid var(--border);
@@ -946,6 +946,10 @@ button:disabled {
 .dot-kept {
   background: var(--good);
 }
+.dot-skipped {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--border-strong);
+}
 .dot-error {
   background: var(--bad);
 }
@@ -968,6 +972,12 @@ button:disabled {
 }
 .stage-kept .bar-fill {
   opacity: 0.45;
+}
+.stage-skipped .bar-fill {
+  background: var(--border-strong);
+}
+.stage-skipped .stage-title {
+  color: var(--muted);
 }
 .bar-fill.indeterminate {
   background: linear-gradient(90deg, transparent, var(--accent), transparent);
@@ -1058,6 +1068,14 @@ button:disabled {
 }
 .thumb:hover {
   border-color: var(--border-strong);
+}
+/* Xadrez atrás do recorte, como em editores de imagem. */
+.thumb.cut,
+.lightbox.cut img {
+  background: repeating-conic-gradient(#2a2d33 0 25%, #1f2226 0 50%) 0 0 / 16px 16px;
+}
+.thumb.cut img {
+  object-fit: cover;
 }
 .thumb.weak {
   border-color: rgba(255, 107, 107, 0.6);
