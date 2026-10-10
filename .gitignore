@@ -35,3 +35,6 @@ src-tauri/binaries/DirectML.dll
 web/.brush/
 web/pkg/
 dist-web
+
+# Cache local do wrangler (deploy da versão web)
+.wrangler/

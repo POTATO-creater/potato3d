@@ -1,5 +1,6 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { ortWasmGzip } from "./ort-wasm-plugin";
 import { serviceWorker } from "./sw-plugin";
 
 // Versão web: a interface de src/ com o host do navegador (web/src/host/);
@@ -7,8 +8,9 @@ import { serviceWorker } from "./sw-plugin";
 // web/pkg).
 export default defineConfig({
   root: import.meta.dirname,
-  // O service worker (cache offline) só existe no build; no dev ele atrapalharia o HMR.
-  plugins: [react(), serviceWorker(`${import.meta.dirname}/src/sw.template.js`)],
+  // Só agem no build: o .wasm do ONNX Runtime sai gzipado (limite de 25 MiB
+  // do Cloudflare) e o service worker do cache offline, que no dev atrapalharia o HMR.
+  plugins: [react(), ortWasmGzip(), serviceWorker(`${import.meta.dirname}/src/sw.template.js`)],
   // O ONNX Runtime acha os próprios .wasm por import.meta.url: não pode ser pré-empacotado.
   optimizeDeps: { exclude: ["onnxruntime-web"] },
   build: {

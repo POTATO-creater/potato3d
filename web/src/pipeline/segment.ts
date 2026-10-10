@@ -80,7 +80,9 @@ export async function downloadModel(
   signal?: AbortSignal,
 ): Promise<ArrayBuffer> {
   const spec = MODELS[id];
-  const res = await fetch(spec.url, { signal });
+  // Sem Referer: o Hugging Face responde 404 (sem CORS) quando ele é um
+  // *.workers.dev, onde a versão web é publicada.
+  const res = await fetch(spec.url, { signal, referrerPolicy: "no-referrer" });
   if (!res.ok || !res.body) throw new Error(`${spec.label}: download falhou (${res.status})`);
   const buf = new Uint8Array(spec.bytes);
   const reader = res.body.getReader();
@@ -109,6 +111,17 @@ export async function loadModel(id: ModelId, onProgress: (done: number, total: n
 
 type Ort = typeof import("onnxruntime-web/webgpu");
 
+/** O .wasm do ONNX Runtime publicado gzipado (web/ort-wasm-plugin.ts). Se o
+ *  servidor já tiver descompactado (Content-Encoding), usa como veio. */
+async function ortWasmBinary(url: string): Promise<ArrayBuffer> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`ONNX Runtime: ${url} (${res.status})`);
+  const buf = await res.arrayBuffer();
+  const head = new Uint8Array(buf, 0, 2);
+  if (head[0] !== 0x1f || head[1] !== 0x8b) return buf;
+  return new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer();
+}
+
 export class Segmenter {
   private ort: Ort;
   private session: import("onnxruntime-web/webgpu").InferenceSession;
@@ -125,6 +138,9 @@ export class Segmenter {
   static async create(id: ModelId, onProgress: (done: number, total: number) => void): Promise<Segmenter> {
     const model = await loadModel(id, onProgress);
     const ort = await import("onnxruntime-web/webgpu");
+    // Import dinâmico: os testes (Node) importam este arquivo e não resolvem módulos virtuais do Vite.
+    const { default: ortWasmGz } = await import("virtual:ort-wasm-gz");
+    if (ortWasmGz) ort.env.wasm.wasmBinary ??= await ortWasmBinary(ortWasmGz);
     const opts = { freeDimensionOverrides: { batch_size: 1 } };
     try {
       const s = await ort.InferenceSession.create(model, { ...opts, executionProviders: ["webgpu"] });

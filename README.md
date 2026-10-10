@@ -381,6 +381,32 @@ Ainda não foi testado em vídeos reais de IA (desfoque, pouca textura,
 elementos que se mexem), onde o SIFT reforçado e o mapeador global do COLMAP
 fazem diferença.
 
+### Publicação na Cloudflare
+
+A versão web é publicada como **assets estáticos no Cloudflare Workers**
+(`wrangler.jsonc`): não há código de Worker, então os acessos não são
+cobrados. O endereço é `gausify-orbit.<subdomínio>.workers.dev`; para um
+domínio próprio, veja o comentário de `routes` no `wrangler.jsonc`.
+
+- **Automático:** o `.github/workflows/web.yml` verifica cada PR (tipos,
+  testes, build e limite de tamanho) e publica a cada push na `main`. Ele
+  precisa do segredo `CLOUDFLARE_API_TOKEN` no repositório (token com o modelo
+  "Edit Cloudflare Workers"). O Brush em WASM é compilado no CI e fica em
+  cache até o commit fixo ou os patches mudarem.
+- **Manual:** `pnpm web:deploy` (build + `wrangler deploy`, com a conta do
+  `wrangler login`).
+
+Detalhes que o Workers impõe:
+
+- **25 MiB por arquivo:** o `.wasm` do ONNX Runtime (~27 MB) sai gzipado
+  (~7 MB) e o app descompacta no navegador (`web/ort-wasm-plugin.ts`).
+- **`web/public/_headers`:** cache imutável em `/assets`, `no-cache` no
+  `sw.js` e `Referrer-Policy: same-origin`. O Hugging Face responde 404 sem
+  CORS quando o Referer é um `*.workers.dev`, e o download do RMBG falharia;
+  o `segment.ts` também baixa o modelo sem Referer.
+- **Offline:** o service worker (`web/sw-plugin.ts`) guarda o build inteiro
+  na primeira visita e avisa quando há versão nova.
+
 ## Testes
 
 ```bash
