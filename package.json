@@ -10,7 +10,10 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
-    "dev:mock": "VITE_MOCK=1 vite --port 1430 --strictPort"
+    "dev:mock": "VITE_MOCK=1 vite --port 1430 --strictPort",
+    "web:wasm": "node scripts/build-brush-web.mjs",
+    "web:dev": "vite --config web/vite.config.ts",
+    "web:build": "vite build --config web/vite.config.ts"
   },
   "dependencies": {
     "@sparkjsdev/spark": "^2.3.1",
@@ -26,7 +29,9 @@
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@types/three": "^0.186.0",
+    "@types/wicg-file-system-access": "^2023.10.7",
     "@vitejs/plugin-react": "^6.0.2",
+    "@webgpu/types": "^0.1.74",
     "typescript": "~6.0.3",
     "vite": "^8.0.16"
   },

@@ -5,8 +5,9 @@ import { SparkRenderer, SplatFileType, SplatMesh } from "@sparkjsdev/spark";
 import { fileUrl, type SceneFrame } from "../lib/api";
 
 interface Props {
-  /** `label` substitui o rótulo padrão (ex.: arquivo exportado). */
-  splat: { path: string; iter: number | null; version: number; label?: string } | null;
+  /** `label` substitui o rótulo padrão (ex.: arquivo exportado); `url`, o
+   *  endereço derivado de `path` (ex.: blob gerado no navegador). */
+  splat: { path: string; iter: number | null; version: number; label?: string; url?: string } | null;
   frame: SceneFrame | null;
   placeholder?: React.ReactNode;
 }
@@ -201,7 +202,7 @@ export function Viewer({ splat, frame, placeholder }: Props) {
     setLoading(true);
     setLoadError(null);
     const fileType = splat.path.toLowerCase().endsWith(".sog") ? SplatFileType.PCSOGSZIP : SplatFileType.PLY;
-    const mesh = new SplatMesh({ url: fileUrl(splat.path, splat.version), fileType });
+    const mesh = new SplatMesh({ url: splat.url ?? fileUrl(splat.path, splat.version), fileType });
     mesh.initialized
       .then(() => {
         if (stale || !ctx.current) {

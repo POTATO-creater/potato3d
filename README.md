@@ -212,6 +212,55 @@ real; a exportação é simulada e devolve o `lastExport` gravado nele por
 `cli export`. Use uma pasta fora de `~/Downloads`/`~/Documents`: o macOS pode
 bloquear o acesso do Vite a elas e o servidor trava.
 
+## Protótipo web (treino no navegador)
+
+`web/` é um protótipo que roda **só o treino** no navegador: o Brush compilado
+para WebAssembly (bindings `brush-js`) treina na GPU via WebGPU, com prévias
+no mesmo visualizador Spark do app e download do `.ply` no fim. Frames,
+recorte e poses continuam no app desktop (ou em qualquer ferramenta que
+exporte COLMAP).
+
+```bash
+pnpm web:wasm           # clona o Brush num commit fixo, aplica web/brush/*.patch e compila (~5 min)
+pnpm web:dev            # http://localhost:1440
+```
+
+O `web:wasm` precisa de `rustup` e `wasm-pack`; instala sozinho um toolchain
+Rust 1.99 lado a lado (o Burn do Brush exige ≥ 1.95) sem mexer no `stable`.
+
+- **Entrada:** a pasta `dataset` (ou `dataset_alpha`) de um projeto do
+  SplatForge, ou qualquer export COLMAP com `images/` e `sparse/0`. No Chrome
+  e no Edge a pasta é lida direto (`showDirectoryPicker`); nos outros
+  navegadores é copiada para o OPFS. `?dataset=<url>` baixa um dataset servido
+  por HTTP (os nomes das imagens vêm do `images.bin`); em dev,
+  `WEB_FS_ANY=1 pnpm web:dev` e `?dataset=/@fs/<caminho absoluto>`.
+- **Navegador:** Chrome/Edge desktop com WebGPU e a extensão `subgroups`.
+- **Desempenho (M4, dataset sintético de 72 imagens 480×360, 3 mil passos,
+  SH 1):** 38 s no Chrome (~100 passos/s), contra 12 s do Brush nativo; PSNR
+  27,8 dB (nativo v0.3.0: 26,2 dB). O `.ply` sai no mesmo formato do export nativo.
+
+O que foi preciso consertar para o treino rodar (e rodar rápido) no navegador:
+
+- **Commit do Brush:** fixado antes do #546, que leva o kernel
+  `project_forward` a 12 storage buffers; o Chrome expõe só 10 por estágio
+  no Metal e o treino não roda no Mac.
+- **`enable subgroups;`:** o writer WGSL do naga (wgpu 30) usa as funções de
+  subgroup sem declarar a extensão, e o Chrome recusa os shaders. O
+  `web/src/brush.ts` acrescenta a diretiva antes de entregar o WGSL ao
+  navegador.
+- **Patch `web/brush/brush-js.patch`:**
+  - Construtores estáticos rodam uma vez só. Sem isso, o wasm-ld trata o
+    módulo como "command" e embrulha **toda** export (até `malloc`) para
+    rodar de novo os milhares de registros `inventory` do CubeCL a cada
+    chamada JS→WASM. O treino ficava ~25× mais lento (4 passos/s).
+  - Autotune do CubeCL em `Full`: nos outros níveis o Burn mede a vazão de
+    pico da GPU com um `sync` bloqueante, que dá panic no WASM no primeiro
+    reduce.
+  - `trainSteps` não consulta de novo um stream já encerrado (panic "async fn
+    resumed after completion" no fim do treino).
+  - `Training.exportPly()`: o mesmo export do Brush nativo (piso de escala
+    embutido, unidades do dataset restauradas).
+
 ## Testes
 
 ```bash
