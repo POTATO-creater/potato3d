@@ -8,6 +8,8 @@ import { join, relative, resolve, sep } from "node:path";
 import type { Plugin, ResolvedConfig } from "vite";
 
 const SW = "sw.js";
+// Regras do Cloudflare (web/public/_headers): lidas no deploy, nunca servidas.
+const NOT_SERVED = new Set([SW, "_headers", "_redirects"]);
 
 function walk(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
@@ -27,7 +29,7 @@ export function serviceWorker(template: string): Plugin {
       const out = resolve(config.root, config.build.outDir);
       const files = walk(out)
         .map((f) => relative(out, f).split(sep).join("/"))
-        .filter((f) => f !== SW && !f.endsWith(".map") && !f.startsWith("."))
+        .filter((f) => !NOT_SERVED.has(f) && !f.endsWith(".map") && !f.startsWith("."))
         .sort();
       // O código do próprio service worker também entra: mudar só ele já é versão nova.
       const hash = createHash("sha256").update(readFileSync(template));

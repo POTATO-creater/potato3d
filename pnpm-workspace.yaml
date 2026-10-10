@@ -1,3 +1,6 @@
 allowBuilds:
   # postinstall do protobufjs (dependência do onnxruntime-web) só confere versões
   protobufjs: false
+  # wrangler (deploy da versão web): instalam o binário de cada plataforma
+  esbuild: true
+  workerd: true

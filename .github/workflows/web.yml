@@ -1,0 +1,70 @@
+# Versão web: verificação a cada push e PR; publicação na Cloudflare
+# (wrangler.jsonc) quando a `main` anda. O app desktop sai pelo release.yml.
+
+name: web
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Dois pushes seguidos na `main` não podem publicar fora de ordem: o segundo
+# cancela o primeiro, e o que fica no ar é o commit mais novo.
+concurrency:
+  group: web-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Versão do pnpm vem do `packageManager` do package.json.
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Brush em WASM (web/pkg, fora do git). Compilar do zero leva vários
+      # minutos, então só acontece quando o commit fixo do Brush ou os patches
+      # mudam; o script instala sozinho o toolchain Rust que ele exige.
+      - id: brush
+        uses: actions/cache@v6
+        with:
+          path: web/pkg
+          key: brush-pkg-${{ hashFiles('scripts/build-brush-web.mjs', 'web/brush/*.patch') }}
+
+      - if: steps.brush.outputs.cache-hit != 'true'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack@0.15.0
+
+      - if: steps.brush.outputs.cache-hit != 'true'
+        run: pnpm web:wasm
+
+      - run: pnpm exec tsc --noEmit -p web
+
+      - run: pnpm test:web
+
+      # Compilar aqui é o que impede um build quebrado de só aparecer na hora
+      # de publicar, e numa PR não há publicação para descobrir.
+      - run: pnpm web:build
+
+      # O Workers recusa arquivos acima de 25 MiB. O .wasm do ONNX Runtime
+      # (~27 MB) sai gzipado (web/ort-wasm-plugin.ts); se uma atualização
+      # trouxer outro arquivo grande, o erro aparece aqui, não no deploy.
+      - name: Nenhum arquivo acima de 25 MiB
+        run: |
+          big=$(find dist-web -type f -size +25M)
+          if [ -n "$big" ]; then echo "Arquivos grandes demais para o Workers:"; echo "$big"; exit 1; fi
+
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          command: deploy

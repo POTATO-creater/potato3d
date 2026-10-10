@@ -1,0 +1,21 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "gausify-orbit",
+  "compatibility_date": "2026-10-10",
+
+  // A versão web é 100% estática: não há código de Worker, só os assets do
+  // `pnpm web:build` (dist-web/). Frames, recorte, poses, treino e exportação
+  // rodam no navegador, com WebGPU.
+  //
+  // `single-page-application` responde qualquer caminho desconhecido com o
+  // `index.html`, sem acordar Worker nenhum (assets estáticos não são cobrados).
+  // Limite do Workers: 25 MiB por arquivo (ver web/ort-wasm-plugin.ts).
+  "assets": {
+    "directory": "./dist-web",
+    "not_found_handling": "single-page-application"
+  },
+
+  // Sem `routes`, o endereço é `gausify-orbit.<subdomínio>.workers.dev`. Para um
+  // domínio próprio: "routes": [{ "pattern": "exemplo.com", "custom_domain": true }]
+  "workers_dev": true
+}
