@@ -274,7 +274,9 @@ faz o SfM sem o COLMAP, numa cópia das imagens no OPFS (a pasta original não
    preset + saltos 16/32/64, órbita fechada).
 3. **Verificação:** matriz fundamental por RANSAC (8 pontos normalizado).
 4. **Reconstrução incremental** num worker (`web/src/sfm/`): tracks por
-   union-find, par inicial com paralaxe ≥ 2°, PnP partindo da pose do frame
+   union-find, par inicial escolhido por paralaxe (≥ 2°) e número de pontos,
+   com até 3 tentativas em regiões diferentes da órbita se a primeira
+   registrar menos de 90% das câmeras, PnP partindo da pose do frame
    vizinho (com DLT + RANSAC de reserva), triangulação, BA local a cada frame
    e global periódico (Levenberg–Marquardt com complemento de Schur, Huber,
    focal compartilhada). No fim, BA com limiar decrescente reaproveita as
@@ -291,6 +293,28 @@ fundo):
 | Poses verdadeiras | — | — | — | — | — | — | 41,2 dB |
 
 PSNR: Brush web, 5 mil passos a 960 px, SH 1, 8 vistas de avaliação.
+
+Para repetir a medição (`scripts/web-bench/`, com `WEB_FS_ANY=1 pnpm web:dev`
+rodando):
+
+```bash
+python3 scripts/web-bench/synth-orbit.py /tmp/orbit 120 960 720
+```
+```bash
+node scripts/web-bench/headless.mjs poses "http://localhost:1440/?dataset=/@fs/tmp/orbit" --out /tmp/orbit-web
+```
+```bash
+python3 scripts/web-bench/eval-poses.py /tmp/orbit/gt.json /tmp/orbit-web/sparse/0
+```
+```bash
+node scripts/web-bench/headless.mjs train "http://localhost:1440/?dataset=/@fs/tmp/orbit-web" --steps 5000 --max-res 960
+```
+
+O `synth-orbit.py` gera um dataset já com as poses verdadeiras em `sparse/0`
+(treino de referência) e o `gt.json`; o `headless.mjs` roda o protótipo num
+Chrome headless (sem o throttling de abas ocultas) nos modos `poses`, `train`
+e `profile` (perfil de CPU do treino; com `pnpm web:wasm --profiling` sai com
+os nomes das funções do WASM).
 
 Ainda não foi testado em vídeos reais de IA (desfoque, pouca textura,
 elementos que se mexem), onde o SIFT reforçado e o mapeador global do COLMAP
