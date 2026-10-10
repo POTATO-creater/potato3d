@@ -1,13 +1,13 @@
 // Exportação fora da thread da interface: k-means, decimação e WebP de
 // milhões de gaussianas levam segundos.
 
-import type { ExportOptions } from "../../../src/lib/api";
+import type { ExportOptions, Msg } from "../../../src/lib/api";
 import { runExport } from "./run.ts";
 import { webpEncoder } from "./webp/index.ts";
 
 export type ExportRequest = { input: Blob; options: ExportOptions };
 export type ExportReply =
-  | { kind: "progress"; fraction: number; message: string }
+  | { kind: "progress"; fraction: number; message: Msg }
   | { kind: "done"; name: string; bytes: Uint8Array; stats: ReturnType<typeof runExport>["stats"] }
   | { kind: "error"; message: string };
 

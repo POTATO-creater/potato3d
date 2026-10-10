@@ -101,7 +101,7 @@ fn has_nvidia_gpu() -> bool {
 
 fn client() -> Result<reqwest::Client> {
     Ok(reqwest::Client::builder()
-        .user_agent(concat!("SplatForge/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("GausifyOrbit/", env!("CARGO_PKG_VERSION")))
         .build()?)
 }
 

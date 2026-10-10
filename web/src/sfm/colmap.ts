@@ -1,5 +1,5 @@
 // Grava o modelo no formato binário do COLMAP (cameras/images/points3D.bin),
-// que o Brush e o resto do SplatForge leem.
+// que o Brush e o resto do Gausify Orbit leem.
 
 import { quatFromMat } from "./linalg";
 import type { SfmModel } from "./reconstruct";

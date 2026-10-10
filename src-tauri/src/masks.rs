@@ -28,6 +28,8 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
+use crate::msg;
+
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum MaskMethod {
@@ -127,14 +129,14 @@ enum Msg {
 /// Roda `work` numa thread de bloqueio repassando progresso e log.
 async fn drive<T: Send + 'static>(
     work: impl FnOnce(Tx) -> Result<T> + Send + 'static,
-    on_progress: &mut impl FnMut(f32, &str),
+    on_progress: &mut impl FnMut(f32, crate::msg::Msg),
     on_log: &mut impl FnMut(&str),
 ) -> Result<T> {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let worker = tokio::task::spawn_blocking(move || work(tx));
     while let Some(msg) = rx.recv().await {
         match msg {
-            Msg::Progress(i, n) => on_progress(i as f32 / n.max(1) as f32, &format!("Recortando {i}/{n}")),
+            Msg::Progress(i, n) => on_progress(i as f32 / n.max(1) as f32, msg!("masks.cutting", i = i, n = n)),
             Msg::Log(l) => on_log(&l),
         }
     }
@@ -147,7 +149,7 @@ pub async fn run(
     images: &Path,
     masks: &Path,
     cancel: &CancellationToken,
-    mut on_progress: impl FnMut(f32, &str),
+    mut on_progress: impl FnMut(f32, crate::msg::Msg),
     mut on_log: impl FnMut(&str),
 ) -> Result<MaskStats> {
     if masks.exists() {
@@ -203,7 +205,7 @@ async fn run_ai(
     images: &Path,
     masks: &Path,
     cancel: &CancellationToken,
-    on_progress: &mut impl FnMut(f32, &str),
+    on_progress: &mut impl FnMut(f32, crate::msg::Msg),
     on_log: &mut impl FnMut(&str),
     no_subject: &mut u32,
 ) -> Result<String> {
@@ -243,7 +245,7 @@ async fn run_ai(
                 .and_then(|r| r.split_once('/'))
                 .and_then(|(i, n)| Some((i.parse::<u32>().ok()?, n.parse::<u32>().ok()?)))
             {
-                on_progress(i as f32 / n.max(1) as f32, &format!("Recortando {i}/{n}"));
+                on_progress(i as f32 / n.max(1) as f32, msg!("masks.cutting", i = i, n = n));
             } else if let Some(name) = line.strip_prefix("nosubject ") {
                 *no_subject += 1;
                 on_log(&format!("nenhum sujeito detectado em {name}; frame mantido inteiro"));

@@ -19,12 +19,14 @@ use rayon::prelude::*;
 use serde_json::json;
 
 use super::ply::{sh_coeffs, Splats};
+use crate::msg;
+use crate::msg::Msg;
 
 const KMEANS_ITERATIONS: usize = 8;
 const COARSE_CLUSTERS: usize = 256;
 const COARSE_SAMPLE: usize = 65_536;
 
-pub fn write(path: &Path, s: &Splats, mut progress: impl FnMut(f32, &str)) -> Result<u64> {
+pub fn write(path: &Path, s: &Splats, mut progress: impl FnMut(f32, &Msg)) -> Result<u64> {
     let n = s.count;
     if n == 0 {
         bail!("nenhuma gaussiana para exportar");
@@ -36,11 +38,11 @@ pub fn write(path: &Path, s: &Splats, mut progress: impl FnMut(f32, &str)) -> Re
     }
     let texels = width * height;
 
-    progress(0.0, "Ordenando (Morton)");
+    progress(0.0, &msg!("export.sorting"));
     let order = morton_order(&s.pos);
 
     // ---- quantização das escalas e das cores (codebooks de 256)
-    progress(0.1, "Quantizando escalas e cores");
+    progress(0.1, &msg!("export.quantizing"));
     let column = |src: &[f32], stride: usize, a: usize| -> Vec<f32> { src.iter().skip(a).step_by(stride).copied().collect() };
     let (scales_q, sh0_q) = rayon::join(
         || quantize_1d(&[column(&s.scale, 3, 0), column(&s.scale, 3, 1), column(&s.scale, 3, 2)], 256),
@@ -49,13 +51,13 @@ pub fn write(path: &Path, s: &Splats, mut progress: impl FnMut(f32, &str)) -> Re
 
     // ---- paleta SH
     let sh = if s.sh_degree > 0 {
-        progress(0.25, "Agrupando as bandas SH (k-means)");
+        progress(0.25, &msg!("export.clustering"));
         Some(encode_sh(s))
     } else {
         None
     };
 
-    progress(0.6, "Montando as texturas");
+    progress(0.6, &msg!("export.textures"));
     // ---- means: log, 16 bits em duas texturas
     let log_t = |v: f32| (v as f64).signum() * ((v as f64).abs() + 1.0).ln();
     let mut mins = [f64::INFINITY; 3];
@@ -111,7 +113,7 @@ pub fn write(path: &Path, s: &Splats, mut progress: impl FnMut(f32, &str)) -> Re
     ];
     let mut meta = json!({
         "version": 2,
-        "asset": { "generator": concat!("SplatForge ", env!("CARGO_PKG_VERSION")) },
+        "asset": { "generator": concat!("Gausify Orbit ", env!("CARGO_PKG_VERSION")) },
         "count": n,
         "means": { "mins": mins, "maxs": maxs, "files": ["means_l.webp", "means_u.webp"] },
         "scales": { "codebook": scales_q.centroids, "files": ["scales.webp"] },
@@ -130,13 +132,13 @@ pub fn write(path: &Path, s: &Splats, mut progress: impl FnMut(f32, &str)) -> Re
         });
     }
 
-    progress(0.7, "Comprimindo as texturas (WebP)");
+    progress(0.7, &msg!("export.compressing"));
     let encoded: Vec<Vec<u8>> = textures
         .par_iter()
         .map(|(_, rgba, w, h)| webp_lossless(rgba, *w, *h))
         .collect::<Result<_>>()?;
 
-    progress(0.95, "Gravando o .sog");
+    progress(0.95, &msg!("export.writingSog"));
     let file = std::fs::File::create(path)?;
     let mut zip = zip::ZipWriter::new(file);
     let opts = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);

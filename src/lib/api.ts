@@ -1,6 +1,14 @@
 export type Stage = "frames" | "masks" | "poses" | "train";
 export const STAGES: Stage[] = ["frames", "masks", "poses", "train"];
 
+/** Texto traduzível vindo do backend (ou do reducer): chave do catálogo `msg`
+ *  de src/i18n + parâmetros. Um parâmetro pode ser outra `Msg`. */
+export interface Msg {
+  key: string;
+  args?: Record<string, MsgArg>;
+}
+export type MsgArg = string | number | Msg;
+
 export interface Tools {
   ffmpeg: string | null;
   ffprobe: string | null;
@@ -181,11 +189,11 @@ export type TrainEvent =
 
 export type JobEvent =
   | { type: "stageStarted"; stage: Stage }
-  | { type: "progress"; stage: Stage; fraction: number; message: string }
+  | { type: "progress"; stage: Stage; fraction: number; message: Msg }
   | { type: "log"; stage: Stage; line: string }
   | { type: "framesReady"; frames: FrameInfo[] }
   | { type: "masksReady"; stats: MaskStats; dir: string }
-  | { type: "stageSkipped"; stage: Stage; reason: string }
+  | { type: "stageSkipped"; stage: Stage; reason: Msg }
   | { type: "posesReady"; stats: ModelStats }
   | { type: "train"; event: TrainEvent }
   | { type: "stageDone"; stage: Stage; seconds: number }
@@ -229,7 +237,7 @@ export interface Api {
   exportSplat(
     projectDir: string,
     options: ExportOptions,
-    onProgress: (p: { fraction: number; message: string }) => void,
+    onProgress: (p: { fraction: number; message: Msg }) => void,
   ): Promise<ExportStats>;
   /** `rmbg`: incluir o modelo RMBG-1.4 (só baixado quando escolhido). */
   installPlan(rmbg: boolean): Promise<InstallPlan>;

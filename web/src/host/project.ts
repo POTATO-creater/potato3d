@@ -131,7 +131,7 @@ async function datasetState(root: string, mapper: string, saved?: ProjectState):
 }
 
 /** Copia uma pasta escolhida no disco para o projeto: um projeto do
- *  SplatForge (dataset/ + masks/ + project.json) ou um dataset COLMAP
+ *  Gausify Orbit (dataset/ + masks/ + project.json) ou um dataset COLMAP
  *  (images/ + sparse/0 ou sparse/). */
 export async function importFolder(src: FileSystemDirectoryHandle, root: string): Promise<ProjectState> {
   const sub = async (d: FileSystemDirectoryHandle, path: string[]) => {
@@ -151,7 +151,7 @@ export async function importFolder(src: FileSystemDirectoryHandle, root: string)
     }
   }
   const images = await sub(dataset, ["images"]).catch(() => {
-    throw new Error(`"${src.name}" não tem images/ nem é uma pasta de projeto do SplatForge.`);
+    throw new Error(`"${src.name}" não tem images/ nem é uma pasta de projeto do Gausify Orbit.`);
   });
   const model = (await sub(dataset, ["sparse", "0"]).catch(() => null)) ?? (await sub(dataset, ["sparse"]).catch(() => null));
 

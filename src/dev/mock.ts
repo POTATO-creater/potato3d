@@ -50,9 +50,9 @@ async function plyInfo(path: string) {
 
 async function fakeExport(channel: Channel<any>, projectDir: string) {
   const project = await readJson<any>(`${projectDir}/project.json`);
-  const steps = ["Lendo o .ply", "Fundindo gaussianas parecidas", "Agrupando as bandas SH (k-means)", "Comprimindo as texturas (WebP)"];
+  const steps = ["export.readingPly", "export.merging", "export.clustering", "export.compressing"];
   for (let i = 0; i <= 20; i++) {
-    channel.onmessage({ fraction: i / 20, message: steps[Math.min(steps.length - 1, Math.floor(i / 6))] });
+    channel.onmessage({ fraction: i / 20, message: { key: steps[Math.min(steps.length - 1, Math.floor(i / 6))] } });
     await new Promise((r) => setTimeout(r, 70));
   }
   if (!project?.lastExport) throw new Error("projeto sem lastExport (rode `cli export` antes)");

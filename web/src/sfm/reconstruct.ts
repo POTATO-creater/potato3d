@@ -1,6 +1,7 @@
 // SfM incremental para vídeo orbital: verificação geométrica, tracks,
 // par inicial, registro por PnP, triangulação e bundle adjustment.
 
+import type { Msg } from "../../../src/lib/api";
 import { bundleAdjust } from "./ba";
 import {
   center,
@@ -50,7 +51,7 @@ export function reconstruct(
   imgs: ImageFeatures[],
   matches: PairMatches[],
   log: (s: string) => void,
-  progress: (frac: number, msg: string) => void,
+  progress: (frac: number, msg: Msg) => void,
 ): SfmModel {
   const N = imgs.length;
   const { width: W, height: H } = imgs[0];
@@ -354,7 +355,7 @@ export function reconstruct(
         lastGlobal = order.length;
         log(`BA global com ${order.length} câmeras: ${g.rmsBefore.toFixed(2)} → ${g.rmsAfter.toFixed(2)} px, f = ${f.toFixed(1)}`);
       }
-      progress(order.length / N, `Registradas ${order.length}/${N} câmeras`);
+      progress(order.length / N, { key: "poses.webRegistered", args: { i: order.length, n: N } });
       // uma imagem que falhou pode ter mais pontos agora
       if (failed.size && order.length % 5 === 0) failed.clear();
     }

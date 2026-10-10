@@ -155,7 +155,7 @@ export function writePly(s: Splats): Uint8Array {
   for (let i = 0; i < rl; i++) names.push(`f_rest_${i}`);
   names.push("opacity", "scale_0", "scale_1", "scale_2", "rot_0", "rot_1", "rot_2", "rot_3");
   const header = new TextEncoder().encode(
-    "ply\nformat binary_little_endian 1.0\ncomment Exported from SplatForge\n" +
+    "ply\nformat binary_little_endian 1.0\ncomment Exported from Gausify Orbit\n" +
       `element vertex ${s.count}\n` +
       names.map((n) => `property float ${n}\n`).join("") +
       "end_header\n",

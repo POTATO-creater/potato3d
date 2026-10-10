@@ -4,6 +4,7 @@ pub mod export;
 pub mod frames;
 pub mod installer;
 pub mod masks;
+pub mod msg;
 pub mod pipeline;
 pub mod proc;
 pub mod scene;
@@ -66,7 +67,7 @@ fn splat_info(path: String) -> CmdResult<export::SplatInfo> {
 #[derive(Clone, serde::Serialize)]
 struct ExportProgress {
     fraction: f32,
-    message: String,
+    message: msg::Msg,
 }
 
 /// Roda fora do runtime assíncrono: é CPU pura (rayon) e leva de décimos de
@@ -90,7 +91,7 @@ async fn export_splat(
             // ~15 atualizações por segundo bastam para a barra.
             if last.elapsed().as_millis() >= 66 || fraction >= 1.0 {
                 last = std::time::Instant::now();
-                let _ = on_progress.send(ExportProgress { fraction, message: message.to_string() });
+                let _ = on_progress.send(ExportProgress { fraction, message: message.clone() });
             }
         })
     })

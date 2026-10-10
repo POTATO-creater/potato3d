@@ -7,6 +7,7 @@
 // splat-transform: paleta de até 64k vetores (k-means em dois níveis),
 // quantizada num codebook de 256, e um rótulo de 16 bits por gaussiana.
 
+import type { Msg } from "../../../src/lib/api";
 import { restLen, shCoeffs, type Splats } from "./splats.ts";
 import { zipStore } from "./zip.ts";
 
@@ -17,7 +18,7 @@ const COARSE_SAMPLE = 65_536;
 /** RGBA → WebP sem perdas (alfa direto). */
 export type WebpEncoder = (rgba: Uint8Array, width: number, height: number) => Uint8Array;
 
-export function writeSog(s: Splats, webp: WebpEncoder, generator: string, progress: (f: number, msg: string) => void): Uint8Array {
+export function writeSog(s: Splats, webp: WebpEncoder, generator: string, progress: (f: number, msg: Msg) => void): Uint8Array {
   const n = s.count;
   if (n === 0) throw new Error("nenhuma gaussiana para exportar");
   const width = Math.max(Math.ceil(Math.sqrt(n) / 4) * 4, 4);
@@ -25,11 +26,11 @@ export function writeSog(s: Splats, webp: WebpEncoder, generator: string, progre
   if (width > 16383 || height > 16383) throw new Error(`gaussianas demais para o SOG (${n})`);
   const texels = width * height;
 
-  progress(0, "Ordenando (Morton)");
+  progress(0, { key: "export.sorting" });
   const order = mortonOrder(s.pos);
 
   // ---- quantização das escalas e das cores (codebooks de 256)
-  progress(0.1, "Quantizando escalas e cores");
+  progress(0.1, { key: "export.quantizing" });
   const column = (src: Float32Array, stride: number, a: number) => {
     const c = new Float32Array(src.length / stride);
     for (let i = 0; i < c.length; i++) c[i] = src[i * stride + a];
@@ -41,11 +42,11 @@ export function writeSog(s: Splats, webp: WebpEncoder, generator: string, progre
   // ---- paleta SH
   let sh: ShPalette | null = null;
   if (s.shDegree > 0) {
-    progress(0.25, "Agrupando as bandas SH (k-means)");
+    progress(0.25, { key: "export.clustering" });
     sh = encodeSh(s);
   }
 
-  progress(0.6, "Montando as texturas");
+  progress(0.6, { key: "export.textures" });
   // ---- means: log, 16 bits em duas texturas
   const logT = (v: number) => Math.sign(v) * Math.log(Math.abs(v) + 1);
   const mins = [Infinity, Infinity, Infinity], maxs = [-Infinity, -Infinity, -Infinity];
@@ -116,10 +117,10 @@ export function writeSog(s: Splats, webp: WebpEncoder, generator: string, progre
   const files: [string, Uint8Array][] = [];
   for (let k = 0; k < textures.length; k++) {
     const [name, rgba, w, h] = textures[k];
-    progress(0.7 + (0.25 * k) / textures.length, "Comprimindo as texturas (WebP)");
+    progress(0.7 + (0.25 * k) / textures.length, { key: "export.compressing" });
     files.push([name, webp(rgba, w, h)]);
   }
-  progress(0.95, "Gravando o .sog");
+  progress(0.95, { key: "export.writingSog" });
   files.push(["meta.json", new TextEncoder().encode(JSON.stringify(meta))]);
   return zipStore(files);
 }

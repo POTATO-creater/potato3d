@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, type InstallEvent, type InstallPlan, type Tools } from "../lib/api";
 import { installCommand } from "../lib/platform";
+import { useI18n } from "../i18n";
 
 type Missing = { name: string; key: "ffmpeg" | "colmap" | "brush" | "model" }[];
 
@@ -26,6 +27,10 @@ export function ToolsSetup({
   rmbg: boolean;
   onInstalled: () => void;
 }) {
+  const { t } = useI18n();
+  const tt = t.setup;
+  /** Modelos têm rótulo traduzido; ferramentas usam o nome que vem do backend. */
+  const pkgLabel = (id: string, label: string) => tt.packages[id] ?? label;
   const [plan, setPlan] = useState<InstallPlan | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
@@ -94,11 +99,11 @@ export function ToolsSetup({
     <div className="setup">
       <div className="setup-head">
         <div>
-          <strong>Primeiro uso: faltam ferramentas</strong>
+          <strong>{tt.title}</strong>
           <span className="muted"> · {missing.map((m) => m.name).join(", ")}</span>
         </div>
         <button className="link" onClick={onInstalled} disabled={running}>
-          Verificar de novo
+          {tt.recheck}
         </button>
       </div>
 
@@ -109,40 +114,35 @@ export function ToolsSetup({
               <ul>
                 {plan.packages.map((p) => (
                   <li key={p.id}>
-                    <span>{p.label}</span>
+                    <span>{pkgLabel(p.id, p.label)}</span>
                     <span className="mono muted">{mb(p.size)}</span>
                   </li>
                 ))}
               </ul>
               <p className="help">
-                {tools.os === "windows" &&
-                  (plan.cuda
-                    ? "GPU NVIDIA detectada: o COLMAP com CUDA usa a placa para extrair e casar features. "
-                    : "Nenhuma GPU NVIDIA detectada: o COLMAP roda na CPU. ")}
-                {plan.packages.some((p) => p.id === "rmbg") &&
-                  "O RMBG-1.4 é da BRIA AI, com licença só para uso não comercial. "}
-                Os arquivos são conferidos por SHA-256 e ficam{" "}
-                {tools.os === "web" ? "guardados no navegador" : "na pasta de dados do usuário"}.
+                {tools.os === "windows" && (plan.cuda ? tt.nvidia : tt.noNvidia)}
+                {plan.packages.some((p) => p.id === "rmbg") && tt.rmbgLicense}
+                {tools.os === "web" ? tt.storedInBrowser : tt.storedLocally}
               </p>
               <button className="btn-primary setup-btn" onClick={install}>
-                Instalar ferramentas ({mb(plan.totalBytes)})
+                {tt.install(mb(plan.totalBytes))}
               </button>
             </div>
           )}
-          {!plan && !planError && <p className="help">Verificando o que precisa ser baixado…</p>}
-          {planError && <p className="help bad">Não foi possível preparar a instalação: {planError}</p>}
+          {!plan && !planError && <p className="help">{tt.checking}</p>}
+          {planError && <p className="help bad">{tt.planError(planError)}</p>}
 
           {Object.keys(pkgs).length > 0 && (
             <div className="setup-progress">
               {Object.entries(pkgs).map(([id, p]) => (
                 <div key={id} className="setup-row">
                   <div className="setup-row-head">
-                    <span>{p.label}</span>
+                    <span>{pkgLabel(id, p.label)}</span>
                     <span className="mono muted">
-                      {p.phase === "waiting" && "na fila"}
+                      {p.phase === "waiting" && tt.queued}
                       {p.phase === "download" && `${mb(p.done)} / ${mb(p.total)}`}
-                      {p.phase === "extract" && "extraindo…"}
-                      {p.phase === "done" && "pronto"}
+                      {p.phase === "extract" && tt.extracting}
+                      {p.phase === "done" && tt.ready}
                     </span>
                   </div>
                   <div className="bar">
@@ -155,21 +155,21 @@ export function ToolsSetup({
               ))}
               {running && (
                 <button className="btn-sm" onClick={() => api.cancelInstall()}>
-                  Cancelar
+                  {t.common.cancel}
                 </button>
               )}
             </div>
           )}
           {tools.os !== "web" && missing.some((m) => m.key === "brush") && (
             <p className="help">
-              O Brush deveria vir junto com o app. Em desenvolvimento, rode <code>pnpm setup:tools</code>.
+              {tt.brushDev} <code>pnpm setup:tools</code>.
             </p>
           )}
           {brewTools.length > 0 && (
             <div className="setup-cmds">
               {brewTools.map((m) => (
                 <span key={m.name}>
-                  {m.name} → <code>{installCommand(m.key, tools.os)}</code>
+                  {m.name} → <code>{installCommand(t, m.key, tools.os)}</code>
                 </span>
               ))}
             </div>
@@ -181,10 +181,10 @@ export function ToolsSetup({
             .filter((m) => m.key !== "model")
             .map((m) => (
               <span key={m.name}>
-                {m.name} → <code>{installCommand(m.key, tools.os)}</code>
+                {m.name} → <code>{installCommand(t, m.key, tools.os)}</code>
               </span>
             ))}
-          {macMasker && <span>O recortador (Vision) vem com o app e exige macOS 14 ou superior.</span>}
+          {macMasker && <span>{tt.visionNote}</span>}
         </div>
       )}
       {error && <pre className="setup-error">{error}</pre>}

@@ -164,7 +164,9 @@ await send("Runtime.enable");
 await send("Page.enable");
 await send("Page.navigate", { url: new URL(url).origin });
 await sleep(1000);
-await evaluate(`localStorage.setItem('splatforge.settings.v3', ${JSON.stringify(JSON.stringify({ preset: "custom", settings }))});
+// Os seletores abaixo usam os textos em pt-BR.
+await evaluate(`localStorage.setItem('splatforge.locale.v1', 'pt-BR');
+  localStorage.setItem('splatforge.settings.v3', ${JSON.stringify(JSON.stringify({ preset: "custom", settings }))});
   localStorage.setItem('splatforge.masks.v1', ${JSON.stringify(JSON.stringify(masks))});
   localStorage.setItem('splatforge.export.v1', ${JSON.stringify(opt("export", "{}"))})`);
 await send("Page.navigate", { url });

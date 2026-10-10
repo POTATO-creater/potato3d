@@ -780,6 +780,10 @@ button:disabled {
   color: var(--good);
   font-size: 12px;
 }
+.lang-select {
+  width: 150px;
+  flex: none;
+}
 
 .banner {
   margin: 10px 16px 0;

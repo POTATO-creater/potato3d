@@ -5,6 +5,7 @@ import { Field, NumField, Segmented, Select, Toggle } from "./fields";
 import { VideoPlayer } from "./VideoPlayer";
 import { MasksPanel } from "./MasksPanel";
 import { basename, fileManager, type Os } from "../lib/platform";
+import { useI18n } from "../i18n";
 
 interface Props {
   os: Os | undefined;
@@ -36,6 +37,8 @@ interface Props {
 const fmtTime = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, "0")}`;
 
 export function Sidebar(p: Props) {
+  const { t } = useI18n();
+  const ts = t.sidebar;
   const videoEl = useRef<HTMLVideoElement>(null);
   // No web os projetos ficam no armazenamento do navegador e as poses saem
   // do SfM próprio (sem as opções do COLMAP).
@@ -51,15 +54,15 @@ export function Sidebar(p: Props) {
     <aside className="sidebar">
       <div className="brand" data-tauri-drag-region>
         <span className="brand-mark" aria-hidden />
-        SplatForge
+        Gausify Orbit
       </div>
 
       <div className="sidebar-scroll">
         <section className="panel">
           <header className="panel-head">
-            <h2>Vídeo</h2>
+            <h2>{ts.video}</h2>
             <button className="link" onClick={p.onPickVideo} disabled={locked}>
-              {p.videoPath ? "Trocar…" : "Escolher…"}
+              {p.videoPath ? ts.changeVideo : ts.chooseVideo}
             </button>
           </header>
 
@@ -89,7 +92,7 @@ export function Sidebar(p: Props) {
               )}
               <div className="trim">
                 <div className="trim-row">
-                  <span className="trim-label">Trecho</span>
+                  <span className="trim-label">{ts.trim}</span>
                   <span className="mono">
                     {fmtTime(p.trim.start)} → {fmtTime(end)}
                   </span>
@@ -104,7 +107,7 @@ export function Sidebar(p: Props) {
                       p.onTrim({ start: t, end: p.trim.end != null && p.trim.end <= t ? null : p.trim.end });
                     }}
                   >
-                    Início aqui
+                    {ts.startHere}
                   </button>
                   <button
                     className="btn-sm"
@@ -114,51 +117,48 @@ export function Sidebar(p: Props) {
                       if (t > p.trim.start) p.onTrim({ ...p.trim, end: t });
                     }}
                   >
-                    Fim aqui
+                    {ts.endHere}
                   </button>
                   <button
                     className="btn-sm ghost"
                     disabled={locked || (p.trim.start === 0 && p.trim.end == null)}
                     onClick={() => p.onTrim({ start: 0, end: null })}
                   >
-                    Vídeo todo
+                    {ts.wholeVideo}
                   </button>
                 </div>
-                <p className="help">
-                  Arraste as alças laranja na linha do tempo ou use os botões. Use só o trecho em que o objeto continua
-                  consistente: vídeo de IA costuma "derreter" no fim da órbita.
-                </p>
+                <p className="help">{ts.trimHelp}</p>
               </div>
             </>
           ) : (
             <button className="dropzone" onClick={p.onPickVideo}>
-              <strong>Arraste um vídeo orbital aqui</strong>
-              <span>ou clique para escolher (.mp4, .mov, .webm)</span>
+              <strong>{ts.dropTitle}</strong>
+              <span>{ts.dropHint}</span>
             </button>
           )}
         </section>
 
         <section className="panel">
           <header className="panel-head">
-            <h2>Projeto</h2>
+            <h2>{ts.project}</h2>
             <span className="panel-actions">
               {!web && (
                 <button className="link" onClick={p.onRevealProject} disabled={!p.projectDir}>
-                  {fileManager(p.os)}
+                  {fileManager(t, p.os)}
                 </button>
               )}
               <button
                 className="link"
                 onClick={p.onPickProject}
                 disabled={locked || !p.videoPath}
-                title={web ? "Importa uma pasta de projeto do SplatForge ou um dataset COLMAP (images/ + sparse/0)" : undefined}
+                title={web ? ts.importTitle : undefined}
               >
-                {web ? "Importar…" : "Alterar…"}
+                {web ? ts.importProject : ts.changeProject}
               </button>
             </span>
           </header>
           <div className="path" title={p.projectDir ?? ""}>
-            {p.projectDir ?? "Escolha um vídeo primeiro"}
+            {p.projectDir ?? ts.pickVideoFirst}
           </div>
         </section>
 
@@ -166,8 +166,8 @@ export function Sidebar(p: Props) {
 
         <section className="panel">
           <header className="panel-head">
-            <h2>Qualidade</h2>
-            {p.preset === "custom" && <span className="badge">personalizado</span>}
+            <h2>{ts.quality}</h2>
+            {p.preset === "custom" && <span className="badge">{ts.custom}</span>}
           </header>
           <div className="presets">
             {PRESETS.map((pr) => (
@@ -177,100 +177,94 @@ export function Sidebar(p: Props) {
                 disabled={locked}
                 onClick={() => p.onPreset(pr.id)}
               >
-                <span className="preset-label">{pr.label}</span>
-                <span className="preset-hint">{pr.hint}</span>
+                <span className="preset-label">{t.presets[pr.id].label}</span>
+                <span className="preset-hint">{t.presets[pr.id].hint}</span>
               </button>
             ))}
           </div>
 
           <details className="advanced">
-            <summary>Parâmetros avançados</summary>
+            <summary>{ts.advanced}</summary>
             <fieldset disabled={locked}>
-              <h3>Frames</h3>
+              <h3>{ts.frames}</h3>
               <div className="grid2">
-                <NumField label="Frames" value={s.frames.targetFrames} min={20} max={600} step={10}
+                <NumField label={ts.frames} value={s.frames.targetFrames} min={20} max={600} step={10}
                   onChange={(v) => set("frames", { targetFrames: v })} />
-                <NumField label="Lado máx." value={s.frames.maxSide} min={480} max={3840} step={160} suffix="px"
+                <NumField label={ts.maxSide} value={s.frames.maxSide} min={480} max={3840} step={160} suffix="px"
                   onChange={(v) => set("frames", { maxSide: v })} />
-                <NumField label="Candidatos/frame" hint="escolhe o mais nítido" value={s.frames.oversample} min={1} max={8}
+                <NumField label={ts.candidates} hint={ts.candidatesHint} value={s.frames.oversample} min={1} max={8}
                   onChange={(v) => set("frames", { oversample: v })} />
               </div>
 
-              <h3>{web ? "Poses" : "Poses (COLMAP)"}</h3>
+              <h3>{web ? ts.poses : ts.posesColmap}</h3>
               {!web && (
               <Field
-                label="Features"
-                hint={
-                  s.poses.features === "sift"
-                    ? "se registrar < 95% das câmeras, repete com o reforçado"
-                    : s.poses.features === "siftPlus"
-                      ? "acha pontos em cabelo, pele e fundo desfocado (~2× o tempo)"
-                      : "registra bem, mas ~10× mais lento na CPU"
-                }
+                label={ts.features}
+                hint={ts.featuresHint[s.poses.features]}
               >
                 <Select
                   value={s.poses.features}
                   onChange={(features) => set("poses", { features })}
                   options={[
-                    { value: "sift", label: "SIFT (rápido)" },
-                    { value: "siftPlus", label: "SIFT reforçado", hint: "~2× o tempo" },
-                    { value: "aliked", label: "ALIKED + LightGlue", hint: "~10× mais lento na CPU" },
+                    { value: "sift", ...ts.featureOptions.sift },
+                    { value: "siftPlus", ...ts.featureOptions.siftPlus },
+                    { value: "aliked", ...ts.featureOptions.aliked },
                   ]}
                 />
               </Field>
               )}
               <div className="grid2">
-                <NumField label="Vizinhos casados" value={s.poses.matchWindow} min={3} max={40}
+                <NumField label={ts.matchWindow} value={s.poses.matchWindow} min={3} max={40}
                   onChange={(v) => set("poses", { matchWindow: v })} />
                 {!web && (
-                <Field label="Câmera">
+                <Field label={ts.camera}>
                   <Select
                     value={s.poses.cameraModel}
                     onChange={(cameraModel) => set("poses", { cameraModel })}
                     options={[
-                      { value: "SIMPLE_PINHOLE", label: "Pinhole simples" },
-                      { value: "PINHOLE", label: "Pinhole (fx ≠ fy)" },
+                      { value: "SIMPLE_PINHOLE", label: ts.simplePinhole },
+                      { value: "PINHOLE", label: ts.pinhole },
                     ]}
                   />
                 </Field>
                 )}
               </div>
-              <Toggle label="Órbita fechada (360°)" hint="casa o fim com o começo" checked={s.poses.closedLoop}
+              <Toggle label={ts.closedLoop} hint={ts.closedLoopHint} checked={s.poses.closedLoop}
                 onChange={(v) => set("poses", { closedLoop: v })} />
               {!web && (
-                <Toggle label="Forçar órbita plana" hint="câmeras na mesma altura; só para vídeos que giram em nível"
+                <Toggle label={ts.flatOrbit} hint={ts.flatOrbitHint}
                   checked={s.poses.flatOrbit ?? false}
                   onChange={(v) => set("poses", { flatOrbit: v })} />
               )}
 
-              <h3>Treino (Brush)</h3>
+              <h3>{ts.training}</h3>
               <div className="grid2">
-                <NumField label="Passos" value={s.train.totalSteps} min={1000} max={100000} step={1000}
+                <NumField label={ts.steps} value={s.train.totalSteps} min={1000} max={100000} step={1000}
                   onChange={(v) => set("train", { totalSteps: v })} />
-                <NumField label="Grau SH" hint="0–3" value={s.train.shDegree} min={0} max={3}
+                <NumField label={ts.shDegree} hint="0–3" value={s.train.shDegree} min={0} max={3}
                   onChange={(v) => set("train", { shDegree: v })} />
-                <NumField label="Máx. splats" value={s.train.maxSplats / 1e6} min={0.1} max={10} step={0.1} suffix="M"
+                <NumField label={ts.maxSplats} value={s.train.maxSplats / 1e6} min={0.1} max={10} step={0.1} suffix="M"
                   onChange={(v) => set("train", { maxSplats: Math.round(v * 1e6) })} />
-                <NumField label="Resolução máx." value={s.train.maxResolution} min={480} max={3840} step={160} suffix="px"
+                <NumField label={ts.maxResolution} value={s.train.maxResolution} min={480} max={3840} step={160} suffix="px"
                   onChange={(v) => set("train", { maxResolution: v })} />
-                <NumField label="Prévia a cada" value={s.train.exportEvery} min={500} max={20000} step={500} suffix="passos"
+                <NumField label={ts.previewEvery} value={s.train.exportEvery} min={500} max={20000} step={500} suffix={ts.stepsSuffix}
                   onChange={(v) => set("train", { exportEvery: v })} />
               </div>
               <Toggle
-                label="Perda SSIM"
-                hint="detalhes um pouco mais finos, mas ~3× mais lento no Mac"
+                label={ts.ssim}
+                hint={ts.ssimHint}
                 checked={s.train.ssimWeight > 0}
                 onChange={(v) => set("train", { ssimWeight: v ? 0.2 : 0 })}
               />
               <Toggle
-                label="Suavizar áreas não filmadas"
-                hint="menos riscos e cores estranhas no topo; −1,3 dB de detalhe"
+                label={ts.smooth}
+                hint={ts.smoothHint}
                 checked={s.train.scaleLossWeight != null}
                 onChange={(v) => set("train", { scaleLossWeight: v ? 1e-6 : undefined })}
               />
               <Toggle
-                label="Medir qualidade (PSNR)"
-                hint="separa 1 a cada 16 frames para avaliação"
+                label={ts.psnr}
+                hint={ts.psnrHint}
                 checked={s.train.evalSplitEvery > 0}
                 onChange={(v) => set("train", { evalSplitEvery: v ? 16 : 0 })}
               />
@@ -282,31 +276,31 @@ export function Sidebar(p: Props) {
       </div>
 
       <footer className="run">
-        <Field label="Executar a partir de">
+        <Field label={ts.runFrom}>
           <Segmented
             value={p.fromStage}
             onChange={p.onFromStage}
             disabled={locked}
             options={[
-              { value: "frames", label: "Frames" },
+              { value: "frames", label: t.stages.frames },
               {
                 value: "masks",
-                label: "Recorte",
+                label: t.stages.masks,
                 disabled: !p.available.masks || !p.masks.enabled,
-                title: p.masks.enabled ? "Requer frames extraídos" : "Ative o recorte do sujeito",
+                title: p.masks.enabled ? ts.needsFrames : ts.enableMasks,
               },
-              { value: "poses", label: "Poses", disabled: !p.available.poses, title: "Requer frames extraídos" },
-              { value: "train", label: "Treino", disabled: !p.available.train, title: "Requer poses (e recortes, se ativados)" },
+              { value: "poses", label: t.stages.poses, disabled: !p.available.poses, title: ts.needsFrames },
+              { value: "train", label: t.stages.train, disabled: !p.available.train, title: ts.needsPoses },
             ]}
           />
         </Field>
         {p.running ? (
           <button className="btn-primary danger" onClick={p.onCancel}>
-            Cancelar
+            {t.common.cancel}
           </button>
         ) : (
           <button className="btn-primary" onClick={p.onRun} disabled={!p.canRun}>
-            Gerar splat
+            {ts.run}
           </button>
         )}
       </footer>

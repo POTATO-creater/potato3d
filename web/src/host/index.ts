@@ -180,7 +180,7 @@ export const webHost: Host = {
     const file = await pickFile(["video/*", ...extensions.map((e) => `.${e}`)].join(","));
     return file ? addVideo(file) : null;
   },
-  /** "Importar…": copia uma pasta de projeto do SplatForge ou um dataset
+  /** "Importar…": copia uma pasta de projeto do Gausify Orbit ou um dataset
    *  COLMAP para um projeto no navegador. */
   async pickFolder() {
     if (!("showDirectoryPicker" in window)) {

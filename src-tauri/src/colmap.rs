@@ -18,8 +18,10 @@ use tokio::process::Command;
 use tokio_util::sync::CancellationToken;
 
 use crate::proc::{run_capture, run_streaming};
+use crate::msg;
+use crate::msg::Msg;
 
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum Features {
     /// SIFT padrão: o mais rápido na CPU.
@@ -229,7 +231,7 @@ async fn attempt(
     opts: &PoseOptions,
     features: Features,
     cancel: &CancellationToken,
-    on_progress: &mut impl FnMut(f32, &str),
+    on_progress: &mut impl FnMut(f32, Msg),
     on_log: &mut impl FnMut(&str),
 ) -> Result<Option<Best>> {
     if dir.exists() {
@@ -237,10 +239,9 @@ async fn attempt(
     }
     std::fs::create_dir_all(dir)?;
     let db = dir.join("database.db");
-    let label = features.label();
 
     // 1. Features
-    on_progress(0.0, &format!("Extraindo features ({label})"));
+    on_progress(0.0, msg!("poses.extracting", features = features));
     let mut cmd = base(colmap, "feature_extractor");
     cmd.arg("--database_path").arg(&db)
         .arg("--image_path").arg(images)
@@ -255,7 +256,7 @@ async fn attempt(
         let l = strip_glog(l);
         if l.starts_with("Processed file") {
             if let Some((i, n)) = bracket_progress(l) {
-                on_progress(0.4 * i as f32 / n as f32, &format!("Extraindo features ({label}) {i}/{n}"));
+                on_progress(0.4 * i as f32 / n as f32, msg!("poses.extractingN", features = features, i = i, n = n));
             }
         } else if !l.starts_with(' ') {
             on_log(l);
@@ -267,7 +268,7 @@ async fn attempt(
     // 2. Matching circular
     let pairs_path = dir.join("pairs.txt");
     let n_pairs = write_pairs(images, &pairs_path, opts.match_window, opts.closed_loop)?;
-    on_progress(0.4, &format!("Casando {n_pairs} pares"));
+    on_progress(0.4, msg!("poses.matching", pairs = n_pairs));
     let mut cmd = base(colmap, "matches_importer");
     cmd.arg("--database_path").arg(&db)
         .arg("--match_list_path").arg(&pairs_path)
@@ -279,7 +280,7 @@ async fn attempt(
         if l.starts_with("Processing block") {
             if let Some((i, n)) = bracket_progress(l) {
                 let f = (i - 1) as f32 / n as f32;
-                on_progress(0.4 + 0.45 * f, &format!("Casando {n_pairs} pares (bloco {i}/{n})"));
+                on_progress(0.4 + 0.45 * f, msg!("poses.matchingBlock", pairs = n_pairs, i = i, n = n));
             }
         }
         on_log(l);
@@ -288,7 +289,7 @@ async fn attempt(
     .context("falha no matching")?;
 
     // 3. Calibração do grafo de vistas (melhora o foco inicial do mapeador global)
-    on_progress(0.85, "Calibrando grafo de vistas");
+    on_progress(0.85, msg!("poses.calibrating"));
     let mut cmd = base(colmap, "view_graph_calibrator");
     cmd.arg("--database_path").arg(&db);
     if let Err(e) = run_streaming(cmd, cancel, |l| on_log(strip_glog(l))).await {
@@ -299,7 +300,7 @@ async fn attempt(
     }
 
     // 4. Mapeador global
-    on_progress(0.9, "Reconstruindo (mapeador global)");
+    on_progress(0.9, msg!("poses.globalMapper"));
     let global_dir = dir.join("sparse_global");
     std::fs::create_dir_all(&global_dir)?;
     let mut cmd = base(colmap, "global_mapper");
@@ -354,7 +355,7 @@ pub async fn run(
     paths: Paths<'_>,
     opts: &PoseOptions,
     cancel: &CancellationToken,
-    mut on_progress: impl FnMut(f32, &str),
+    mut on_progress: impl FnMut(f32, Msg),
     mut on_log: impl FnMut(&str),
 ) -> Result<ModelStats> {
     let Paths { colmap, images, work, model_out, use_gpu, masks } = paths;
@@ -387,7 +388,7 @@ pub async fn run(
             &retry_opts,
             Features::SiftPlus,
             cancel,
-            &mut |f, m| on_progress(f, &format!("2ª tentativa · {m}")),
+            &mut |f, m| on_progress(f, msg!("poses.retry", step = m)),
             &mut on_log,
         )
         .await?;
@@ -400,7 +401,7 @@ pub async fn run(
 
     // Fallback: incremental, mais lento porém mais tolerante.
     if ratio(&best) < 0.6 {
-        on_progress(0.95, "Poucas câmeras registradas; tentando mapeador incremental");
+        on_progress(0.95, msg!("poses.incremental"));
         let inc_dir = work.join("sparse_incremental");
         std::fs::create_dir_all(&inc_dir)?;
         let mut cmd = base(colmap, "mapper");
@@ -411,7 +412,7 @@ pub async fn run(
         run_streaming(cmd, cancel, |l| {
             let l = strip_glog(l);
             if let Some(rest) = l.strip_prefix("Registering image #") {
-                on_progress(0.95, &format!("Registrando imagem #{rest}"));
+                on_progress(0.95, msg!("poses.registering", image = rest));
             }
             on_log(l);
         })
@@ -441,7 +442,7 @@ pub async fn run(
     let mut label = format!("{mapper} · {}", features.label());
     let mut err = err;
     if opts.flat_orbit {
-        on_progress(0.98, "Forçando órbita plana");
+        on_progress(0.98, msg!("poses.flattening"));
         match flatten(colmap, work, model_out, cancel, &mut on_log).await {
             Ok((dev, e)) => {
                 on_log(&format!("órbita plana: maior desvio de altura corrigido {:.2}% do raio", dev * 100.0));
@@ -453,7 +454,7 @@ pub async fn run(
         }
     }
 
-    on_progress(1.0, &format!("Poses prontas · {}", features.label()));
+    on_progress(1.0, msg!("poses.ready", features = features));
     Ok(ModelStats {
         registered,
         total,

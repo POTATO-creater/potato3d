@@ -13,7 +13,9 @@ use crate::brush::{self, TrainEvent, TrainOptions};
 use crate::colmap::{self, ModelStats, PoseOptions};
 use crate::export::{self, ExportOptions, ExportStats};
 use crate::frames::{self, FrameInfo, FrameOptions, VideoInfo};
-use crate::masks::{self, MaskOptions, MaskStats};
+use crate::masks::{self, MaskMethod, MaskOptions, MaskStats};
+use crate::msg;
+use crate::msg::Msg;
 use crate::proc::is_cancelled;
 use crate::tools::{install_hint, Tools};
 
@@ -43,13 +45,13 @@ pub struct JobConfig {
 #[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum JobEvent {
     StageStarted { stage: Stage },
-    Progress { stage: Stage, fraction: f32, message: String },
+    Progress { stage: Stage, fraction: f32, message: Msg },
     Log { stage: Stage, line: String },
     FramesReady { frames: Vec<FrameInfo> },
     MasksReady { stats: MaskStats, dir: String },
     PosesReady { stats: ModelStats },
     /// Etapa pulada (desativada ou resultado anterior reaproveitado).
-    StageSkipped { stage: Stage, reason: String },
+    StageSkipped { stage: Stage, reason: Msg },
     Train { event: TrainEvent },
     StageDone { stage: Stage, seconds: f64 },
     Finished { ply: String, seconds: f64 },
@@ -156,7 +158,7 @@ impl<'a> Reporter<'a> {
         emit(JobEvent::StageStarted { stage });
         Self { emit, stage, last: (Instant::now() - Duration::from_secs(1)).into() }
     }
-    fn progress(&self, fraction: f32, message: &str) {
+    fn progress(&self, fraction: f32, message: Msg) {
         {
             let mut last = self.last.lock().unwrap();
             if fraction < 1.0 && last.elapsed() < Duration::from_millis(66) {
@@ -167,7 +169,7 @@ impl<'a> Reporter<'a> {
         (self.emit)(JobEvent::Progress {
             stage: self.stage,
             fraction,
-            message: message.to_string(),
+            message,
         });
     }
     fn log(&self, line: &str) {
@@ -207,7 +209,7 @@ async fn run_inner(
         let ffprobe = Tools::require(&tools.ffprobe, "ffprobe", install_hint("ffmpeg"))?;
         let rep = Reporter::new(emit, Stage::Frames);
 
-        rep.progress(0.0, "Lendo vídeo");
+        rep.progress(0.0, msg!("frames.reading"));
         let info: VideoInfo = frames::probe(&ffprobe, &video).await?;
         rep.log(&format!(
             "{}x{} @ {:.2} fps, {:.1}s, {}",
@@ -222,7 +224,7 @@ async fn run_inner(
             &cfg.frames,
             &raw,
             cancel,
-            |f| rep.progress(0.6 * f, "Decodificando vídeo"),
+            |f| rep.progress(0.6 * f, msg!("frames.decoding")),
             |l| rep.log(l),
         )
         .await?;
@@ -239,13 +241,13 @@ async fn run_inner(
                     progress_emit(JobEvent::Progress {
                         stage: Stage::Frames,
                         fraction: 0.6 + 0.4 * f,
-                        message: "Medindo nitidez".into(),
+                        message: msg!("frames.sharpness"),
                     });
                 }
             })
         })
         .await??;
-        rep.progress(1.0, &format!("{} frames selecionados", picked.len()));
+        rep.progress(1.0, msg!("frames.selected", n = picked.len()));
 
         // Etapas seguintes ficam inválidas.
         let _ = std::fs::remove_dir_all(layout.dataset().join("sparse"));
@@ -269,16 +271,23 @@ async fn run_inner(
             *current = Some(Stage::Masks);
             let t0 = Instant::now();
             let rep = Reporter::new(emit, Stage::Masks);
-            rep.progress(0.0, "Detectando o sujeito");
+            rep.progress(0.0, msg!("masks.detecting"));
             let stats = masks::run(tools, &cfg.masks, &layout.images(), &layout.masks(), cancel, |f, m| rep.progress(f, m), |l| rep.log(l)).await?;
-            rep.progress(1.0, &format!("{} recortes · {}", stats.count, stats.backend));
+            rep.progress(
+                1.0,
+                if cfg.masks.method == MaskMethod::Chroma {
+                    msg!("masks.doneChroma", n = stats.count)
+                } else {
+                    msg!("masks.done", n = stats.count, backend = stats.backend)
+                },
+            );
             state.masks = Some(stats.clone());
             state.masks_dir = Some(layout.masks().to_string_lossy().into_owned());
             layout.save(&state)?;
             emit(JobEvent::MasksReady { stats, dir: layout.masks().to_string_lossy().into_owned() });
             emit(JobEvent::StageDone { stage: Stage::Masks, seconds: t0.elapsed().as_secs_f64() });
         } else {
-            emit(JobEvent::StageSkipped { stage: Stage::Masks, reason: "Recorte desativado".into() });
+            emit(JobEvent::StageSkipped { stage: Stage::Masks, reason: msg!("masks.disabled") });
         }
     }
     if cfg.masks.enabled && !masks_ready(&state) {
@@ -292,7 +301,7 @@ async fn run_inner(
         && layout.model().join("images.bin").exists()
         && state.poses.is_some();
     if reuse_poses {
-        emit(JobEvent::StageSkipped { stage: Stage::Poses, reason: "Poses anteriores reaproveitadas".into() });
+        emit(JobEvent::StageSkipped { stage: Stage::Poses, reason: msg!("poses.reused") });
     } else if cfg.from_stage <= Stage::Poses {
         *current = Some(Stage::Poses);
         let t0 = Instant::now();
@@ -337,7 +346,7 @@ async fn run_inner(
     let rep = Reporter::new(emit, Stage::Train);
     let total = cfg.train.total_steps.max(1);
     let train_dataset = if cfg.masks.enabled {
-        rep.progress(0.0, "Montando frames com fundo transparente");
+        rep.progress(0.0, msg!("train.alphaDataset"));
         let (dataset, masks_dir, out) = (layout.dataset(), layout.masks(), layout.alpha_dataset());
         let despill = cfg.masks.despill.then_some(cfg.masks.despill_strength);
         let key = tokio::task::spawn_blocking(move || masks::build_alpha_dataset(&dataset, &masks_dir, &out, despill)).await??;
@@ -351,7 +360,7 @@ async fn run_inner(
         let _ = std::fs::remove_dir_all(layout.alpha_dataset());
         layout.dataset()
     };
-    rep.progress(0.0, "Carregando dataset na GPU");
+    rep.progress(0.0, msg!("train.loading"));
     let mut last_psnr = None;
     let last_ply = brush::run(
         &brush_bin,
@@ -361,10 +370,9 @@ async fn run_inner(
         cancel,
         |ev| {
             match &ev {
-                TrainEvent::Step { iter, splats } => rep.progress(
-                    *iter as f32 / total as f32,
-                    &format!("Passo {iter}/{total} · {} splats", fmt_count(*splats)),
-                ),
+                TrainEvent::Step { iter, splats } => {
+                    rep.progress(*iter as f32 / total as f32, msg!("train.step", iter = iter, total = total, splats = splats))
+                }
                 TrainEvent::Eval { psnr, .. } => last_psnr = Some(*psnr),
                 TrainEvent::Snapshot { .. } => {}
             }
@@ -376,7 +384,7 @@ async fn run_inner(
 
     let final_ply = layout.final_ply();
     std::fs::copy(&last_ply, &final_ply)?;
-    rep.progress(1.0, "Treino concluído");
+    rep.progress(1.0, msg!("train.done"));
     let ply = final_ply.to_string_lossy().into_owned();
     state.final_ply = Some(ply.clone());
     state.last_psnr = last_psnr;
@@ -386,17 +394,9 @@ async fn run_inner(
     Ok(ply)
 }
 
-fn fmt_count(n: u64) -> String {
-    match n {
-        n if n >= 1_000_000 => format!("{:.2}M", n as f64 / 1e6),
-        n if n >= 1_000 => format!("{:.0}k", n as f64 / 1e3),
-        n => n.to_string(),
-    }
-}
-
 /// Exporta o splat final do projeto com os ajustes de otimização e guarda o
 /// resultado no `project.json`.
-pub fn export_project(project_dir: &str, opts: &ExportOptions, progress: impl FnMut(f32, &str)) -> Result<ExportStats> {
+pub fn export_project(project_dir: &str, opts: &ExportOptions, progress: impl FnMut(f32, &Msg)) -> Result<ExportStats> {
     let layout = Layout::new(project_dir);
     let input = layout.final_ply();
     if !input.exists() {

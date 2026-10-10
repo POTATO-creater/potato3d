@@ -2,12 +2,12 @@
 // poda por opacidade, corte de bandas SH, decimação por fusão e saída em .ply
 // ou .sog comprimido.
 
-import type { ExportOptions, ExportStats } from "../../../src/lib/api";
+import type { ExportOptions, ExportStats, Msg } from "../../../src/lib/api";
 import { decimate } from "./decimate.ts";
 import { writeSog, type WebpEncoder } from "./sog.ts";
 import { readPly, restLen, select, truncateSh, writePly } from "./splats.ts";
 
-export type Progress = (p: { fraction: number; message: string }) => void;
+export type Progress = (p: { fraction: number; message: Msg }) => void;
 
 /** Nome do arquivo de saída, que muda com os ajustes para não sobrescrever
  *  exportações anteriores com outros parâmetros. */
@@ -27,8 +27,8 @@ export function runExport(
   webp: WebpEncoder,
   progress: Progress,
 ): { name: string; bytes: Uint8Array; stats: Omit<ExportStats, "path" | "seconds"> } {
-  const report = (fraction: number, message: string) => progress({ fraction, message });
-  report(0, "Lendo o .ply");
+  const report = (fraction: number, message: Msg) => progress({ fraction, message });
+  report(0, { key: "export.readingPly" });
   let s = readPly(input);
   const inputCount = s.count;
 
@@ -56,18 +56,18 @@ export function runExport(
   // Pesos de cada fase na barra de progresso.
   const [decSpan, writeStart] = o.decimate > 0 ? [0.55, 0.6] : [0, 0.1];
   if (o.decimate > 0) {
-    report(0.05, "Fundindo gaussianas parecidas");
-    s = decimate(s, o.decimate, (f) => report(0.05 + f * decSpan, "Fundindo gaussianas parecidas")) ?? s;
+    report(0.05, { key: "export.merging" });
+    s = decimate(s, o.decimate, (f) => report(0.05 + f * decSpan, { key: "export.merging" })) ?? s;
   }
   const span = 1 - writeStart;
   let bytes: Uint8Array;
   if (o.format === "ply") {
-    report(writeStart, "Gravando o .ply");
+    report(writeStart, { key: "export.writingPly" });
     bytes = writePly(s);
   } else {
-    bytes = writeSog(s, webp, "SplatForge web", (f, m) => report(writeStart + f * span, m));
+    bytes = writeSog(s, webp, "Gausify Orbit web", (f, m) => report(writeStart + f * span, m));
   }
-  report(1, "Pronto");
+  report(1, { key: "export.done" });
   return {
     name: outputName(o),
     bytes,

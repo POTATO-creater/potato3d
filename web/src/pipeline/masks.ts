@@ -1,12 +1,12 @@
 // Recorte (máscaras 255 = sujeito) e dataset com fundo transparente, como
 // src-tauri/src/masks.rs. Só o RMBG-1.4 e a cor sólida existem no web.
 
-import type { MaskOptions, MaskStats } from "../../../src/lib/api";
+import type { MaskOptions, MaskStats, Msg } from "../../../src/lib/api";
 import { applyDespill, backgroundColor, borderKey, chromaMask, despillFor, type RGB } from "./chroma";
 import { encodePng } from "./png";
 import { MODELS, Segmenter } from "./segment";
 
-type Progress = (frac: number, msg: string) => void;
+type Progress = (frac: number, msg: Msg) => void;
 
 const stem = (name: string) => name.replace(/\.[^.]+$/, "");
 
@@ -51,7 +51,7 @@ export async function makeMasks(
   if (s.method !== "chroma") {
     const spec = MODELS.rmbg;
     seg = await Segmenter.create("rmbg", (d, n) =>
-      progress(0, `Baixando ${spec.label}: ${(d / 1e6).toFixed(0)}/${(n / 1e6).toFixed(0)} MB`),
+      progress(0, { key: "masks.downloading", args: { model: spec.label, done: Math.round(d / 1e6), total: Math.round(n / 1e6) } }),
     );
     log(`${seg.backend} (${spec.license})`);
   }
@@ -74,7 +74,7 @@ export async function makeMasks(
       for (const v of mask) sum += v;
       coverage += sum / (255 * mask.length);
       await write(out, `${stem(names[i])}.png`, await encodePng(mask, w, h, 1));
-      progress((i + 1) / names.length, `Recortando ${i + 1}/${names.length}`);
+      progress((i + 1) / names.length, { key: "masks.cutting", args: { i: i + 1, n: names.length } });
     }
   } finally {
     seg?.release();
@@ -126,6 +126,6 @@ export async function buildAlpha(
     if (despill) applyDespill(rgba, mask, despill);
     for (let p = 0; p < mask.length; p++) rgba[4 * p + 3] = mask[p];
     await write(out, `${stem(names[i])}.png`, await encodePng(rgba, w, h, 4));
-    progress((i + 1) / names.length, `Frames com fundo transparente ${i + 1}/${names.length}`);
+    progress((i + 1) / names.length, { key: "masks.alphaFrames", args: { i: i + 1, n: names.length } });
   }
 }

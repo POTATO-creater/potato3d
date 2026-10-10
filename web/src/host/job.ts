@@ -1,8 +1,7 @@
 // Frames → recorte → poses → treino no navegador, com os mesmos eventos,
 // regras de retomada e project.json de src-tauri/src/pipeline.rs.
 
-import type { JobConfig, JobEvent, ProjectState, Stage } from "../../../src/lib/api";
-import { fmtCount } from "../../../src/lib/format";
+import type { JobConfig, JobEvent, Msg, ProjectState, Stage } from "../../../src/lib/api";
 import { train } from "../brush";
 import { extractFrames, probeVideo } from "../pipeline/frames";
 import { buildAlpha, makeMasks } from "../pipeline/masks";
@@ -22,7 +21,7 @@ function reporter(emit: (e: JobEvent) => void, stage: Stage, signal: AbortSignal
   let last = 0;
   return {
     /** Também é o ponto de cancelamento dos laços de cada etapa. */
-    progress(fraction: number, message: string) {
+    progress(fraction: number, message: Msg) {
       if (signal.aborted) throw cancelled();
       const now = performance.now();
       if (fraction < 1 && now - last < 66) return;
@@ -61,16 +60,16 @@ async function run(cfg: JobConfig, emit: (e: JobEvent) => void, signal: AbortSig
     const v = video(cfg.videoPath);
     const rep = reporter(emit, "frames", signal);
     await pruneProjects(l.root);
-    rep.progress(0, "Lendo vídeo");
+    rep.progress(0, { key: "frames.reading" });
     const info = (v.info ??= await probeVideo(v.file));
     rep.log(`${info.width}x${info.height} @ ${info.fps.toFixed(2)} fps, ${info.duration.toFixed(1)}s, ${info.codec}`);
     // Etapas seguintes ficam inválidas.
     for (const p of [l.images, `${l.dataset}/sparse`, l.masks, l.alpha, l.training, l.finalPly, l.exports]) await remove(p);
     const picked = await extractFrames(v.file, info, cfg.frames, await dirAt(l.images, true), (f) =>
-      rep.progress(f, "Decodificando e medindo nitidez"),
+      rep.progress(f, { key: "frames.decodingSharpness" }),
     );
     await publishDir(l.images, IMAGE_EXT);
-    rep.progress(1, `${picked.length} frames selecionados`);
+    rep.progress(1, { key: "frames.selected", args: { n: picked.length } });
     const frames = picked.map((f) => ({ path: `${l.images}/${f.name}`, time: f.time, sharpness: f.sharpness }));
     state = { ...state, videoPath: cfg.videoPath, frames, masks: null, masksDir: null, poses: null, finalPly: null, lastPsnr: null, lastExport: null };
     await saveState(l.root, state);
@@ -87,17 +86,17 @@ async function run(cfg: JobConfig, emit: (e: JobEvent) => void, signal: AbortSig
       at.stage = "masks";
       const t = performance.now();
       const rep = reporter(emit, "masks", signal);
-      rep.progress(0, "Detectando o sujeito");
+      rep.progress(0, { key: "masks.detecting" });
       await remove(l.masks);
       const stats = await makeMasks(await dirAt(l.images), await dirAt(l.masks, true), m, rep.log, rep.progress);
       await publishDir(l.masks, /\.png$/i);
-      rep.progress(1, `${stats.count} recortes · ${stats.backend}`);
+      rep.progress(1, m.method === "chroma" ? { key: "masks.doneChroma", args: { n: stats.count } } : { key: "masks.done", args: { n: stats.count, backend: stats.backend } });
       state = { ...state, masks: stats, masksDir: l.masks };
       await saveState(l.root, state);
       emit({ type: "masksReady", stats, dir: l.masks });
       emit({ type: "stageDone", stage: "masks", seconds: secs(t) });
     } else {
-      emit({ type: "stageSkipped", stage: "masks", reason: "Recorte desativado" });
+      emit({ type: "stageSkipped", stage: "masks", reason: { key: "masks.disabled" } });
     }
   }
   if (m.enabled && !(state.masks && (await exists(l.masks))))
@@ -108,7 +107,7 @@ async function run(cfg: JobConfig, emit: (e: JobEvent) => void, signal: AbortSig
   const hasModel = () => exists(`${l.model}/images.bin`);
   const reuse = from === "masks" && !(m.enabled && m.forPoses) && state.poses && (await hasModel());
   if (reuse) {
-    emit({ type: "stageSkipped", stage: "poses", reason: "Poses anteriores reaproveitadas" });
+    emit({ type: "stageSkipped", stage: "poses", reason: { key: "poses.reused" } });
   } else if (before(from, "poses")) {
     at.stage = "poses";
     const t = performance.now();
@@ -152,7 +151,7 @@ async function run(cfg: JobConfig, emit: (e: JobEvent) => void, signal: AbortSig
   let dataset = l.dataset;
   await remove(l.alpha);
   if (m.enabled) {
-    rep.progress(0, "Montando frames com fundo transparente");
+    rep.progress(0, { key: "train.alphaDataset" });
     dataset = l.alpha;
     await buildAlpha(await dirAt(l.images), await dirAt(l.masks), await dirAt(`${l.alpha}/images`, true), m, rep.log, (_, msg) =>
       rep.progress(0, msg),
@@ -162,7 +161,7 @@ async function run(cfg: JobConfig, emit: (e: JobEvent) => void, signal: AbortSig
     const images = await (await readFile(`${l.model}/images.bin`)).arrayBuffer();
     await writeFile(`${l.alpha}/sparse/0/images.bin`, renameImages(images, (n) => `${stem(n)}.png`));
   }
-  rep.progress(0, "Carregando dataset na GPU");
+  rep.progress(0, { key: "train.loading" });
   await remove(l.training);
   let lastPsnr: number | null = null;
   let snapshot: string | null = null;
@@ -170,10 +169,10 @@ async function run(cfg: JobConfig, emit: (e: JobEvent) => void, signal: AbortSig
     await dirAt(dataset),
     cfg.train,
     {
-      status: (text) => rep.progress(0, text),
+      status: (msg) => rep.progress(0, msg),
       dataset: (n, e) => rep.log(`dataset: ${n} vistas de treino${e ? `, ${e} de avaliação` : ""}`),
       step: (iter, splats) => {
-        rep.progress(iter / total, `Passo ${iter}/${total} · ${fmtCount(splats)} splats`);
+        rep.progress(iter / total, { key: "train.step", args: { iter, total, splats } });
         emit({ type: "train", event: { kind: "step", iter, splats } });
       },
       eval: (iter, psnr, ssim) => {
@@ -194,7 +193,7 @@ async function run(cfg: JobConfig, emit: (e: JobEvent) => void, signal: AbortSig
     signal,
   );
   publish(l.finalPly, await writeFile(l.finalPly, ply as BufferSource));
-  rep.progress(1, "Treino concluído");
+  rep.progress(1, { key: "train.done" });
   state = { ...state, finalPly: l.finalPly, lastPsnr, lastExport: null };
   await saveState(l.root, state);
   emit({ type: "stageDone", stage: "train", seconds: secs(t) });

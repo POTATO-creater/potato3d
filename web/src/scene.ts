@@ -73,7 +73,7 @@ export function readFrame(imagesBin: ArrayBuffer, pointsBin: ArrayBuffer | null)
   }
   if (!cams.length) return null;
   cams.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-  // O SplatForge grava os frames como 00000.jpg, 00001.jpg, …
+  // O Gausify Orbit grava os frames como 00000.jpg, 00001.jpg, …
   const frameIndices = cams.map(({ name }, i) => {
     const stem = name.split("/").pop()!.replace(/\.[^.]+$/, "");
     return /^\d+$/.test(stem) ? Number(stem) : i;

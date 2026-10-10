@@ -1,11 +1,12 @@
 // Roda a reconstrução (síncrona e pesada) fora da thread da interface.
 
+import type { Msg } from "../../../src/lib/api";
 import type { PairMatches } from "./matcher";
 import { type ImageFeatures, reconstruct, type SfmModel } from "./reconstruct";
 
 export type SfmWorkerMessage =
   | { kind: "log"; text: string }
-  | { kind: "progress"; frac: number; text: string }
+  | { kind: "progress"; frac: number; msg: Msg }
   | { kind: "done"; model: SfmModel }
   | { kind: "error"; text: string };
 
@@ -16,7 +17,7 @@ self.onmessage = (ev: MessageEvent<{ imgs: ImageFeatures[]; matches: PairMatches
       ev.data.imgs,
       ev.data.matches,
       (text) => post({ kind: "log", text }),
-      (frac, text) => post({ kind: "progress", frac, text }),
+      (frac, msg) => post({ kind: "progress", frac, msg }),
     );
     post({ kind: "done", model });
   } catch (e) {
