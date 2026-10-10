@@ -568,6 +568,10 @@ button:disabled {
 }
 
 .toggle {
+  /* Contém o checkbox escondido: sem isso ele escapa da barra lateral
+     rolável e, ao ganhar foco no clique (Chromium/WebView2), rola a página
+     inteira para alcançá-lo, deslocando toda a interface. */
+  position: relative;
   display: flex;
   align-items: flex-start;
   gap: 9px;
@@ -576,6 +580,11 @@ button:disabled {
 }
 .toggle input {
   position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  margin: 0;
   opacity: 0;
   pointer-events: none;
 }
