@@ -1,5 +1,3 @@
-import { Channel, convertFileSrc, invoke } from "@tauri-apps/api/core";
-
 export type Stage = "frames" | "masks" | "poses" | "train";
 export const STAGES: Stage[] = ["frames", "masks", "poses", "train"];
 
@@ -17,7 +15,8 @@ export interface Tools {
   modnetModel: string | null;
   /** Windows e macOS (Apple Silicon): RMBG-1.4, baixado sob demanda. */
   rmbgModel: string | null;
-  os: "macos" | "windows" | "linux";
+  /** "web": tudo roda no navegador (web/); as ferramentas acima viram rótulos. */
+  os: "macos" | "windows" | "linux" | "web";
 }
 
 export interface VideoInfo {
@@ -217,36 +216,51 @@ export type InstallEvent =
   | { type: "failed"; error: string }
   | { type: "cancelled" };
 
-export const api = {
-  detectTools: () => invoke<Tools>("detect_tools"),
-  probeVideo: (path: string) => invoke<VideoInfo>("probe_video", { path }),
-  defaultProjectDir: (videoPath: string) => invoke<string>("default_project_dir", { videoPath }),
-  loadProject: (projectDir: string) => invoke<ProjectState>("load_project", { projectDir }),
-  sceneFrame: (projectDir: string) => invoke<SceneFrame>("scene_frame", { projectDir }),
-  cancelJob: () => invoke<void>("cancel_job"),
-  splatInfo: (path: string) => invoke<SplatInfo>("splat_info", { path }),
-  exportSplat: (projectDir: string, options: ExportOptions, onProgress: (p: { fraction: number; message: string }) => void) => {
-    const channel = new Channel<{ fraction: number; message: string }>();
-    channel.onmessage = onProgress;
-    return invoke<ExportStats>("export_splat", { projectDir, options, onProgress: channel });
-  },
+/** Comandos do backend: o Rust via Tauri no desktop, o pipeline em
+ *  TypeScript + WebGPU na versão web. */
+export interface Api {
+  detectTools(): Promise<Tools>;
+  probeVideo(path: string): Promise<VideoInfo>;
+  defaultProjectDir(videoPath: string): Promise<string>;
+  loadProject(projectDir: string): Promise<ProjectState>;
+  sceneFrame(projectDir: string): Promise<SceneFrame>;
+  cancelJob(): Promise<void>;
+  splatInfo(path: string): Promise<SplatInfo>;
+  exportSplat(
+    projectDir: string,
+    options: ExportOptions,
+    onProgress: (p: { fraction: number; message: string }) => void,
+  ): Promise<ExportStats>;
   /** `rmbg`: incluir o modelo RMBG-1.4 (só baixado quando escolhido). */
-  installPlan: (rmbg: boolean) => invoke<InstallPlan>("install_plan", { rmbg }),
-  cancelInstall: () => invoke<void>("cancel_install"),
-  installTools: (rmbg: boolean, onEvent: (e: InstallEvent) => void) => {
-    const channel = new Channel<InstallEvent>();
-    channel.onmessage = onEvent;
-    return invoke<void>("install_tools", { rmbg, onEvent: channel });
-  },
-  startJob: (config: JobConfig, onEvent: (e: JobEvent) => void) => {
-    const channel = new Channel<JobEvent>();
-    channel.onmessage = onEvent;
-    return invoke<void>("start_job", { config, onEvent: channel });
-  },
-};
-
-/** URL servível pelo protocolo `asset:` do Tauri (com cache-buster opcional). */
-export function fileUrl(path: string, bust?: string | number) {
-  const url = convertFileSrc(path);
-  return bust === undefined ? url : `${url}?v=${bust}`;
+  installPlan(rmbg: boolean): Promise<InstallPlan>;
+  cancelInstall(): Promise<void>;
+  installTools(rmbg: boolean, onEvent: (e: InstallEvent) => void): Promise<void>;
+  /** Volta logo; o andamento chega por `onEvent`. */
+  startJob(config: JobConfig, onEvent: (e: JobEvent) => void): Promise<void>;
 }
+
+/** O que muda entre o app desktop e a versão web, além dos comandos. Os
+ *  caminhos são opacos para a interface: no web apontam para o OPFS. */
+export interface Host {
+  api: Api;
+  /** URL servível de um arquivo (com cache-buster opcional). */
+  fileUrl(path: string, bust?: string | number): string;
+  pickVideo(extensions: string[]): Promise<string | null>;
+  pickFolder(defaultPath?: string): Promise<string | null>;
+  /** Mostra o arquivo no gerenciador de arquivos (no web, baixa). */
+  reveal(path: string): Promise<void>;
+  /** Arquivos soltos na janela; devolve a função que para de ouvir. */
+  onDrop(handler: (paths: string[]) => void): () => void;
+}
+
+// Definidos uma vez pelo ponto de entrada (src/main.tsx ou web/src/main.tsx),
+// antes do primeiro render.
+export let host: Host;
+export let api: Api;
+
+export function setHost(h: Host) {
+  host = h;
+  api = h.api;
+}
+
+export const fileUrl = (path: string, bust?: string | number) => host.fileUrl(path, bust);

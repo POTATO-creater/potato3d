@@ -6,6 +6,13 @@
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["dev:mock"],
       "port": 1430
+    },
+    {
+      "name": "web",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["web:dev"],
+      "env": { "WEB_FS_ANY": "1" },
+      "port": 1440
     }
   ]
 }

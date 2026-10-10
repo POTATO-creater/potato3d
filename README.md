@@ -212,6 +212,175 @@ real; a exportação é simulada e devolve o `lastExport` gravado nele por
 `cli export`. Use uma pasta fora de `~/Downloads`/`~/Documents`: o macOS pode
 bloquear o acesso do Vite a elas e o servidor trava.
 
+## Versão web (tudo no navegador)
+
+`web/` roda o pipeline inteiro no navegador, com a **mesma interface** do app
+desktop: o `web/src/main.tsx` monta o `src/App.tsx` e os componentes de
+`src/components/`. O que muda entre as duas versões fica atrás da interface
+`Host` (`src/lib/api.ts`):
+
+- **Desktop** (`src/lib/tauri.ts`): comandos do backend em Rust via Tauri,
+  diálogos e "Mostrar no Finder".
+- **Web** (`web/src/host/`): os mesmos comandos (`startJob`, `loadProject`,
+  `exportSplat`…) e os mesmos eventos (`JobEvent`), implementados com WebGPU,
+  WASM e OPFS. `job.ts` segue as regras do `pipeline.rs` (etapas, retomada,
+  `project.json`).
+
+Uma funcionalidade nova na interface aparece nas duas versões; o que depende
+do sistema usa `tools.os` (`"web"` no navegador), como já era feito para
+macOS e Windows.
+
+```bash
+pnpm web:wasm           # clona o Brush num commit fixo, aplica web/brush/*.patch e compila (~5 min)
+pnpm web:dev            # http://localhost:1440
+```
+
+O `web:wasm` precisa de `rustup` e `wasm-pack`; instala sozinho um toolchain
+Rust 1.99 lado a lado (o Burn do Brush exige ≥ 1.95) sem mexer no `stable`.
+Navegador: Chrome ou Edge desktop com WebGPU e a extensão `subgroups`.
+
+Diferenças em relação ao desktop:
+
+- **Projetos** ficam no armazenamento do navegador (OPFS), em
+  `/projects/<nome do vídeo>`, com o mesmo layout e o mesmo `project.json`;
+  ficam os 3 mais recentes. Ao soltar o mesmo vídeo de novo, o projeto volta
+  com as etapas prontas. **Importar…** (no lugar de "Alterar…") copia uma
+  pasta de projeto do desktop ou um dataset COLMAP (`images/` + `sparse/0`).
+- **Arquivos:** "Mostrar no Finder" vira **Baixar**.
+- **Recorte:** RMBG-1.4 e cor sólida. O RMBG (176 MB, licença não comercial)
+  é baixado pelo mesmo aviso de primeiro uso do desktop, com SHA-256
+  conferido.
+- **Poses:** SfM próprio (abaixo); as opções do COLMAP (features, modelo de
+  câmera, órbita plana) não aparecem.
+- **Exportação:** a mesma do desktop (PLY ou SOG, poda, corte de bandas SH e
+  decimação), portada para TypeScript em `web/src/export/` e rodando num
+  worker. O WebP sem perdas vem do libwebp em WASM do splat-transform (MIT,
+  `web/src/export/webp/`), porque o canvas pré-multiplica o alfa.
+- **fps do vídeo:** lido do contêiner MP4/MOV, como o ffprobe; em outros
+  formatos é medido durante a reprodução.
+
+O que foi preciso consertar para o treino rodar (e rodar rápido) no navegador:
+
+- **Commit do Brush:** fixado antes do #546, que leva o kernel
+  `project_forward` a 12 storage buffers; o Chrome expõe só 10 por estágio
+  no Metal e o treino não roda no Mac.
+- **`enable subgroups;`:** o writer WGSL do naga (wgpu 30) usa as funções de
+  subgroup sem declarar a extensão, e o Chrome recusa os shaders. O
+  `web/src/brush.ts` acrescenta a diretiva antes de entregar o WGSL ao
+  navegador.
+- **Patch `web/brush/brush-js.patch`:**
+  - Construtores estáticos rodam uma vez só. Sem isso, o wasm-ld trata o
+    módulo como "command" e embrulha **toda** export (até `malloc`) para
+    rodar de novo os milhares de registros `inventory` do CubeCL a cada
+    chamada JS→WASM. O treino ficava ~25× mais lento (4 passos/s).
+  - Autotune do CubeCL em `Full`: nos outros níveis o Burn mede a vazão de
+    pico da GPU com um `sync` bloqueante, que dá panic no WASM no primeiro
+    reduce.
+  - `trainSteps` não consulta de novo um stream já encerrado (panic "async fn
+    resumed after completion" no fim do treino).
+  - `Training.exportPly()`: o mesmo export do Brush nativo (piso de escala
+    embutido, unidades do dataset restauradas).
+
+### Etapas no navegador
+
+1. **Frames:** o navegador decodifica o vídeo (um seek por candidato).
+   Candidatos uniformes no trecho (`frames × candidatos`, no máximo o fps do
+   vídeo), escala que cabe no lado máximo sem ampliar, e o mais nítido de cada
+   janela (variância do Laplaciano na miniatura de 640 px, luma Rec.709), como
+   no `frames.rs`. O seek vai meio quadro adiante para pegar o quadro mais
+   próximo do instante, como o filtro `fps` do ffmpeg.
+2. **Recorte:**
+   - **RMBG-1.4**: ONNX Runtime Web com WebGPU, com o mesmo pré/pós-
+     processamento do `masks.rs`, modelo do mesmo endereço fixado do
+     instalador. É o único modelo de IA da versão web: o Vision é só do macOS,
+     o BiRefNet é lento até em GPU dedicada e o MODNet (pessoas) ficou de fora
+     por decisão do projeto.
+   - **Cor sólida** e **despill**: port exato do Rust (testes em
+     `web/src/pipeline/*.test.ts`, `pnpm test:web`, com os casos do
+     `masks.rs`).
+   - `dataset_alpha`: PNG RGBA com alfa direto (encoder próprio: o canvas
+     pré-multiplica o alfa) e o `images.bin` com os nomes `.png`. "Usar o
+     recorte também nas poses" descarta as features onde a máscara é 0.
+3. **Poses:** SfM sem o COLMAP (`web/src/sfm/`):
+   1. **Features:** AKAZE do OpenCV.js (`@techstark/opencv-js` 4.12, que não
+      traz SIFT nem as funções de geometria epipolar) em Web Workers.
+   2. **Matching:** força bruta por distância de Hamming num compute shader
+      WebGPU, com teste de razão e checagem mútua; mesmos pares do app (janela do
+      preset + saltos 16/32/64, órbita fechada).
+   3. **Verificação:** matriz fundamental por RANSAC (8 pontos normalizado).
+   4. **Reconstrução incremental** num worker (`web/src/sfm/`): tracks por
+      union-find, par inicial escolhido por paralaxe (≥ 2°) e número de pontos,
+      com até 3 tentativas em regiões diferentes da órbita se a primeira
+      registrar menos de 90% das câmeras, PnP partindo da pose do frame
+      vizinho (com DLT + RANSAC de reserva), triangulação, BA local a cada frame
+      e global periódico (Levenberg–Marquardt com complemento de Schur, Huber,
+      focal compartilhada). No fim, BA com limiar decrescente reaproveita as
+      observações que fecham a órbita.
+4. **Treino:** Brush em WASM + WebGPU, com prévias a cada "Prévia a cada"
+   passos no visualizador.
+
+Medido num vídeo de tela verde sintético (`synth-orbit.py --green`: 120
+quadros 960×720, 24 fps, verde rebatido nos objetos), preset Prévia (90
+frames), no Chrome headless do M4:
+
+| Etapa | Tempo | Resultado |
+|---|---|---|
+| Frames | 3,1 s | 90 de 120 candidatos |
+| Recorte, cor sólida | 2,4 s | IoU 0,91 com as máscaras verdadeiras (mín. 0,83) |
+| Recorte, RMBG-1.4 (WebGPU) | 32 s (+12 s no 1º uso: download e verificação) | IoU 0,996 (mín. 0,99), ~0,36 s/frame |
+| Poses | 29–31 s | 90/90 câmeras, posição 0,15% do raio, rotação 0,12°, focal −0,4% |
+| PNG com transparência | 4,5 s | pixels do sujeito com verde dominante: 16% → 0% |
+| Treino (3 mil passos, cor sólida) | — | PSNR 36,7 dB, 0,4% das gaussianas visíveis verdes |
+
+O chroma key não chega a IoU 1 porque o cubo tem manchas verde-azuladas que
+encostam na borda e saem junto com a tela (o mesmo acontece no app desktop);
+o RMBG + despill as mantém. Num painel ou aba oculta o navegador limita os
+seeks e a extração de frames fica ~10× mais lenta.
+
+Poses medidas num vídeo orbital sintético de 120 frames 960×720 com poses
+verdadeiras conhecidas (`synth-orbit.py`: textura procedural, chão e parede
+ao fundo):
+
+| | Tempo | Câmeras | Pontos | Focal | Posição (mediana) | Rotação (mediana) | PSNR do treino |
+|---|---|---|---|---|---|---|---|
+| Navegador | 37 s | 120/120 | 14 mil | +0,22% | 0,27% do raio | 0,085° | 39,7 dB |
+| COLMAP 4.2 nativo (SIFT, global) | 14 s | 120/120 | 2 mil | +0,07% | 0,73% do raio | 0,19° | 36,2 dB |
+| Poses verdadeiras | — | — | — | — | — | — | 41,2 dB |
+
+PSNR: Brush web, 5 mil passos a 960 px, SH 1, 8 vistas de avaliação. O treino
+roda a ~40 passos/s nesse dataset (contra ~3× isso no Brush nativo).
+
+Para repetir a medição (`scripts/web-bench/`, com `WEB_FS_ANY=1 pnpm web:dev`
+rodando):
+
+```bash
+python3 scripts/web-bench/synth-orbit.py /tmp/orbit 120 960 720
+```
+```bash
+ffmpeg -framerate 24 -i /tmp/orbit/images/%05d.jpg -c:v libx264 -pix_fmt yuv420p /tmp/orbit.mp4
+```
+```bash
+node scripts/web-bench/headless.mjs poses "http://localhost:1440/?video=/@fs/tmp/orbit.mp4&dataset=/@fs/tmp/orbit" --out /tmp/orbit-web
+```
+```bash
+python3 scripts/web-bench/eval-poses.py /tmp/orbit/gt.json /tmp/orbit-web/sparse/0
+```
+```bash
+node scripts/web-bench/headless.mjs train "http://localhost:1440/?video=/@fs/tmp/orbit.mp4&dataset=/@fs/tmp/orbit-web" --steps 5000 --max-res 960
+```
+
+O `headless.mjs` usa a interface num Chrome headless (sem o throttling de abas
+ocultas). `?video=` abre o vídeo como se ele fosse solto na janela;
+`?dataset=` faz o projeto desse vídeo começar com um dataset COLMAP (imagens e
+poses), para treinar ou recalcular as poses a partir da etapa certa. Modos:
+`video` (do vídeo ao splat, com `--mask chroma|rmbg`), `poses`, `train` e
+`profile` (perfil de CPU do treino; com `pnpm web:wasm --profiling` sai com
+os nomes das funções do WASM).
+
+Ainda não foi testado em vídeos reais de IA (desfoque, pouca textura,
+elementos que se mexem), onde o SIFT reforçado e o mapeador global do COLMAP
+fazem diferença.
+
 ## Testes
 
 ```bash

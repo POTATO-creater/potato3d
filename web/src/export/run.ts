@@ -1,0 +1,76 @@
+// Exportação otimizada do splat treinado, como src-tauri/src/export/mod.rs:
+// poda por opacidade, corte de bandas SH, decimação por fusão e saída em .ply
+// ou .sog comprimido.
+
+import type { ExportOptions, ExportStats } from "../../../src/lib/api";
+import { decimate } from "./decimate.ts";
+import { writeSog, type WebpEncoder } from "./sog.ts";
+import { readPly, restLen, select, truncateSh, writePly } from "./splats.ts";
+
+export type Progress = (p: { fraction: number; message: string }) => void;
+
+/** Nome do arquivo de saída, que muda com os ajustes para não sobrescrever
+ *  exportações anteriores com outros parâmetros. */
+export function outputName(o: ExportOptions) {
+  let name = "splat";
+  if (o.decimate > 0) name += `_dec${Math.round(o.decimate * 100)}`;
+  if (o.minOpacity > 0) name += `_op${Math.round(o.minOpacity * 1000)}`;
+  if (o.shDegree != null) name += `_sh${o.shDegree}`;
+  // Não sobrescreve o splat.ply do treino.
+  if (o.format === "ply" && name === "splat") name += "_export";
+  return `${name}.${o.format}`;
+}
+
+export function runExport(
+  input: Uint8Array,
+  o: ExportOptions,
+  webp: WebpEncoder,
+  progress: Progress,
+): { name: string; bytes: Uint8Array; stats: Omit<ExportStats, "path" | "seconds"> } {
+  const report = (fraction: number, message: string) => progress({ fraction, message });
+  report(0, "Lendo o .ply");
+  let s = readPly(input);
+  const inputCount = s.count;
+
+  // Poda: tira opacidades baixas e qualquer linha com NaN/∞.
+  const p = Math.min(Math.max(o.minOpacity, 1e-6), 0.999);
+  const minLogit = o.minOpacity > 0 ? Math.log(p / (1 - p)) : -Infinity;
+  const rl = restLen(s);
+  const keep: number[] = [];
+  const finite = (a: Float32Array, from: number, to: number) => {
+    for (let k = from; k < to; k++) if (!Number.isFinite(a[k])) return false;
+    return true;
+  };
+  for (let i = 0; i < s.count; i++) {
+    if (!(s.opacity[i] >= minLogit)) continue;
+    if (!finite(s.pos, i * 3, i * 3 + 3) || !finite(s.scale, i * 3, i * 3 + 3)) continue;
+    if (s.rot[i * 4] === 0 && s.rot[i * 4 + 1] === 0 && s.rot[i * 4 + 2] === 0 && s.rot[i * 4 + 3] === 0) continue;
+    if (!finite(s.rest, i * rl, (i + 1) * rl)) continue;
+    keep.push(i);
+  }
+  if (keep.length < s.count) s = select(s, keep);
+  const prunedCount = s.count;
+  if (!prunedCount) throw new Error("a poda por opacidade removeu todas as gaussianas");
+  if (o.shDegree != null) s = truncateSh(s, o.shDegree);
+
+  // Pesos de cada fase na barra de progresso.
+  const [decSpan, writeStart] = o.decimate > 0 ? [0.55, 0.6] : [0, 0.1];
+  if (o.decimate > 0) {
+    report(0.05, "Fundindo gaussianas parecidas");
+    s = decimate(s, o.decimate, (f) => report(0.05 + f * decSpan, "Fundindo gaussianas parecidas")) ?? s;
+  }
+  const span = 1 - writeStart;
+  let bytes: Uint8Array;
+  if (o.format === "ply") {
+    report(writeStart, "Gravando o .ply");
+    bytes = writePly(s);
+  } else {
+    bytes = writeSog(s, webp, "SplatForge web", (f, m) => report(writeStart + f * span, m));
+  }
+  report(1, "Pronto");
+  return {
+    name: outputName(o),
+    bytes,
+    stats: { inputCount, prunedCount, outputCount: s.count, inputBytes: input.length, outputBytes: bytes.length, shDegree: s.shDegree },
+  };
+}

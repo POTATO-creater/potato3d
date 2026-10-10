@@ -29,6 +29,7 @@ function methods(os: Os | undefined): { value: MaskMethod; label: string; hint: 
       chroma,
     ];
   }
+  if (os === "web") return [rmbg, chroma];
   const vision = { value: "auto" as const, label: "Vision", hint: "Recorte nativo do macOS, na GPU: qualquer sujeito." };
   return os === "macos" ? [vision, rmbg, chroma] : [vision, chroma];
 }

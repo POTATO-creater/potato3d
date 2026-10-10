@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
-import { open } from "@tauri-apps/plugin-dialog";
-import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
 import {
   api,
   DEFAULT_CHROMA,
+  host,
   type ExportStats,
   type JobEvent,
   type MaskOptions,
@@ -16,7 +14,7 @@ import {
 } from "./lib/api";
 import { initialJob, jobReducer } from "./lib/job";
 import { fmtDuration } from "./lib/format";
-import { fileManager } from "./lib/platform";
+import { revealLabel, stageBlurbs } from "./lib/platform";
 import { ToolsSetup } from "./components/ToolsSetup";
 import { PRESETS, presetById, type PresetId } from "./lib/presets";
 import { Sidebar } from "./components/Sidebar";
@@ -73,7 +71,8 @@ function matchPreset(s: Settings): PresetId | "custom" {
 
 /** O recorte por IA tem o que precisa neste sistema? */
 function maskToolReady(tools: Tools, m: MaskOptions) {
-  if (m.method === "rmbg") return !!tools.rmbgModel;
+  // No web o único recorte por IA é o RMBG.
+  if (m.method === "rmbg" || tools.os === "web") return !!tools.rmbgModel;
   if (tools.os !== "windows") return !!tools.masker;
   return m.method === "general" ? !!tools.birefnetModel : !!tools.modnetModel;
 }
@@ -179,25 +178,24 @@ export default function App() {
   );
 
   // Arrastar e soltar um vídeo em qualquer lugar da janela.
-  useEffect(() => {
-    const un = getCurrentWebview().onDragDropEvent((e) => {
-      if (e.payload.type !== "drop" || job.running) return;
-      const p = e.payload.paths.find((x) => VIDEO_EXT.includes(x.split(".").pop()?.toLowerCase() ?? ""));
-      if (p) chooseVideo(p);
-    });
-    return () => {
-      un.then((f) => f());
-    };
-  }, [chooseVideo, job.running]);
+  useEffect(
+    () =>
+      host.onDrop((paths) => {
+        if (job.running) return;
+        const p = paths.find((x) => VIDEO_EXT.includes(x.split(".").pop()?.toLowerCase() ?? ""));
+        if (p) chooseVideo(p);
+      }),
+    [chooseVideo, job.running],
+  );
 
   async function pickVideo() {
-    const p = await open({ multiple: false, filters: [{ name: "Vídeo", extensions: VIDEO_EXT }] });
-    if (typeof p === "string") chooseVideo(p);
+    const p = await host.pickVideo(VIDEO_EXT);
+    if (p) chooseVideo(p);
   }
 
   async function pickProject() {
-    const p = await open({ directory: true, multiple: false, defaultPath: projectDir ?? undefined });
-    if (typeof p === "string") openProject(p);
+    const p = await host.pickFolder(projectDir ?? undefined);
+    if (p) openProject(p);
   }
 
   function onEvent(e: JobEvent) {
@@ -281,6 +279,8 @@ export default function App() {
     train: !!job.poses && (!maskOpts.enabled || !!job.masks),
   };
 
+  const blurbs = stageBlurbs(tools?.os);
+
   return (
     <div className="app">
       <Sidebar
@@ -292,7 +292,7 @@ export default function App() {
         onPickVideo={pickVideo}
         projectDir={projectDir}
         onPickProject={pickProject}
-        onRevealProject={() => projectDir && revealItemInDir(job.finalPly ?? projectDir)}
+        onRevealProject={() => projectDir && host.reveal(job.finalPly ?? projectDir)}
         preset={preset}
         onPreset={(id) => {
           setPreset(id);
@@ -360,8 +360,8 @@ export default function App() {
             </span>
           )}
           {job.finalPly && (
-            <button className="btn-sm" onClick={() => revealItemInDir(job.finalPly!)}>
-              Mostrar .ply no {fileManager(tools?.os)}
+            <button className="btn-sm" onClick={() => host.reveal(job.finalPly!)}>
+              {revealLabel(tools?.os, ".ply")}
             </button>
           )}
         </div>
@@ -392,16 +392,16 @@ export default function App() {
                   <h1>Vídeo orbital → Gaussian Splatting</h1>
                   <ol>
                     <li>
-                      <strong>Frames</strong>: ffmpeg decodifica por hardware e escolhe os frames mais nítidos.
+                      <strong>Frames</strong>: {blurbs.frames}
                     </li>
                     <li>
-                      <strong>Recorte</strong> (opcional): isola o sujeito para o splat sair sem o fundo.
+                      <strong>Recorte</strong> (opcional): {blurbs.masks}
                     </li>
                     <li>
-                      <strong>Poses</strong>: COLMAP com matching circular (fecha a órbita) e mapeador global.
+                      <strong>Poses</strong>: {blurbs.poses}
                     </li>
                     <li>
-                      <strong>Treino</strong>: Brush na GPU, com prévias ao vivo aqui.
+                      <strong>Treino</strong>: {blurbs.train}
                     </li>
                   </ol>
                   {!videoPath && <p className="muted">Arraste um vídeo para a janela para começar.</p>}
