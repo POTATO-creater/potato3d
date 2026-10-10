@@ -1,6 +1,7 @@
 // Poses no navegador: features (AKAZE em workers) → matching (WebGPU) →
 // SfM incremental (TS) → modelo COLMAP. Prova de conceito.
 
+import type { Msg } from "../../../src/lib/api";
 import { colmapFiles } from "./colmap";
 import type { FeatureRequest, FeatureResult } from "./features.worker";
 import { HammingMatcher } from "./matcher";
@@ -97,7 +98,7 @@ export async function runSfm(
   dir: FileSystemDirectoryHandle,
   opts: SfmOptions,
   log: (s: string) => void,
-  progress: (frac: number, msg: string) => void,
+  progress: (frac: number, msg: Msg) => void,
 ): Promise<SfmRun> {
   const timings: Record<string, number> = {};
   const t0 = performance.now();
@@ -114,8 +115,8 @@ export async function runSfm(
       return (await opts.masksDir.getFileHandle(n.replace(/\.[^.]+$/, ".png"))).getFile();
     }),
   );
-  progress(0, "Extraindo features");
-  const feats = await extractAll(files, masks, opts, (d) => progress((0.3 * d) / names.length, `Features ${d}/${names.length}`));
+  progress(0, { key: "poses.webFeatures" });
+  const feats = await extractAll(files, masks, opts, (d) => progress((0.3 * d) / names.length, { key: "poses.webFeaturesN", args: { i: d, n: names.length } }));
   timings.features = performance.now() - t0;
   const meanFeat = feats.reduce((s, f) => s + f.n, 0) / feats.length;
   log(`Features AKAZE: média ${meanFeat.toFixed(0)}/imagem em ${(timings.features / 1000).toFixed(1)} s`);
@@ -129,7 +130,7 @@ export async function runSfm(
       feats.map((f) => f.desc),
       pairs,
       {},
-      (d, n) => progress(0.3 + (0.2 * d) / n, `Casando ${d}/${n} pares`),
+      (d, n) => progress(0.3 + (0.2 * d) / n, { key: "poses.webMatching", args: { i: d, n } }),
     );
   } finally {
     matcher.destroy();
@@ -145,7 +146,7 @@ export async function runSfm(
     w.onmessage = (ev: MessageEvent<SfmWorkerMessage>) => {
       const m = ev.data;
       if (m.kind === "log") log(m.text);
-      else if (m.kind === "progress") progress(0.5 + 0.5 * m.frac, m.text);
+      else if (m.kind === "progress") progress(0.5 + 0.5 * m.frac, m.msg);
       else {
         w.terminate();
         if (m.kind === "done") resolve(m.model);

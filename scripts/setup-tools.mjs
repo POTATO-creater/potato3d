@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Baixa e verifica (SHA-256) as ferramentas externas do SplatForge.
+// Baixa e verifica (SHA-256) as ferramentas externas do Gausify Orbit.
 //
 //   pnpm setup:tools            instala o que falta
 //   pnpm setup:tools --force    baixa tudo de novo
@@ -55,7 +55,7 @@ const COLMAP = { repo: "colmap/colmap", tag: "4.2.1" };
 // GITHUB_TOKEN eleva o limite.
 const ghHeaders = {
   Accept: "application/vnd.github+json",
-  "User-Agent": "splatforge-setup",
+  "User-Agent": "gausify-orbit-setup",
   ...((process.env.GITHUB_TOKEN || process.env.GH_TOKEN) && {
     Authorization: `Bearer ${process.env.GITHUB_TOKEN || process.env.GH_TOKEN}`,
   }),

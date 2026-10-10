@@ -255,7 +255,7 @@ pub fn read(path: &Path) -> Result<Splats> {
 
 pub fn write(path: &Path, s: &Splats) -> Result<u64> {
     let mut w = BufWriter::with_capacity(1 << 20, std::fs::File::create(path)?);
-    let mut header = String::from("ply\nformat binary_little_endian 1.0\ncomment Exported from SplatForge\n");
+    let mut header = String::from("ply\nformat binary_little_endian 1.0\ncomment Exported from Gausify Orbit\n");
     header += &format!("element vertex {}\n", s.count);
     let mut names: Vec<String> = ["x", "y", "z", "f_dc_0", "f_dc_1", "f_dc_2"].map(String::from).to_vec();
     names.extend((0..s.rest_len()).map(|i| format!("f_rest_{i}")));

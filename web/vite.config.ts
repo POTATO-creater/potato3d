@@ -1,12 +1,14 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { serviceWorker } from "./sw-plugin";
 
 // Versão web: a interface de src/ com o host do navegador (web/src/host/);
 // o treino roda no Brush compilado para WASM + WebGPU (`pnpm web:wasm` gera
 // web/pkg).
 export default defineConfig({
   root: import.meta.dirname,
-  plugins: [react()],
+  // O service worker (cache offline) só existe no build; no dev ele atrapalharia o HMR.
+  plugins: [react(), serviceWorker(`${import.meta.dirname}/src/sw.template.js`)],
   // O ONNX Runtime acha os próprios .wasm por import.meta.url: não pode ser pré-empacotado.
   optimizeDeps: { exclude: ["onnxruntime-web"] },
   build: {

@@ -49,7 +49,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || format('build-{0}', github.run_number) }}
-          releaseName: SplatForge ${{ github.ref_type == 'tag' && github.ref_name || format('build {0}', github.run_number) }}
+          releaseName: Gausify Orbit ${{ github.ref_type == 'tag' && github.ref_name || format('build {0}', github.run_number) }}
           releaseBody: |
             Windows: baixe o `*-setup.exe`. Na primeira execução o app oferece
             instalar COLMAP e ffmpeg (≈ 590 MB com CUDA).

@@ -22,7 +22,10 @@ import { Viewer } from "./components/Viewer";
 import { StageStrip } from "./components/StageStrip";
 import { FramesGrid, LogView } from "./components/FramesGrid";
 import { ExportPanel } from "./components/ExportPanel";
+import { LanguageSelect } from "./components/LanguageSelect";
+import { UpdateBanner } from "./components/UpdateBanner";
 import { basename } from "./lib/platform";
+import { I18nProvider, useI18n } from "./i18n";
 import "./styles.css";
 
 const VIDEO_EXT = ["mp4", "mov", "m4v", "webm", "mkv", "avi"];
@@ -78,6 +81,15 @@ function maskToolReady(tools: Tools, m: MaskOptions) {
 }
 
 export default function App() {
+  return (
+    <I18nProvider>
+      <AppView />
+    </I18nProvider>
+  );
+}
+
+function AppView() {
+  const { t } = useI18n();
   const stored = useRef(loadStored()).current;
   const [tools, setTools] = useState<Tools | null>(null);
   const [videoPath, setVideoPath] = useState<string | null>(null);
@@ -214,7 +226,7 @@ export default function App() {
         if (projectDir) refreshFrame(projectDir);
         break;
       case "failed":
-        pushLog(`ERRO: ${e.error}`);
+        pushLog(t.app.logError(e.error));
         break;
     }
   }
@@ -253,7 +265,7 @@ export default function App() {
 
   const viewerSplat =
     previewExport && lastExport
-      ? { path: lastExport.path, iter: null, version: previewExport.version, label: `Exportado · ${basename(lastExport.path)}` }
+      ? { path: lastExport.path, iter: null, version: previewExport.version, label: t.app.exported(basename(lastExport.path)) }
       : job.splat;
 
   const missing = tools
@@ -264,7 +276,7 @@ export default function App() {
           { name: "Brush", key: "brush", ok: !!tools.brush },
           // O recorte só é exigido quando ativado.
           {
-            name: tools.os === "windows" || maskOpts.method === "rmbg" ? "Modelo de recorte" : "Recortador",
+            name: tools.os === "windows" || maskOpts.method === "rmbg" ? t.app.maskModel : t.app.masker,
             key: "model",
             ok: !maskOpts.enabled || maskOpts.method === "chroma" || maskToolReady(tools, maskOpts),
           },
@@ -279,7 +291,7 @@ export default function App() {
     train: !!job.poses && (!maskOpts.enabled || !!job.masks),
   };
 
-  const blurbs = stageBlurbs(tools?.os);
+  const blurbs = stageBlurbs(t, tools?.os);
 
   return (
     <div className="app">
@@ -345,27 +357,28 @@ export default function App() {
         <div className="topbar" data-tauri-drag-region>
           <nav className="tabs">
             <button className={tab === "viewer" ? "active" : ""} onClick={() => setTab("viewer")}>
-              3D
+              {t.app.tabs.viewer}
             </button>
             <button className={tab === "frames" ? "active" : ""} onClick={() => setTab("frames")}>
-              Frames{job.frames.length ? ` (${job.frames.length})` : ""}
+              {t.app.tabs.frames}
+              {job.frames.length ? ` (${job.frames.length})` : ""}
             </button>
             <button className={tab === "log" ? "active" : ""} onClick={() => setTab("log")}>
-              Log
+              {t.app.tabs.log}
             </button>
           </nav>
           {job.totalSeconds != null && (
-            <span className="done-note">
-              Pronto em {fmtDuration(job.totalSeconds)}
-            </span>
+            <span className="done-note">{t.app.readyIn(fmtDuration(job.totalSeconds))}</span>
           )}
           {job.finalPly && (
             <button className="btn-sm" onClick={() => host.reveal(job.finalPly!)}>
-              {revealLabel(tools?.os, ".ply")}
+              {revealLabel(t, tools?.os, ".ply")}
             </button>
           )}
+          <LanguageSelect />
         </div>
 
+        <UpdateBanner busy={job.running} />
         {tools && missing.length > 0 && (
           <ToolsSetup
             tools={tools}
@@ -374,10 +387,10 @@ export default function App() {
             onInstalled={() => api.detectTools().then(setTools)}
           />
         )}
-        {videoError && <div className="banner error">Não foi possível ler o vídeo: {videoError}</div>}
+        {videoError && <div className="banner error">{t.app.videoError(videoError)}</div>}
         {job.error && (
           <div className="banner error">
-            <strong>Falhou{job.error.stage ? ` na etapa ${job.error.stage}` : ""}.</strong>
+            <strong>{job.error.stage ? t.app.failedAt(t.stages[job.error.stage]) : t.app.failed}</strong>
             <pre>{job.error.message}</pre>
           </div>
         )}
@@ -389,22 +402,22 @@ export default function App() {
               frame={frame}
               placeholder={
                 <div className="placeholder">
-                  <h1>Vídeo orbital → Gaussian Splatting</h1>
+                  <h1>{t.app.hero}</h1>
                   <ol>
                     <li>
-                      <strong>Frames</strong>: {blurbs.frames}
+                      <strong>{t.stages.frames}</strong>: {blurbs.frames}
                     </li>
                     <li>
-                      <strong>Recorte</strong> (opcional): {blurbs.masks}
+                      <strong>{t.stages.masks}</strong> ({t.app.optional}): {blurbs.masks}
                     </li>
                     <li>
-                      <strong>Poses</strong>: {blurbs.poses}
+                      <strong>{t.stages.poses}</strong>: {blurbs.poses}
                     </li>
                     <li>
-                      <strong>Treino</strong>: {blurbs.train}
+                      <strong>{t.stages.train}</strong>: {blurbs.train}
                     </li>
                   </ol>
-                  {!videoPath && <p className="muted">Arraste um vídeo para a janela para começar.</p>}
+                  {!videoPath && <p className="muted">{t.app.dropToStart}</p>}
                 </div>
               }
             />

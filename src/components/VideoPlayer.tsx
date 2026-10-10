@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
+import { useI18n } from "../i18n";
 
 interface Trim {
   start: number;
@@ -54,6 +55,8 @@ function Svg({ children }: { children: React.ReactNode }) {
 
 /** Player compacto com linha do tempo que mostra e edita o trecho usado. */
 export function VideoPlayer({ src, duration: probed, fps, trim, onTrim, locked, videoRef }: Props) {
+  const { t } = useI18n();
+  const tp = t.player;
   const timeline = useRef<HTMLDivElement>(null);
   const drag = useRef<"seek" | "start" | "end" | null>(null);
   const [duration, setDuration] = useState(probed);
@@ -173,19 +176,19 @@ export function VideoPlayer({ src, duration: probed, fps, trim, onTrim, locked, 
       >
         <div className="tl-track" />
         <div className="tl-range" style={{ left: pct(trim.start), width: `calc(${pct(end)} - ${pct(trim.start)})` }} />
-        <div className="tl-handle" data-handle="start" style={{ left: pct(trim.start) }} title="Arraste para definir o início" />
-        <div className="tl-handle" data-handle="end" style={{ left: pct(end) }} title="Arraste para definir o fim" />
+        <div className="tl-handle" data-handle="start" style={{ left: pct(trim.start) }} title={tp.dragStart} />
+        <div className="tl-handle" data-handle="end" style={{ left: pct(end) }} title={tp.dragEnd} />
         <div className="tl-head" style={{ left: pct(time) }} />
       </div>
 
       <div className="player-bar">
-        <button className="pbtn" onClick={toggle} title={playing ? "Pausar (espaço)" : "Reproduzir (espaço)"}>
+        <button className="pbtn" onClick={toggle} title={playing ? tp.pause : tp.play}>
           <Svg>{playing ? Icon.pause : Icon.play}</Svg>
         </button>
-        <button className="pbtn" onClick={() => step(-1)} title="Frame anterior (←)">
+        <button className="pbtn" onClick={() => step(-1)} title={tp.prevFrame}>
           <Svg>{Icon.prev}</Svg>
         </button>
-        <button className="pbtn" onClick={() => step(1)} title="Próximo frame (→)">
+        <button className="pbtn" onClick={() => step(1)} title={tp.nextFrame}>
           <Svg>{Icon.next}</Svg>
         </button>
         <span className="player-time mono">
@@ -194,7 +197,7 @@ export function VideoPlayer({ src, duration: probed, fps, trim, onTrim, locked, 
         <button
           className={`pbtn ${loopTrim ? "on" : ""}`}
           onClick={() => setLoopTrim((v) => !v)}
-          title="Repetir só o trecho selecionado"
+          title={tp.loop}
         >
           <Svg>{Icon.loop}</Svg>
         </button>

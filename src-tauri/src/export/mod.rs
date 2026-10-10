@@ -14,6 +14,9 @@ use std::time::Instant;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
+use crate::msg;
+use crate::msg::Msg;
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Format {
@@ -89,9 +92,9 @@ pub fn output_name(opts: &ExportOptions) -> String {
     }
 }
 
-pub fn run(input: &Path, out_dir: &Path, opts: &ExportOptions, mut progress: impl FnMut(f32, &str)) -> Result<ExportStats> {
+pub fn run(input: &Path, out_dir: &Path, opts: &ExportOptions, mut progress: impl FnMut(f32, &Msg)) -> Result<ExportStats> {
     let t0 = Instant::now();
-    progress(0.0, "Lendo o .ply");
+    progress(0.0, &msg!("export.readingPly"));
     let input_bytes = std::fs::metadata(input)?.len();
     let mut s = ply::read(input)?;
     let input_count = s.count;
@@ -128,8 +131,8 @@ pub fn run(input: &Path, out_dir: &Path, opts: &ExportOptions, mut progress: imp
     // Pesos de cada fase na barra de progresso.
     let (dec_span, write_start) = if opts.decimate > 0.0 { (0.55, 0.6) } else { (0.0, 0.1) };
     if opts.decimate > 0.0 {
-        progress(0.05, "Fundindo gaussianas parecidas");
-        if let Some(d) = decimate::decimate(&s, opts.decimate, |f| progress(0.05 + f * dec_span, "Fundindo gaussianas parecidas")) {
+        progress(0.05, &msg!("export.merging"));
+        if let Some(d) = decimate::decimate(&s, opts.decimate, |f| progress(0.05 + f * dec_span, &msg!("export.merging"))) {
             s = d;
         }
     }
@@ -139,12 +142,12 @@ pub fn run(input: &Path, out_dir: &Path, opts: &ExportOptions, mut progress: imp
     let span = 1.0 - write_start;
     let output_bytes = match opts.format {
         Format::Ply => {
-            progress(write_start, "Gravando o .ply");
+            progress(write_start, &msg!("export.writingPly"));
             ply::write(&path, &s)?
         }
         Format::Sog => sog::write(&path, &s, |f, m| progress(write_start + f * span, m))?,
     };
-    progress(1.0, "Pronto");
+    progress(1.0, &msg!("export.done"));
 
     Ok(ExportStats {
         path: path.to_string_lossy().into_owned(),

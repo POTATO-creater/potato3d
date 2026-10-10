@@ -1,7 +1,7 @@
 // Treino do Brush no navegador (bindings `brush-js`, gerados por `pnpm web:wasm`).
 
 import init, { BrushApp, BrushMessageKind, type BrushMessage } from "../pkg/brush_js.js";
-import type { TrainOptions } from "../../src/lib/api";
+import type { Msg, TrainOptions } from "../../src/lib/api";
 
 export interface GpuInfo {
   vendor: string;
@@ -69,7 +69,7 @@ function enableSubgroupsInShaders(device: GPUDevice) {
 }
 
 /** Campos do `TrainStreamConfig` (JSON achatado, kebab-case) que o
- *  SplatForge controla; o resto fica no padrão do Brush. */
+ *  Gausify Orbit controla; o resto fica no padrão do Brush. */
 function applyOptions(cfg: Record<string, unknown>, o: TrainOptions, log: (s: string) => void) {
   const set: Record<string, unknown> = {
     "total-train-iters": o.totalSteps,
@@ -93,7 +93,7 @@ function applyOptions(cfg: Record<string, unknown>, o: TrainOptions, log: (s: st
 const STEPS_PER_BATCH = 10;
 
 export interface TrainEvents {
-  status(text: string): void;
+  status(msg: Msg): void;
   dataset(train: number, evalViews: number): void;
   /** Uma vez por lote de passos. */
   step(iter: number, splats: number): void;
@@ -114,7 +114,7 @@ export async function train(dir: FileSystemDirectoryHandle, opts: TrainOptions, 
   const handle = (m: BrushMessage) => {
     switch (m.kind) {
       case BrushMessageKind.StartLoading:
-        ev.status(`Carregando ${m.name ?? "dataset"} na GPU`);
+        ev.status(m.name ? { key: "train.loadingNamed", args: { name: m.name } } : { key: "train.loading" });
         break;
       case BrushMessageKind.DatasetLoaded:
         ev.dataset(m.trainViews ?? 0, m.evalViews ?? 0);

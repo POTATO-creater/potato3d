@@ -1,11 +1,12 @@
-import { STAGES, type FrameInfo, type JobEvent, type MaskStats, type ModelStats, type ProjectState, type Stage } from "./api";
+import { STAGES, type FrameInfo, type JobEvent, type MaskStats, type ModelStats, type Msg, type ProjectState, type Stage } from "./api";
 
 export type StageStatus = "idle" | "queued" | "running" | "done" | "error" | "kept" | "skipped";
 
 export interface StageState {
   status: StageStatus;
   fraction: number;
-  message: string;
+  /** Traduzida na hora de exibir (src/i18n). */
+  message: Msg | null;
   seconds?: number;
 }
 
@@ -34,7 +35,7 @@ export interface JobState {
   totalSeconds: number | null;
 }
 
-const idle = (): StageState => ({ status: "idle", fraction: 0, message: "" });
+const idle = (): StageState => ({ status: "idle", fraction: 0, message: null });
 
 export const initialJob: JobState = {
   running: false,
@@ -61,7 +62,7 @@ export function jobReducer(s: JobState, a: JobAction): JobState {
     case "load": {
       const p = a.project;
       const kept = (has: boolean): StageState =>
-        has ? { status: "kept", fraction: 1, message: "Resultado salvo no projeto" } : idle();
+        has ? { status: "kept", fraction: 1, message: { key: "stage.saved" } } : idle();
       return {
         ...initialJob,
         stages: {
@@ -84,7 +85,7 @@ export function jobReducer(s: JobState, a: JobAction): JobState {
       const from = STAGES.indexOf(a.from);
       const stages = { ...s.stages };
       STAGES.forEach((st, i) => {
-        if (i >= from) stages[st] = { status: "queued", fraction: 0, message: "Na fila" };
+        if (i >= from) stages[st] = { status: "queued", fraction: 0, message: { key: "stage.queued" } };
       });
       return {
         ...s,
@@ -115,7 +116,7 @@ function patchStage(s: JobState, stage: Stage, patch: Partial<StageState>): JobS
 function applyEvent(s: JobState, e: JobEvent): JobState {
   switch (e.type) {
     case "stageStarted":
-      return patchStage(s, e.stage, { status: "running", fraction: 0, message: "Iniciando" });
+      return patchStage(s, e.stage, { status: "running", fraction: 0, message: { key: "stage.starting" } });
     case "progress":
       return patchStage(s, e.stage, { status: "running", fraction: e.fraction, message: e.message });
     case "log":
@@ -143,12 +144,12 @@ function applyEvent(s: JobState, e: JobEvent): JobState {
       };
     case "failed": {
       const next = { ...s, running: false, error: { stage: e.stage, message: e.error } };
-      return clearQueued(e.stage ? patchStage(next, e.stage, { status: "error", message: "Falhou" }) : next);
+      return clearQueued(e.stage ? patchStage(next, e.stage, { status: "error", message: { key: "stage.failed" } }) : next);
     }
     case "cancelled": {
       const running = STAGES.find((st) => s.stages[st].status === "running");
       const next = { ...s, running: false };
-      return clearQueued(running ? patchStage(next, running, { status: "idle", message: "Cancelado" }) : next);
+      return clearQueued(running ? patchStage(next, running, { status: "idle", message: { key: "stage.cancelled" } }) : next);
     }
     case "train": {
       const t = e.event;

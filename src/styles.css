@@ -780,6 +780,10 @@ button:disabled {
   color: var(--good);
   font-size: 12px;
 }
+.lang-select {
+  width: 150px;
+  flex: none;
+}
 
 .banner {
   margin: 10px 16px 0;
@@ -794,6 +798,16 @@ button:disabled {
 .banner.warn {
   background: rgba(242, 193, 78, 0.1);
   border: 1px solid rgba(242, 193, 78, 0.3);
+}
+.banner.info {
+  background: var(--accent-soft);
+  border: 1px solid rgba(255, 154, 77, 0.35);
+  align-items: center;
+}
+.banner-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
 }
 .banner.error {
   background: rgba(255, 107, 107, 0.08);

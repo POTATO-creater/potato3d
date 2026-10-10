@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { api, host, type ExportOptions, type ExportStats, type SplatInfo } from "../lib/api";
+import { api, host, type ExportOptions, type ExportStats, type Msg, type SplatInfo } from "../lib/api";
 import { fmtBytes, fmtCount, fmtDuration } from "../lib/format";
 import { basename, revealLabel, type Os } from "../lib/platform";
 import { Field, NumField, Segmented, Select } from "./fields";
+import { useI18n } from "../i18n";
 
 const STORE_KEY = "splatforge.export.v1";
 const DEFAULTS: ExportOptions = { format: "sog", decimate: 0, minOpacity: 0, shDegree: null };
@@ -17,10 +18,6 @@ function loadOptions(): ExportOptions {
   return DEFAULTS;
 }
 
-const SH_LABELS = ["só cor (grau 0)", "grau 1", "grau 2", "grau 3"];
-/** O que cada grau mantém, para o menu. */
-const SH_HINTS = ["sem reflexos, o menor arquivo", "reflexos suaves", "reflexos mais nítidos"];
-
 interface Props {
   os: Os | undefined;
   projectDir: string;
@@ -33,9 +30,11 @@ interface Props {
 }
 
 export function ExportPanel(p: Props) {
+  const { t, tm } = useI18n();
+  const te = t.export;
   const [opts, setOpts] = useState<ExportOptions>(loadOptions);
   const [info, setInfo] = useState<SplatInfo | null>(null);
-  const [progress, setProgress] = useState<{ fraction: number; message: string } | null>(null);
+  const [progress, setProgress] = useState<{ fraction: number; message: Msg } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const set = (patch: Partial<ExportOptions>) => setOpts((o) => ({ ...o, ...patch }));
 
@@ -59,7 +58,7 @@ export function ExportPanel(p: Props) {
 
   async function run() {
     setError(null);
-    setProgress({ fraction: 0, message: "Iniciando" });
+    setProgress({ fraction: 0, message: { key: "stage.starting" } });
     try {
       const stats = await api.exportSplat(p.projectDir, { ...opts, shDegree }, setProgress);
       p.onExported(stats);
@@ -76,7 +75,7 @@ export function ExportPanel(p: Props) {
   return (
     <section className="panel">
       <header className="panel-head">
-        <h2>Exportação</h2>
+        <h2>{te.title}</h2>
         {info && (
           <span className="muted mono small">
             {fmtCount(info.count)} · {fmtBytes(info.bytes)} · SH {info.shDegree}
@@ -86,26 +85,22 @@ export function ExportPanel(p: Props) {
 
       <fieldset className="export-fields" disabled={busy}>
         <Field
-          label="Formato"
-          hint={
-            opts.format === "sog"
-              ? "texturas WebP quantizadas, ~5–15× menor; abre no Spark, PlayCanvas e SuperSplat"
-              : "float32 sem perdas; compatível com qualquer visualizador"
-          }
+          label={te.format}
+          hint={opts.format === "sog" ? te.formatHintSog : te.formatHintPly}
         >
           <Segmented
             value={opts.format}
             onChange={(format) => set({ format })}
             options={[
-              { value: "sog", label: "SOG comprimido" },
-              { value: "ply", label: "PLY" },
+              { value: "sog", label: te.sog },
+              { value: "ply", label: te.ply },
             ]}
           />
         </Field>
         <div className="grid2">
           <NumField
-            label="Reduzir"
-            hint="funde splats parecidos"
+            label={te.reduce}
+            hint={te.reduceHint}
             value={Math.round(opts.decimate * 100)}
             min={0}
             max={90}
@@ -114,8 +109,8 @@ export function ExportPanel(p: Props) {
             onChange={(v) => set({ decimate: Math.min(90, Math.max(0, v)) / 100 })}
           />
           <NumField
-            label="Opacidade mín."
-            hint="0 desliga"
+            label={te.minOpacity}
+            hint={te.minOpacityHint}
             value={Math.round(opts.minOpacity * 1000) / 10}
             min={0}
             max={20}
@@ -124,16 +119,16 @@ export function ExportPanel(p: Props) {
             onChange={(v) => set({ minOpacity: Math.min(20, Math.max(0, v)) / 100 })}
           />
         </div>
-        <Field label="Bandas SH" hint="brilho que muda com o ângulo; cortar reduz bastante o arquivo">
+        <Field label={te.shBands} hint={te.shBandsHint}>
           <Select<number | null>
             value={shDegree}
             onChange={(shDegree) => set({ shDegree })}
             options={[
-              { value: null, label: `Manter (${SH_LABELS[trained]})` },
-              ...SH_LABELS.slice(0, trained).map((label, d) => ({
+              { value: null, label: te.keep(te.shLabels[trained]) },
+              ...te.shLabels.slice(0, trained).map((label, d) => ({
                 value: d,
                 label: label[0].toUpperCase() + label.slice(1),
-                hint: SH_HINTS[d],
+                hint: te.shHints[d],
               })),
             ]}
           />
@@ -145,11 +140,11 @@ export function ExportPanel(p: Props) {
           <div className="bar">
             <div className="bar-fill" style={{ width: `${Math.round(progress.fraction * 100)}%` }} />
           </div>
-          <span className="help">{progress.message}…</span>
+          <span className="help">{tm(progress.message)}…</span>
         </div>
       ) : (
         <button className="btn-sm export-run" onClick={run}>
-          Exportar{estimate != null && opts.decimate > 0 ? ` ~${fmtCount(estimate)} splats` : ""}
+          {estimate != null && opts.decimate > 0 ? te.runApprox(fmtCount(estimate)) : te.run}
         </button>
       )}
 
@@ -167,21 +162,20 @@ export function ExportPanel(p: Props) {
             <span>
               {fmtBytes(last.inputBytes)} → {fmtBytes(last.outputBytes)}
             </span>
-            <span className="good">{(last.inputBytes / last.outputBytes).toFixed(1)}× menor</span>
+            <span className="good">{te.smaller((last.inputBytes / last.outputBytes).toFixed(1))}</span>
             <span>{fmtDuration(last.seconds)}</span>
           </div>
           {last.prunedCount < last.inputCount && (
             <p className="help">
-              Poda por opacidade tirou {fmtCount(last.inputCount - last.prunedCount)}; a fusão,{" "}
-              {fmtCount(last.prunedCount - last.outputCount)}.
+              {te.pruned(fmtCount(last.inputCount - last.prunedCount), fmtCount(last.prunedCount - last.outputCount))}
             </p>
           )}
           <div className="trim-actions">
             <button className={`btn-sm ${p.previewing ? "on" : ""}`} onClick={() => p.onPreview(!p.previewing)}>
-              {p.previewing ? "Ver original" : "Ver no 3D"}
+              {p.previewing ? te.viewOriginal : te.view3d}
             </button>
             <button className="btn-sm ghost" onClick={() => host.reveal(last.path)}>
-              {revealLabel(p.os)}
+              {revealLabel(t, p.os)}
             </button>
           </div>
         </div>

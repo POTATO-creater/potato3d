@@ -1,4 +1,4 @@
-# SplatForge
+# Gausify Orbit
 
 App desktop (Tauri 2 + React) que transforma **vídeos orbitais** — inclusive
 gerados por IA — em **Gaussian Splatting**, 100% local, no macOS (Apple
@@ -24,7 +24,7 @@ pnpm setup:tools        # baixa o Brush (sidecar do Tauri) e confere ffmpeg/COLM
 
 ### Windows (usuário final)
 
-1. Baixe e execute o `SplatForge_<versão>_x64-setup.exe` (gerado pelo
+1. Baixe e execute o `Gausify Orbit_<versão>_x64-setup.exe` (gerado pelo
    GitHub Actions, ver abaixo). Ele instala só para o usuário atual, sem
    pedir administrador, e baixa o WebView2 se faltar.
 2. Na primeira execução o app mostra **"Instalar ferramentas"**: baixa o

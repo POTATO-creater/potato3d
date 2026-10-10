@@ -2,10 +2,9 @@ import type { Settings } from "./api";
 
 export type PresetId = "preview" | "balanced" | "quality";
 
+/** Nome e descrição de cada preset ficam no catálogo (`t.presets`). */
 export interface Preset {
   id: PresetId;
-  label: string;
-  hint: string;
   settings: Settings;
 }
 
@@ -20,8 +19,6 @@ export interface Preset {
 export const PRESETS: Preset[] = [
   {
     id: "preview",
-    label: "Prévia",
-    hint: "Confere rápido se o vídeo reconstrói",
     settings: {
       frames: { targetFrames: 90, maxSide: 1280, oversample: 3 },
       poses: { features: "sift", cameraModel: "SIMPLE_PINHOLE", matchWindow: 8, closedLoop: true },
@@ -38,8 +35,6 @@ export const PRESETS: Preset[] = [
   },
   {
     id: "balanced",
-    label: "Equilibrado",
-    hint: "Bom ponto de partida para a maioria dos vídeos",
     settings: {
       frames: { targetFrames: 160, maxSide: 1600, oversample: 3 },
       poses: { features: "siftPlus", cameraModel: "SIMPLE_PINHOLE", matchWindow: 20, closedLoop: true },
@@ -56,8 +51,6 @@ export const PRESETS: Preset[] = [
   },
   {
     id: "quality",
-    label: "Qualidade",
-    hint: "Mais frames, 30k passos e perda SSIM; bem mais lento no Mac",
     settings: {
       frames: { targetFrames: 220, maxSide: 1920, oversample: 4 },
       poses: { features: "siftPlus", cameraModel: "SIMPLE_PINHOLE", matchWindow: 20, closedLoop: true },

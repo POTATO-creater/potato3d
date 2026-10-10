@@ -1,0 +1,341 @@
+// Catálogo de referência: os outros idiomas têm que ter exatamente esta forma.
+
+import { fmtCount } from "../lib/format";
+
+/** Parâmetros de uma `Msg`, com as mensagens aninhadas já traduzidas. */
+export type Args = Record<string, string | number>;
+
+const FEATURES: Record<string, string> = { sift: "SIFT", siftPlus: "SIFT reforçado", aliked: "ALIKED + LightGlue" };
+const features = (id: string | number) => FEATURES[id] ?? String(id);
+
+export const ptBR = {
+  language: "Português (Brasil)",
+
+  /** Nomes curtos das etapas (botões e listas). */
+  stages: { frames: "Frames", masks: "Recorte", poses: "Poses", train: "Treino" },
+  /** Títulos da faixa de etapas. */
+  stageTitles: { frames: "Frames", masks: "Recorte", poses: "Poses de câmera", train: "Treino do splat" },
+
+  common: {
+    cancel: "Cancelar",
+    language: "Idioma",
+  },
+
+  app: {
+    tabs: { viewer: "3D", frames: "Frames", log: "Log" },
+    readyIn: (d: string) => `Pronto em ${d}`,
+    videoError: (e: string) => `Não foi possível ler o vídeo: ${e}`,
+    failed: "Falhou.",
+    failedAt: (stage: string) => `Falhou na etapa ${stage}.`,
+    logError: (e: string) => `ERRO: ${e}`,
+    exported: (name: string) => `Exportado · ${name}`,
+    hero: "Vídeo orbital → Gaussian Splatting",
+    optional: "opcional",
+    dropToStart: "Arraste um vídeo para a janela para começar.",
+    maskModel: "Modelo de recorte",
+    masker: "Recortador",
+  },
+
+  platform: {
+    browserDecoder: "decodificador do navegador",
+    solidColor: "cor sólida",
+    webPoses: "AKAZE · WebGPU · SfM incremental",
+    hwDecode: "decodificação por hardware",
+    globalMapper: "mapeador global",
+    webgpuChrome: "Chrome ou Edge com WebGPU",
+    webgpuBrowser: "navegador com WebGPU",
+    installTools: "Instalar ferramentas",
+    packageManager: (tool: string) => `instale ${tool} pelo gerenciador de pacotes`,
+    fileManager: "gerenciador de arquivos",
+    download: (what?: string) => `Baixar${what ? ` ${what}` : ""}`,
+    reveal: (fileManager: string, what?: string) => `Mostrar${what ? ` ${what}` : ""} no ${fileManager}`,
+    blurbs: {
+      web: {
+        frames: "o navegador decodifica o vídeo e escolhe os frames mais nítidos.",
+        masks: "isola o sujeito para o splat sair sem o fundo.",
+        poses: "features AKAZE, matching circular na GPU (fecha a órbita) e SfM incremental.",
+        train: "Brush em WebAssembly + WebGPU, com prévias ao vivo aqui.",
+      },
+      desktop: {
+        frames: "ffmpeg decodifica por hardware e escolhe os frames mais nítidos.",
+        masks: "isola o sujeito para o splat sair sem o fundo.",
+        poses: "COLMAP com matching circular (fecha a órbita) e mapeador global.",
+        train: "Brush na GPU, com prévias ao vivo aqui.",
+      },
+    },
+  },
+
+  presets: {
+    preview: { label: "Prévia", hint: "Confere rápido se o vídeo reconstrói" },
+    balanced: { label: "Equilibrado", hint: "Bom ponto de partida para a maioria dos vídeos" },
+    quality: { label: "Qualidade", hint: "Mais frames, 30k passos e perda SSIM; bem mais lento no Mac" },
+  },
+
+  sidebar: {
+    video: "Vídeo",
+    changeVideo: "Trocar…",
+    chooseVideo: "Escolher…",
+    trim: "Trecho",
+    startHere: "Início aqui",
+    endHere: "Fim aqui",
+    wholeVideo: "Vídeo todo",
+    trimHelp:
+      'Arraste as alças laranja na linha do tempo ou use os botões. Use só o trecho em que o objeto continua consistente: vídeo de IA costuma "derreter" no fim da órbita.',
+    dropTitle: "Arraste um vídeo orbital aqui",
+    dropHint: "ou clique para escolher (.mp4, .mov, .webm)",
+    project: "Projeto",
+    importProject: "Importar…",
+    importTitle: "Importa uma pasta de projeto do Gausify Orbit ou um dataset COLMAP (images/ + sparse/0)",
+    changeProject: "Alterar…",
+    pickVideoFirst: "Escolha um vídeo primeiro",
+    quality: "Qualidade",
+    custom: "personalizado",
+    advanced: "Parâmetros avançados",
+    frames: "Frames",
+    maxSide: "Lado máx.",
+    candidates: "Candidatos/frame",
+    candidatesHint: "escolhe o mais nítido",
+    poses: "Poses",
+    posesColmap: "Poses (COLMAP)",
+    features: "Features",
+    featuresHint: {
+      sift: "se registrar < 95% das câmeras, repete com o reforçado",
+      siftPlus: "acha pontos em cabelo, pele e fundo desfocado (~2× o tempo)",
+      aliked: "registra bem, mas ~10× mais lento na CPU",
+    },
+    featureOptions: {
+      sift: { label: "SIFT (rápido)" },
+      siftPlus: { label: "SIFT reforçado", hint: "~2× o tempo" },
+      aliked: { label: "ALIKED + LightGlue", hint: "~10× mais lento na CPU" },
+    },
+    matchWindow: "Vizinhos casados",
+    camera: "Câmera",
+    simplePinhole: "Pinhole simples",
+    pinhole: "Pinhole (fx ≠ fy)",
+    closedLoop: "Órbita fechada (360°)",
+    closedLoopHint: "casa o fim com o começo",
+    flatOrbit: "Forçar órbita plana",
+    flatOrbitHint: "câmeras na mesma altura; só para vídeos que giram em nível",
+    training: "Treino (Brush)",
+    steps: "Passos",
+    shDegree: "Grau SH",
+    maxSplats: "Máx. splats",
+    maxResolution: "Resolução máx.",
+    previewEvery: "Prévia a cada",
+    stepsSuffix: "passos",
+    ssim: "Perda SSIM",
+    ssimHint: "detalhes um pouco mais finos, mas ~3× mais lento no Mac",
+    smooth: "Suavizar áreas não filmadas",
+    smoothHint: "menos riscos e cores estranhas no topo; −1,3 dB de detalhe",
+    psnr: "Medir qualidade (PSNR)",
+    psnrHint: "separa 1 a cada 16 frames para avaliação",
+    runFrom: "Executar a partir de",
+    needsFrames: "Requer frames extraídos",
+    enableMasks: "Ative o recorte do sujeito",
+    needsPoses: "Requer poses (e recortes, se ativados)",
+    run: "Gerar splat",
+  },
+
+  masks: {
+    title: "Recorte do sujeito",
+    enable: "Isolar o sujeito (remover o fundo)",
+    enableHint: "o splat sai só com a pessoa ou objeto, sem paredes e riscos em volta",
+    methods: {
+      chroma: {
+        label: "Cor sólida",
+        hint:
+          "Chroma key: instantâneo. Para fundo de cor única (tela verde, azul…). Se o sujeito tiver partes " +
+          "da cor do fundo, prefira o RMBG com o despill ligado.",
+      },
+      rmbg: {
+        label: "RMBG",
+        hint:
+          "RMBG-1.4 na GPU: bordas mais limpas, qualquer sujeito. Baixa 176 MB na primeira vez. " +
+          "Licença da BRIA AI só para uso não comercial.",
+      },
+      people: { label: "Pessoas", hint: "MODNet na GPU: rápido, mas só reconhece pessoas." },
+      general: { label: "Objetos", hint: "BiRefNet: qualquer sujeito, bem mais lento." },
+      auto: { label: "Vision", hint: "Recorte nativo do macOS, na GPU: qualquer sujeito." },
+    },
+    bgColor: "Cor do fundo",
+    autoColor: "Detectar a cor pelas bordas",
+    autoColorHint: "mediana das bordas de cada frame",
+    tolerance: "Tolerância",
+    softness: "Suavização da borda",
+    contiguous: "Só regiões ligadas à borda",
+    contiguousHint: "não fura partes do sujeito com a mesma cor do fundo",
+    despill: "Remover reflexo do fundo verde/azul (despill)",
+    despillHint: "tira do sujeito inteiro a luz rebatida pela tela; desligue se ele tiver a cor do fundo",
+    despillStrength: "Intensidade do despill",
+    forPoses: "Usar o recorte também nas poses",
+    forPosesHint: "ajuda se o fundo muda entre frames; atrapalha em sujeitos com pouca textura",
+  },
+
+  export: {
+    title: "Exportação",
+    format: "Formato",
+    formatHintSog: "texturas WebP quantizadas, ~5–15× menor; abre no Spark, PlayCanvas e SuperSplat",
+    formatHintPly: "float32 sem perdas; compatível com qualquer visualizador",
+    sog: "SOG comprimido",
+    ply: "PLY",
+    reduce: "Reduzir",
+    reduceHint: "funde splats parecidos",
+    minOpacity: "Opacidade mín.",
+    minOpacityHint: "0 desliga",
+    shBands: "Bandas SH",
+    shBandsHint: "brilho que muda com o ângulo; cortar reduz bastante o arquivo",
+    /** Rótulo de cada grau SH (minúsculo; o menu capitaliza). */
+    shLabels: ["só cor (grau 0)", "grau 1", "grau 2", "grau 3"],
+    /** O que cada grau mantém, para o menu. */
+    shHints: ["sem reflexos, o menor arquivo", "reflexos suaves", "reflexos mais nítidos"],
+    keep: (label: string) => `Manter (${label})`,
+    run: "Exportar",
+    runApprox: (count: string) => `Exportar ~${count} splats`,
+    smaller: (ratio: string) => `${ratio}× menor`,
+    pruned: (byOpacity: string, byMerge: string) => `Poda por opacidade tirou ${byOpacity}; a fusão, ${byMerge}.`,
+    viewOriginal: "Ver original",
+    view3d: "Ver no 3D",
+  },
+
+  frames: {
+    empty: "Os frames selecionados aparecem aqui depois da primeira etapa.",
+    count: (n: number) => `${n} frames`,
+    lowSharpness: (n: number) => `${n} com menos da metade da nitidez mediana`,
+    uniform: "Nitidez uniforme",
+    showingCut: "Mostrando recorte",
+    showCut: "Mostrar recorte",
+    sharpness: "nitidez",
+    noLog: "Nenhum log ainda.",
+  },
+
+  stageStrip: {
+    selected: "Selecionados",
+    medianSharpness: "Nitidez mediana",
+    cuts: "Recortes",
+    coverage: "Sujeito ocupa",
+    noSubject: "Sem sujeito",
+    background: "Fundo",
+    cameras: "Câmeras",
+    points: "Pontos",
+    reprojError: "Erro reproj.",
+    splats: "Splats",
+    speed: "Velocidade",
+    stepsPerSec: (n: string) => `${n} passos/s`,
+    remaining: "Restante",
+    psnrTitle: "Medido em frames que não entram no treino. >30 dB é ótimo; <25 dB indica vídeo inconsistente.",
+  },
+
+  setup: {
+    title: "Primeiro uso: faltam ferramentas",
+    recheck: "Verificar de novo",
+    nvidia: "GPU NVIDIA detectada: o COLMAP com CUDA usa a placa para extrair e casar features. ",
+    noNvidia: "Nenhuma GPU NVIDIA detectada: o COLMAP roda na CPU. ",
+    rmbgLicense: "O RMBG-1.4 é da BRIA AI, com licença só para uso não comercial. ",
+    storedInBrowser: "Os arquivos são conferidos por SHA-256 e ficam guardados no navegador.",
+    storedLocally: "Os arquivos são conferidos por SHA-256 e ficam na pasta de dados do usuário.",
+    install: (size: string) => `Instalar ferramentas (${size})`,
+    checking: "Verificando o que precisa ser baixado…",
+    planError: (e: string) => `Não foi possível preparar a instalação: ${e}`,
+    queued: "na fila",
+    extracting: "extraindo…",
+    ready: "pronto",
+    /** Seguido de `pnpm setup:tools` em código. */
+    brushDev: "O Brush deveria vir junto com o app. Em desenvolvimento, rode",
+    visionNote: "O recortador (Vision) vem com o app e exige macOS 14 ou superior.",
+    /** Rótulos dos modelos baixáveis (os demais pacotes usam o nome da ferramenta). */
+    packages: {
+      rmbg: "Recorte RMBG-1.4",
+      modnet: "Recorte de pessoas (MODNet)",
+      birefnet: "Recorte de objetos (BiRefNet)",
+    } as Record<string, string>,
+  },
+
+  player: {
+    dragStart: "Arraste para definir o início",
+    dragEnd: "Arraste para definir o fim",
+    pause: "Pausar (espaço)",
+    play: "Reproduzir (espaço)",
+    prevFrame: "Frame anterior (←)",
+    nextFrame: "Próximo frame (→)",
+    loop: "Repetir só o trecho selecionado",
+  },
+
+  viewer: {
+    preview: (step: string) => `Prévia · passo ${step}`,
+    final: "Resultado final",
+    loading: "Carregando splat…",
+    loadError: (e: string) => `Erro ao carregar: ${e}`,
+    cameras: "Câmeras",
+    lockAngle: "Travar ângulo",
+    lockAngleTitle: "Limita a altura da câmera às regiões que o vídeo filmou",
+    spin: "Girar",
+    recenter: "Recentrar",
+  },
+
+  /** Versão web: aviso de versão nova baixada pelo service worker. */
+  update: {
+    available: "Há uma nova versão do Gausify Orbit pronta para usar.",
+    apply: "Atualizar agora",
+    later: "Depois",
+    busy: "Disponível quando o processamento terminar",
+  },
+
+  /** Mensagens de progresso (backend e reducer), por chave da `Msg`. */
+  msg: {
+    "stage.saved": () => "Resultado salvo no projeto",
+    "stage.queued": () => "Na fila",
+    "stage.starting": () => "Iniciando",
+    "stage.failed": () => "Falhou",
+    "stage.cancelled": () => "Cancelado",
+
+    "frames.reading": () => "Lendo vídeo",
+    "frames.decoding": () => "Decodificando vídeo",
+    "frames.decodingSharpness": () => "Decodificando e medindo nitidez",
+    "frames.sharpness": () => "Medindo nitidez",
+    "frames.selected": (a: Args) => `${a.n} frames selecionados`,
+
+    "masks.detecting": () => "Detectando o sujeito",
+    "masks.downloading": (a: Args) => `Baixando ${a.model}: ${a.done}/${a.total} MB`,
+    "masks.cutting": (a: Args) => `Recortando ${a.i}/${a.n}`,
+    "masks.done": (a: Args) => `${a.n} recortes · ${a.backend}`,
+    "masks.doneChroma": (a: Args) => `${a.n} recortes · cor sólida`,
+    "masks.disabled": () => "Recorte desativado",
+    "masks.alphaFrames": (a: Args) => `Frames com fundo transparente ${a.i}/${a.n}`,
+
+    "poses.reused": () => "Poses anteriores reaproveitadas",
+    "poses.extracting": (a: Args) => `Extraindo features (${features(a.features)})`,
+    "poses.extractingN": (a: Args) => `Extraindo features (${features(a.features)}) ${a.i}/${a.n}`,
+    "poses.matching": (a: Args) => `Casando ${a.pairs} pares`,
+    "poses.matchingBlock": (a: Args) => `Casando ${a.pairs} pares (bloco ${a.i}/${a.n})`,
+    "poses.calibrating": () => "Calibrando grafo de vistas",
+    "poses.globalMapper": () => "Reconstruindo (mapeador global)",
+    "poses.retry": (a: Args) => `2ª tentativa · ${a.step}`,
+    "poses.incremental": () => "Poucas câmeras registradas; tentando mapeador incremental",
+    "poses.registering": (a: Args) => `Registrando imagem #${a.image}`,
+    "poses.flattening": () => "Forçando órbita plana",
+    "poses.ready": (a: Args) => `Poses prontas · ${features(a.features)}`,
+    "poses.webFeatures": () => "Extraindo features",
+    "poses.webFeaturesN": (a: Args) => `Features ${a.i}/${a.n}`,
+    "poses.webMatching": (a: Args) => `Casando ${a.i}/${a.n} pares`,
+    "poses.webRegistered": (a: Args) => `Registradas ${a.i}/${a.n} câmeras`,
+
+    "train.alphaDataset": () => "Montando frames com fundo transparente",
+    "train.loading": () => "Carregando dataset na GPU",
+    "train.loadingNamed": (a: Args) => `Carregando ${a.name} na GPU`,
+    "train.step": (a: Args) => `Passo ${a.iter}/${a.total} · ${fmtCount(Number(a.splats))} splats`,
+    "train.done": () => "Treino concluído",
+
+    "export.readingPly": () => "Lendo o .ply",
+    "export.merging": () => "Fundindo gaussianas parecidas",
+    "export.writingPly": () => "Gravando o .ply",
+    "export.sorting": () => "Ordenando (Morton)",
+    "export.quantizing": () => "Quantizando escalas e cores",
+    "export.clustering": () => "Agrupando as bandas SH (k-means)",
+    "export.textures": () => "Montando as texturas",
+    "export.compressing": () => "Comprimindo as texturas (WebP)",
+    "export.writingSog": () => "Gravando o .sog",
+    "export.done": () => "Pronto",
+  },
+};
+
+export type Messages = typeof ptBR;

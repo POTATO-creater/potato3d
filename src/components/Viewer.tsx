@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { SparkRenderer, SplatFileType, SplatMesh } from "@sparkjsdev/spark";
 import { fileUrl, type SceneFrame } from "../lib/api";
+import { useI18n } from "../i18n";
 
 interface Props {
   /** `label` substitui o rótulo padrão (ex.: arquivo exportado); `url`, o
@@ -48,6 +49,8 @@ function polarRange(frame: SceneFrame): [number, number] {
 }
 
 export function Viewer({ splat, frame, placeholder }: Props) {
+  const { t, locale } = useI18n();
+  const tv = t.viewer;
   const host = useRef<HTMLDivElement>(null);
   const ctx = useRef<Ctx | null>(null);
   const [loading, setLoading] = useState(false);
@@ -264,29 +267,29 @@ export function Viewer({ splat, frame, placeholder }: Props) {
       <div className="viewer-hud">
         {splat && (
           <span className="chip">
-            {splat.label ?? (splat.iter != null ? `Prévia · passo ${splat.iter.toLocaleString("pt-BR")}` : "Resultado final")}
+            {splat.label ?? (splat.iter != null ? tv.preview(splat.iter.toLocaleString(locale)) : tv.final)}
           </span>
         )}
-        {loading && <span className="chip chip-pulse">Carregando splat…</span>}
-        {loadError && <span className="chip chip-error">Erro ao carregar: {loadError}</span>}
+        {loading && <span className="chip chip-pulse">{tv.loading}</span>}
+        {loadError && <span className="chip chip-error">{tv.loadError(loadError)}</span>}
       </div>
       <div className="viewer-tools">
         <button className={`tool ${showCams ? "on" : ""}`} onClick={() => setShowCams((v) => !v)} disabled={!frame}>
-          Câmeras
+          {tv.cameras}
         </button>
         <button
           className={`tool ${clampView ? "on" : ""}`}
           onClick={() => setClampView((v) => !v)}
           disabled={!frame}
-          title="Limita a altura da câmera às regiões que o vídeo filmou"
+          title={tv.lockAngleTitle}
         >
-          Travar ângulo
+          {tv.lockAngle}
         </button>
         <button className={`tool ${spin ? "on" : ""}`} onClick={() => setSpin((v) => !v)}>
-          Girar
+          {tv.spin}
         </button>
         <button className="tool" onClick={resetView}>
-          Recentrar
+          {tv.recenter}
         </button>
       </div>
     </div>
