@@ -23,8 +23,11 @@ const CACHE = PREFIX + SW_BUILD.version;
 const META = PREFIX + "meta";
 const ACTIVE_KEY = "/__gausify-orbit-active-version__";
 const scoped = (path) => new URL(path, self.registration.scope).href;
-const PRECACHE = new Set(SW_BUILD.files.map(scoped));
-const INDEX = scoped("index.html");
+// O app é guardado na raiz do escopo, não em index.html: o Cloudflare responde
+// /index.html com 307 para /, e o Chrome recusa resposta redirecionada numa
+// navegação (ERR_FAILED ao recarregar).
+const INDEX = scoped("./");
+const PRECACHE = new Set(SW_BUILD.files.map((f) => (f === "index.html" ? INDEX : scoped(f))));
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -73,6 +76,13 @@ async function fromCache(url, request) {
   return hit ?? fetch(request);
 }
 
+/** Navegação não aceita resposta com `redirected` (de um cache antigo ou de
+ *  um servidor que redirecione a raiz): entrega uma cópia limpa. */
+async function unredirect(res) {
+  if (!res.redirected) return res;
+  return new Response(await res.blob(), { status: res.status, statusText: res.statusText, headers: res.headers });
+}
+
 self.addEventListener("fetch", (event) => {
   const { request } = event;
   if (request.method !== "GET") return;
@@ -81,10 +91,11 @@ self.addEventListener("fetch", (event) => {
 
   // Navegações (inclusive com ?query, como ?dataset=…) abrem o app do cache.
   if (request.mode === "navigate" && url.href.startsWith(self.registration.scope)) {
-    event.respondWith(fromCache(INDEX, request));
+    event.respondWith(fromCache(INDEX, request).then(unredirect));
     return;
   }
-  const clean = url.origin + url.pathname;
+  const path = url.origin + url.pathname;
+  const clean = path === scoped("index.html") ? INDEX : path;
   // Arquivos com hash de outra versão: uma aba antiga pedindo os dela.
   const old = clean.startsWith(scoped("assets/"));
   if (PRECACHE.has(clean) || old) event.respondWith(fromCache(clean, request));
