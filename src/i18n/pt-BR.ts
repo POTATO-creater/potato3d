@@ -272,6 +272,13 @@ export const ptBR = {
     recenter: "Recentrar",
   },
 
+  /** Versão web: aviso de versão nova baixada pelo service worker. */
+  update: {
+    available: "Há uma nova versão do Gausify Orbit pronta para usar.",
+    apply: "Atualizar agora",
+    later: "Depois",
+    busy: "Disponível quando o processamento terminar",
+  },
 
   /** Mensagens de progresso (backend e reducer), por chave da `Msg`. */
   msg: {

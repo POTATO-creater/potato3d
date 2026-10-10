@@ -259,6 +259,11 @@ export interface Host {
   reveal(path: string): Promise<void>;
   /** Arquivos soltos na janela; devolve a função que para de ouvir. */
   onDrop(handler: (paths: string[]) => void): () => void;
+  /** Só no web: avisa quando uma versão nova do app foi baixada (service
+   *  worker); devolve a função que para de ouvir. */
+  onUpdate?(handler: () => void): () => void;
+  /** Põe a versão nova no ar e recarrega a página. */
+  applyUpdate?(): void;
 }
 
 // Definidos uma vez pelo ponto de entrada (src/main.tsx ou web/src/main.tsx),

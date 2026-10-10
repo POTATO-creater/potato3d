@@ -5,6 +5,7 @@ import ReactDOM from "react-dom/client";
 import App from "../../src/App";
 import { setHost } from "../../src/lib/api";
 import { webHost } from "./host";
+import { registerServiceWorker } from "./host/update";
 
 setHost(webHost);
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
@@ -12,3 +13,4 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <App />
   </React.StrictMode>,
 );
+registerServiceWorker();

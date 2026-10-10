@@ -262,6 +262,12 @@ export const enUS: Messages = {
     recenter: "Recenter",
   },
 
+  update: {
+    available: "A new version of Gausify Orbit is ready to use.",
+    apply: "Update now",
+    later: "Later",
+    busy: "Available when processing finishes",
+  },
 
   msg: {
     "stage.saved": () => "Result saved in the project",

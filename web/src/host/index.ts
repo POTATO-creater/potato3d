@@ -8,6 +8,7 @@ import { cachedModel, downloadModel, MODELS } from "../pipeline/segment";
 import { readFrame } from "../scene";
 import { exportSplat, splatInfo } from "./export";
 import { addVideo, basename, readFile, readPublished, publish, urlOf, video, writeFile } from "./files";
+import { applyUpdate, onUpdate } from "./update";
 import { runJob } from "./job";
 import { importFolder, importUrl, layout, openProject, projectFor, readState, saveState } from "./project";
 
@@ -205,4 +206,6 @@ export const webHost: Host = {
     openUrlVideo();
     return () => dropHandlers.delete(handler);
   },
+  onUpdate,
+  applyUpdate,
 };

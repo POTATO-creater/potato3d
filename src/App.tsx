@@ -23,6 +23,7 @@ import { StageStrip } from "./components/StageStrip";
 import { FramesGrid, LogView } from "./components/FramesGrid";
 import { ExportPanel } from "./components/ExportPanel";
 import { LanguageSelect } from "./components/LanguageSelect";
+import { UpdateBanner } from "./components/UpdateBanner";
 import { basename } from "./lib/platform";
 import { I18nProvider, useI18n } from "./i18n";
 import "./styles.css";
@@ -377,6 +378,7 @@ function AppView() {
           <LanguageSelect />
         </div>
 
+        <UpdateBanner busy={job.running} />
         {tools && missing.length > 0 && (
           <ToolsSetup
             tools={tools}
