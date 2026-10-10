@@ -13,6 +13,12 @@
       "runtimeArgs": ["web:dev"],
       "env": { "WEB_FS_ANY": "1" },
       "port": 1440
+    },
+    {
+      "name": "web-preview",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["exec", "vite", "preview", "--config", "web/vite.config.ts", "--port", "1450", "--strictPort"],
+      "port": 1450
     }
   ]
 }
