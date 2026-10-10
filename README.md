@@ -261,6 +261,41 @@ O que foi preciso consertar para o treino rodar (e rodar rápido) no navegador:
   - `Training.exportPly()`: o mesmo export do Brush nativo (piso de escala
     embutido, unidades do dataset restauradas).
 
+### Poses no navegador (prova de conceito)
+
+Com uma pasta que tenha `images/`, o botão **"Calcular poses no navegador"**
+faz o SfM sem o COLMAP, numa cópia das imagens no OPFS (a pasta original não
+é alterada), e grava um `sparse/0` que o treino usa em seguida:
+
+1. **Features:** AKAZE do OpenCV.js (`@techstark/opencv-js` 4.12, que não
+   traz SIFT nem as funções de geometria epipolar) em Web Workers.
+2. **Matching:** força bruta por distância de Hamming num compute shader
+   WebGPU, com teste de razão e checagem mútua; mesmos pares do app (janela do
+   preset + saltos 16/32/64, órbita fechada).
+3. **Verificação:** matriz fundamental por RANSAC (8 pontos normalizado).
+4. **Reconstrução incremental** num worker (`web/src/sfm/`): tracks por
+   union-find, par inicial com paralaxe ≥ 2°, PnP partindo da pose do frame
+   vizinho (com DLT + RANSAC de reserva), triangulação, BA local a cada frame
+   e global periódico (Levenberg–Marquardt com complemento de Schur, Huber,
+   focal compartilhada). No fim, BA com limiar decrescente reaproveita as
+   observações que fecham a órbita.
+
+Medido no M4 com um vídeo orbital sintético de 120 frames 960×720 e poses
+verdadeiras conhecidas (`synth2.py`: textura procedural, chão e parede ao
+fundo):
+
+| | Tempo | Câmeras | Pontos | Focal | Posição (mediana) | Rotação (mediana) | PSNR do treino |
+|---|---|---|---|---|---|---|---|
+| Navegador | 37 s | 120/120 | 14 mil | +0,22% | 0,27% do raio | 0,085° | 39,7 dB |
+| COLMAP 4.2 nativo (SIFT, global) | 14 s | 120/120 | 2 mil | +0,07% | 0,73% do raio | 0,19° | 36,2 dB |
+| Poses verdadeiras | — | — | — | — | — | — | 41,2 dB |
+
+PSNR: Brush web, 5 mil passos a 960 px, SH 1, 8 vistas de avaliação.
+
+Ainda não foi testado em vídeos reais de IA (desfoque, pouca textura,
+elementos que se mexem), onde o SIFT reforçado e o mapeador global do COLMAP
+fazem diferença.
+
 ## Testes
 
 ```bash

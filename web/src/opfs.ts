@@ -4,12 +4,15 @@
 
 const MODEL_FILES = ["cameras.bin", "images.bin", "points3D.bin"];
 
-async function freshDir(name: string) {
+async function freshDir(name: string, keep?: FileSystemDirectoryHandle) {
   const root = await navigator.storage.getDirectory();
   const datasets = await root.getDirectoryHandle("datasets", { create: true });
+  // `keep` pode estar no próprio OPFS (ex.: a origem de uma cópia).
+  const keepSlot = keep ? (await root.resolve(keep))?.[1] : undefined;
   // Um dataset por vez: os anteriores saem para não acumular GBs na origem.
   // Um que ainda esteja aberto (ex.: treino em andamento) fica para a próxima.
   for await (const key of datasets.keys()) {
+    if (key === keepSlot) continue;
     await datasets.removeEntry(key, { recursive: true }).catch(() => {});
   }
   const slot = await datasets.getDirectoryHandle(String(Date.now()), { create: true });
@@ -76,4 +79,19 @@ function imageNames(buf: ArrayBuffer): string[] {
     o += 8 + Number(v.getBigUint64(o, true)) * 24;
   }
   return names;
+}
+
+/** Cópia só de `images/` para o OPFS: base para calcular poses sem tocar na
+ *  pasta do usuário (o SfM grava `sparse/0` na cópia). */
+export async function copyImages(src: FileSystemDirectoryHandle, onProgress: (done: number, total: number) => void) {
+  const images = await src.getDirectoryHandle("images");
+  const files: File[] = [];
+  for await (const [name, h] of images.entries())
+    if (h.kind === "file" && /\.(jpe?g|png|webp)$/i.test(name)) files.push(await (h as FileSystemFileHandle).getFile());
+  const dir = await freshDir(src.name, src);
+  for (let i = 0; i < files.length; i++) {
+    await writeFile(dir, ["images", files[i].name], files[i]);
+    onProgress(i + 1, files.length);
+  }
+  return dir;
 }

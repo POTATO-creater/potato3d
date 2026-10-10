@@ -5,7 +5,9 @@ import { fmtBytes, fmtCount, fmtDuration } from "../../src/lib/format";
 import { PRESETS, presetById, type PresetId } from "../../src/lib/presets";
 import type { TrainOptions } from "../../src/lib/api";
 import { brushRuntime, TrainRun, type GpuInfo, type TrainUpdate } from "./brush";
-import { datasetFromFiles, datasetFromUrl } from "./opfs";
+import { copyImages, datasetFromFiles, datasetFromUrl } from "./opfs";
+import { writeModel } from "./sfm/colmap";
+import { DEFAULT_SFM, runSfm } from "./sfm";
 import { inspectDataset, type DatasetInfo } from "./scene";
 
 type Phase = "idle" | "running" | "paused" | "done" | "error";
@@ -47,6 +49,7 @@ export default function App() {
   const [splat, setSplat] = useState<{ path: string; url: string; iter: number | null; version: number } | null>(null);
   const [result, setResult] = useState<Uint8Array | null>(null);
   const [importing, setImporting] = useState<string | null>(null);
+  const [sfmStatus, setSfmStatus] = useState<string | null>(null);
   const run = useRef<TrainRun | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const samples = useRef<{ iter: number; t: number }[]>([]);
@@ -103,6 +106,34 @@ export default function App() {
   function pickFolder() {
     if (!hasDirPicker) return fileInput.current?.click();
     loadDir(() => window.showDirectoryPicker({ id: "splatforge-dataset", mode: "read" }));
+  }
+
+  /** Poses no navegador (experimental): SfM numa cópia das imagens no OPFS. */
+  async function computePoses() {
+    if (!dir) return;
+    setError(null);
+    setSfmStatus("Copiando imagens…");
+    try {
+      const work = await copyImages(dir, (d, n) => setSfmStatus(`Copiando ${d}/${n} imagens…`));
+      const matchWindow = presetById(preset).settings.poses.matchWindow;
+      addLog(`Poses no navegador: janela ${matchWindow}, órbita fechada`);
+      const run = await runSfm(work, { ...DEFAULT_SFM, window: matchWindow }, addLog, (_, msg) => setSfmStatus(msg));
+      await writeModel(work, run.files);
+      // Só em dev: deixa testes automatizados lerem o modelo gerado.
+      if (import.meta.env.DEV) (window as unknown as { __splatforgeSfm?: unknown }).__splatforgeSfm = { files: run.files, timings: run.timings, stats: run.model.stats };
+      const t = run.timings;
+      addLog(
+        `Poses prontas em ${(t.total / 1000).toFixed(1)} s (features ${(t.features / 1000).toFixed(1)} s, ` +
+          `matching ${(t.matching / 1000).toFixed(1)} s, reconstrução ${(t.reconstruction / 1000).toFixed(1)} s)`,
+      );
+      setDir(work);
+      setDataset(await inspectDataset(work));
+    } catch (e) {
+      setError(String(e));
+      addLog(`Erro nas poses: ${e}`);
+    } finally {
+      setSfmStatus(null);
+    }
   }
 
   function onFilesPicked(list: FileList | null) {
@@ -228,7 +259,7 @@ export default function App() {
             <div className="panel-head">
               <h2>Dataset</h2>
             </div>
-            <button className="btn-sm wide" onClick={pickFolder} disabled={busy || !!importing}>
+            <button className="btn-sm wide" onClick={pickFolder} disabled={busy || !!importing || !!sfmStatus}>
               {importing ?? (dir ? "Trocar pasta…" : "Escolher pasta…")}
             </button>
             {/* Sem showDirectoryPicker (Safari, Firefox): a pasta é copiada para o OPFS. */}
@@ -259,6 +290,16 @@ export default function App() {
                   </>
                 )}
               </div>
+            )}
+            {dir && dataset && dataset.images > 0 && (
+              <button
+                className="btn-sm wide web-sfm"
+                onClick={computePoses}
+                disabled={busy || !!importing || !!sfmStatus || !gpu}
+                title="Experimental: AKAZE + matching na GPU + SfM incremental, numa cópia das imagens"
+              >
+                {sfmStatus ?? (dataset.model ? "Recalcular poses no navegador" : "Calcular poses no navegador")}
+              </button>
             )}
             <p className="help">
               A pasta <code>dataset</code> (ou <code>dataset_alpha</code>, com recorte) de um projeto do SplatForge, ou
@@ -361,7 +402,7 @@ export default function App() {
             <button
               className="btn-primary"
               onClick={start}
-              disabled={!dir || !dataset?.model || !gpu || !!unsupported}
+              disabled={!dir || !dataset?.model || !gpu || !!unsupported || !!sfmStatus}
             >
               Treinar no navegador
             </button>

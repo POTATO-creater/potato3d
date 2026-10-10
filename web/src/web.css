@@ -76,3 +76,7 @@
   user-select: text;
   -webkit-user-select: text;
 }
+
+.btn-sm.web-sfm {
+  margin-top: 8px;
+}
