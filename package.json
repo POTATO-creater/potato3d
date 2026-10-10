@@ -14,7 +14,7 @@
     "web:wasm": "node scripts/build-brush-web.mjs",
     "web:dev": "vite --config web/vite.config.ts",
     "web:build": "vite build --config web/vite.config.ts",
-    "test:web": "node --test web/src/pipeline/*.test.ts"
+    "test:web": "node --test web/src/*/*.test.ts"
   },
   "dependencies": {
     "@sparkjsdev/spark": "^2.3.1",

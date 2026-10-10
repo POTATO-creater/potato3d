@@ -31,7 +31,7 @@ src-tauri/binaries/splatforge_mask-*
 # DirectML do NuGet, baixado por `pnpm setup:tools`
 src-tauri/binaries/DirectML.dll
 
-# Protótipo web: clone do Brush e bindings WASM gerados por `pnpm web:wasm`
+# Versão web: clone do Brush e bindings WASM gerados por `pnpm web:wasm`
 web/.brush/
 web/pkg/
 dist-web

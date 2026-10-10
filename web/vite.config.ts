@@ -1,8 +1,9 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-// Protótipo 100% web: o treino roda no Brush compilado para WASM + WebGPU
-// (`pnpm web:wasm` gera web/pkg). Reaproveita componentes de src/.
+// Versão web: a interface de src/ com o host do navegador (web/src/host/);
+// o treino roda no Brush compilado para WASM + WebGPU (`pnpm web:wasm` gera
+// web/pkg).
 export default defineConfig({
   root: import.meta.dirname,
   plugins: [react()],

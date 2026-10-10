@@ -1,5 +1,5 @@
 # Vídeo orbital sintético com poses verdadeiras, para medir as poses e o
-# treino do protótipo web (ver README, "Poses no navegador").
+# treino da versão web (ver README, "Versão web").
 #
 #   python3 scripts/web-bench/synth-orbit.py <saida> [frames] [largura] [altura]
 #

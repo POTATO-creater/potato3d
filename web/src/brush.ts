@@ -1,6 +1,6 @@
 // Treino do Brush no navegador (bindings `brush-js`, gerados por `pnpm web:wasm`).
 
-import init, { BrushApp, BrushMessageKind, type BrushMessage, type Training } from "../pkg/brush_js.js";
+import init, { BrushApp, BrushMessageKind, type BrushMessage } from "../pkg/brush_js.js";
 import type { TrainOptions } from "../../src/lib/api";
 
 export interface GpuInfo {
@@ -68,17 +68,6 @@ function enableSubgroupsInShaders(device: GPUDevice) {
     );
 }
 
-export type TrainUpdate =
-  | { kind: "status"; text: string }
-  | { kind: "dataset"; train: number; eval: number }
-  | { kind: "step"; iter: number; elapsedMs: number | null }
-  | { kind: "splats"; count: number }
-  | { kind: "eval"; iter: number; psnr: number; ssim: number }
-  | { kind: "warning"; text: string }
-  | { kind: "preview"; iter: number; ply: Uint8Array }
-  | { kind: "done"; ply: Uint8Array | null }
-  | { kind: "error"; text: string };
-
 /** Campos do `TrainStreamConfig` (JSON achatado, kebab-case) que o
  *  SplatForge controla; o resto fica no padrão do Brush. */
 function applyOptions(cfg: Record<string, unknown>, o: TrainOptions, log: (s: string) => void) {
@@ -99,109 +88,72 @@ function applyOptions(cfg: Record<string, unknown>, o: TrainOptions, log: (s: st
   return cfg;
 }
 
-// Passos por ida ao WASM: mais amortiza a fronteira JS↔WASM; menos deixa
-// pausa e prévia mais responsivas.
+// Passos por ida ao WASM: mais amortiza a fronteira JS↔WASM; menos deixa o
+// cancelamento e a barra de progresso mais responsivos.
 const STEPS_PER_BATCH = 10;
 
-export class TrainRun {
-  private training: Training | null = null;
-  private paused = false;
-  private resume: (() => void) | null = null;
-  private previewWanted = false;
-  private lastPreview = 0;
+export interface TrainEvents {
+  status(text: string): void;
+  dataset(train: number, evalViews: number): void;
+  /** Uma vez por lote de passos. */
+  step(iter: number, splats: number): void;
+  eval(iter: number, psnr: number, ssim: number): void;
+  /** Prévia a cada `exportEvery` passos (o treino espera a leitura da GPU). */
+  snapshot(iter: number, ply: Uint8Array): void;
+  log(line: string): void;
+}
 
-  constructor(
-    private emit: (u: TrainUpdate) => void,
-    /** Intervalo das prévias automáticas, em ms (0 desliga). */
-    public previewEveryMs: number,
-  ) {}
-
-  async start(dir: FileSystemDirectoryHandle, opts: TrainOptions, log: (s: string) => void) {
-    const { app } = await brushRuntime();
-    this.emit({ kind: "status", text: "Carregando dataset…" });
-    const t = app.startTrainingFromDirectory(dir, async (initial: Record<string, unknown>) =>
-      applyOptions({ ...initial }, opts, log),
-    );
-    this.training = t;
-    this.lastPreview = performance.now();
-    try {
-      while (true) {
-        while (this.paused) await new Promise<void>((r) => (this.resume = r));
-        if (this.training !== t) return; // cancelado
-        const msgs = await t.trainSteps(STEPS_PER_BATCH);
-        if (this.training !== t) return;
-        if (msgs.length === 0) break;
-        for (const m of msgs) this.handle(m);
-        const due = this.previewEveryMs > 0 && performance.now() - this.lastPreview > this.previewEveryMs;
-        if (this.previewWanted || due) await this.preview(t);
-      }
-      this.emit({ kind: "status", text: "Exportando .ply…" });
-      this.emit({ kind: "done", ply: (await t.exportPly()) ?? null });
-    } catch (e) {
-      if (this.training === t) this.emit({ kind: "error", text: String(e) });
-    } finally {
-      if (this.training === t) this.training = null;
-      t.free();
-    }
-  }
-
-  private lastIter = 0;
-
-  private handle(m: BrushMessage) {
+/** Treina o dataset da pasta e devolve o .ply final. Soltar o stream (no
+ *  cancelamento) descarta o trabalho pendente do Burn. */
+export async function train(dir: FileSystemDirectoryHandle, opts: TrainOptions, ev: TrainEvents, signal: AbortSignal): Promise<Uint8Array> {
+  const { app } = await brushRuntime();
+  const t = app.startTrainingFromDirectory(dir, async (initial: Record<string, unknown>) =>
+    applyOptions({ ...initial }, opts, ev.log),
+  );
+  let iter = 0, splats = 0, lastSnapshot = 0;
+  const handle = (m: BrushMessage) => {
     switch (m.kind) {
       case BrushMessageKind.StartLoading:
-        this.emit({ kind: "status", text: `Carregando ${m.name ?? "dataset"}…` });
+        ev.status(`Carregando ${m.name ?? "dataset"} na GPU`);
         break;
       case BrushMessageKind.DatasetLoaded:
-        this.emit({ kind: "dataset", train: m.trainViews ?? 0, eval: m.evalViews ?? 0 });
+        ev.dataset(m.trainViews ?? 0, m.evalViews ?? 0);
         break;
       case BrushMessageKind.SplatsUpdated:
       case BrushMessageKind.RefineStep:
-        if (m.numSplats != null) this.emit({ kind: "splats", count: m.numSplats });
+        if (m.numSplats != null) splats = m.numSplats;
         break;
       case BrushMessageKind.TrainStep:
-        this.lastIter = m.iter ?? this.lastIter;
-        this.emit({ kind: "step", iter: this.lastIter, elapsedMs: m.elapsedMs ?? null });
+        iter = m.iter ?? iter;
         break;
       case BrushMessageKind.EvalResult:
-        this.emit({ kind: "eval", iter: m.iter ?? 0, psnr: m.psnr ?? 0, ssim: m.ssim ?? 0 });
+        ev.eval(m.iter ?? iter, m.psnr ?? 0, m.ssim ?? 0);
         break;
       case BrushMessageKind.Warning:
-        this.emit({ kind: "warning", text: m.text ?? "" });
+        ev.log(`aviso: ${m.text ?? ""}`);
         break;
     }
     m.free();
-  }
-
-  /** Lê os splats da GPU como .ply. O treino fica parado enquanto isso: o
-   *  stream só anda quando é consumido. */
-  private async preview(t: Training) {
-    this.previewWanted = false;
-    const ply = await t.exportPly();
-    this.lastPreview = performance.now();
-    if (ply && this.training === t) this.emit({ kind: "preview", iter: this.lastIter, ply });
-  }
-
-  requestPreview() {
-    this.previewWanted = true;
-  }
-
-  setPaused(p: boolean) {
-    this.paused = p;
-    if (!p) {
-      this.resume?.();
-      this.resume = null;
+  };
+  try {
+    for (;;) {
+      if (signal.aborted) throw new DOMException("cancelado", "AbortError");
+      const msgs = await t.trainSteps(STEPS_PER_BATCH);
+      if (msgs.length === 0) break;
+      const before = iter;
+      for (const m of msgs) handle(m);
+      if (iter > before) ev.step(iter, splats);
+      if (opts.exportEvery > 0 && iter - lastSnapshot >= opts.exportEvery && iter < opts.totalSteps) {
+        lastSnapshot = iter;
+        const ply = await t.exportPly();
+        if (ply) ev.snapshot(iter, ply);
+      }
     }
-  }
-
-  get isPaused() {
-    return this.paused;
-  }
-
-  /** O laço sai ao fim do lote em andamento e libera o treino (soltar o
-   *  stream cancela o trabalho pendente do Burn). */
-  cancel() {
-    this.training = null;
-    this.setPaused(false);
+    if (signal.aborted) throw new DOMException("cancelado", "AbortError");
+    const ply = await t.exportPly();
+    if (!ply) throw new Error("o Brush não devolveu o splat final");
+    return ply;
+  } finally {
+    t.free();
   }
 }

@@ -1,65 +1,7 @@
-// Port de src-tauri/src/scene.rs: lê o modelo binário do COLMAP direto da
-// pasta escolhida no navegador para enquadrar o visualizador.
+// Port de src-tauri/src/scene.rs: lê o modelo binário do COLMAP do OPFS
+// para enquadrar o visualizador e resumir as poses.
 
-import type { SceneFrame } from "../../src/lib/api";
-
-export interface DatasetInfo {
-  /** Imagens em `images/` (o Brush também aceita outros layouts). */
-  images: number;
-  /** Pasta do modelo COLMAP, relativa à escolhida (ex.: "sparse/0"). */
-  model: string | null;
-  frame: SceneFrame | null;
-}
-
-const IMAGE_EXT = /\.(jpe?g|png|webp)$/i;
-
-async function subdir(dir: FileSystemDirectoryHandle, path: string[]) {
-  let d = dir;
-  for (const name of path) d = await d.getDirectoryHandle(name);
-  return d;
-}
-
-async function tryFile(dir: FileSystemDirectoryHandle, name: string): Promise<ArrayBuffer | null> {
-  try {
-    return await (await (await dir.getFileHandle(name)).getFile()).arrayBuffer();
-  } catch {
-    return null;
-  }
-}
-
-async function countImages(dir: FileSystemDirectoryHandle): Promise<number> {
-  try {
-    const images = await dir.getDirectoryHandle("images");
-    let n = 0;
-    for await (const [name, h] of images.entries()) if (h.kind === "file" && IMAGE_EXT.test(name)) n++;
-    return n;
-  } catch {
-    return 0;
-  }
-}
-
-export async function inspectDataset(dir: FileSystemDirectoryHandle): Promise<DatasetInfo> {
-  const images = await countImages(dir);
-  for (const path of [["sparse", "0"], ["sparse"], []]) {
-    let model: FileSystemDirectoryHandle;
-    try {
-      model = await subdir(dir, path);
-    } catch {
-      continue;
-    }
-    const imagesBin = await tryFile(model, "images.bin");
-    if (!imagesBin) continue;
-    const pointsBin = await tryFile(model, "points3D.bin");
-    let frame: SceneFrame | null = null;
-    try {
-      frame = readFrame(imagesBin, pointsBin);
-    } catch (e) {
-      console.warn("Não foi possível ler o modelo COLMAP", e);
-    }
-    return { images, model: path.join("/") || ".", frame };
-  }
-  return { images, model: null, frame: null };
-}
+import type { ModelStats, SceneFrame } from "../../src/lib/api";
 
 class Bin {
   private o = 0;
@@ -109,7 +51,7 @@ function median(v: number[]) {
   return v[v.length >> 1];
 }
 
-function readFrame(imagesBin: ArrayBuffer, pointsBin: ArrayBuffer | null): SceneFrame | null {
+export function readFrame(imagesBin: ArrayBuffer, pointsBin: ArrayBuffer | null): SceneFrame | null {
   // images.bin: centro = -Rᵀt; "para cima" da câmera COLMAP = -Y → Rᵀ(0,-1,0).
   const r = new Bin(imagesBin);
   const n = r.u64();
@@ -161,4 +103,20 @@ function readFrame(imagesBin: ArrayBuffer, pointsBin: ArrayBuffer | null): Scene
   const radius = median(cameras.map((c) => Math.hypot(c[0] - center[0], c[1] - center[1], c[2] - center[2])));
 
   return { center, up: [up[0] / len, up[1] / len, up[2] / len], radius, cameras, frameIndices };
+}
+
+/** Resumo de um modelo pronto (ex.: dataset importado). */
+export function modelStats(imagesBin: ArrayBuffer, pointsBin: ArrayBuffer | null, total: number, mapper: string): ModelStats {
+  const registered = Number(new DataView(imagesBin).getBigUint64(0, true));
+  let points = 0, err = 0;
+  if (pointsBin) {
+    const p = new Bin(pointsBin);
+    points = p.u64();
+    for (let i = 0; i < points; i++) {
+      p.skip(8 + 24 + 3); // id, xyz, rgb
+      err += p.f64();
+      p.skip(p.u64() * 8);
+    }
+  }
+  return { registered, total: Math.max(total, registered), points, reprojectionError: points ? err / points : null, mapper };
 }

@@ -35,7 +35,8 @@ export function ToolsSetup({
   const modelMissing = missing.some((m) => m.key === "model");
   // No macOS o app só baixa o RMBG; o resto vem do Homebrew.
   const canInstall =
-    (tools.os === "windows" && missing.some((m) => m.key !== "brush")) || (tools.os === "macos" && rmbg && modelMissing);
+    (tools.os === "windows" && missing.some((m) => m.key !== "brush")) ||
+    ((tools.os === "macos" || tools.os === "web") && rmbg && modelMissing);
   const macMasker = tools.os === "macos" && modelMissing && !rmbg;
   const brewTools = tools.os !== "windows" ? missing.filter((m) => m.key === "ffmpeg" || m.key === "colmap") : [];
 
@@ -120,7 +121,8 @@ export function ToolsSetup({
                     : "Nenhuma GPU NVIDIA detectada: o COLMAP roda na CPU. ")}
                 {plan.packages.some((p) => p.id === "rmbg") &&
                   "O RMBG-1.4 é da BRIA AI, com licença só para uso não comercial. "}
-                Os arquivos são conferidos por SHA-256 e ficam na pasta de dados do usuário.
+                Os arquivos são conferidos por SHA-256 e ficam{" "}
+                {tools.os === "web" ? "guardados no navegador" : "na pasta de dados do usuário"}.
               </p>
               <button className="btn-primary setup-btn" onClick={install}>
                 Instalar ferramentas ({mb(plan.totalBytes)})
@@ -158,7 +160,7 @@ export function ToolsSetup({
               )}
             </div>
           )}
-          {missing.some((m) => m.key === "brush") && (
+          {tools.os !== "web" && missing.some((m) => m.key === "brush") && (
             <p className="help">
               O Brush deveria vir junto com o app. Em desenvolvimento, rode <code>pnpm setup:tools</code>.
             </p>

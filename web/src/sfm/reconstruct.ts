@@ -271,19 +271,19 @@ export function reconstruct(
           removed++;
         }
       }
-      // compacta
-      const keep = ptTrack.map((tr, p) => [tr, p]).filter(([tr]) => tr >= 0);
-      const newX: number[] = [];
-      const newTrack: number[] = [];
-      for (const [tr, p] of keep) {
-        trackPoint[tr] = newTrack.length;
-        newTrack.push(tr);
-        newX.push(ptX[3 * p], ptX[3 * p + 1], ptX[3 * p + 2]);
+      // compacta no lugar (um push(...arr) com centenas de milhares de
+      // coordenadas estoura a pilha de chamadas)
+      let w = 0;
+      for (let p = 0; p < ptTrack.length; p++) {
+        const tr = ptTrack[p];
+        if (tr < 0) continue;
+        trackPoint[tr] = w;
+        ptTrack[w] = tr;
+        for (let c = 0; c < 3; c++) ptX[3 * w + c] = ptX[3 * p + c];
+        w++;
       }
-      ptX.length = 0;
-      ptX.push(...newX);
-      ptTrack.length = 0;
-      ptTrack.push(...newTrack);
+      ptTrack.length = w;
+      ptX.length = 3 * w;
       return removed;
     };
 

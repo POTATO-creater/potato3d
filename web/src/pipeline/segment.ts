@@ -61,18 +61,26 @@ async function sha256(buf: ArrayBuffer) {
   return [...d].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-/** Modelo do cache do OPFS ou baixado (conferindo tamanho e SHA-256). */
-export async function loadModel(id: ModelId, onProgress: (done: number, total: number) => void): Promise<ArrayBuffer> {
-  const spec = MODELS[id];
-  const root = await navigator.storage.getDirectory();
-  const dir = await root.getDirectoryHandle("models", { create: true });
+const modelsDir = async () => (await navigator.storage.getDirectory()).getDirectoryHandle("models", { create: true });
+
+/** O modelo já está no cache do OPFS (com o tamanho certo)? */
+export async function cachedModel(id: ModelId): Promise<File | null> {
   try {
-    const file = await (await dir.getFileHandle(spec.file)).getFile();
-    if (file.size === spec.bytes) return await file.arrayBuffer();
+    const file = await (await (await modelsDir()).getFileHandle(MODELS[id].file)).getFile();
+    return file.size === MODELS[id].bytes ? file : null;
   } catch {
-    /* não está no cache */
+    return null;
   }
-  const res = await fetch(spec.url);
+}
+
+/** Baixa o modelo para o cache, conferindo tamanho e SHA-256. */
+export async function downloadModel(
+  id: ModelId,
+  onProgress: (done: number, total: number) => void,
+  signal?: AbortSignal,
+): Promise<ArrayBuffer> {
+  const spec = MODELS[id];
+  const res = await fetch(spec.url, { signal });
   if (!res.ok || !res.body) throw new Error(`${spec.label}: download falhou (${res.status})`);
   const buf = new Uint8Array(spec.bytes);
   const reader = res.body.getReader();
@@ -87,10 +95,16 @@ export async function loadModel(id: ModelId, onProgress: (done: number, total: n
   }
   if (n !== spec.bytes) throw new Error(`${spec.label}: tamanho ${n}, esperado ${spec.bytes}`);
   if ((await sha256(buf.buffer)) !== spec.sha256) throw new Error(`${spec.label}: SHA-256 não confere`);
-  const w = await (await dir.getFileHandle(spec.file, { create: true })).createWritable();
+  const w = await (await (await modelsDir()).getFileHandle(spec.file, { create: true })).createWritable();
   await w.write(buf);
   await w.close();
   return buf.buffer;
+}
+
+/** Modelo do cache, ou baixado na hora. */
+export async function loadModel(id: ModelId, onProgress: (done: number, total: number) => void): Promise<ArrayBuffer> {
+  const file = await cachedModel(id);
+  return file ? file.arrayBuffer() : downloadModel(id, onProgress);
 }
 
 type Ort = typeof import("onnxruntime-web/webgpu");

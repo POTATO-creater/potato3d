@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
-import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { api, type ExportOptions, type ExportStats, type SplatInfo } from "../lib/api";
+import { api, host, type ExportOptions, type ExportStats, type SplatInfo } from "../lib/api";
 import { fmtBytes, fmtCount, fmtDuration } from "../lib/format";
-import { basename, fileManager, type Os } from "../lib/platform";
-import { Field, NumField, Segmented } from "./fields";
+import { basename, revealLabel, type Os } from "../lib/platform";
+import { Field, NumField, Segmented, Select } from "./fields";
 
 const STORE_KEY = "splatforge.export.v1";
 const DEFAULTS: ExportOptions = { format: "sog", decimate: 0, minOpacity: 0, shDegree: null };
@@ -19,6 +18,8 @@ function loadOptions(): ExportOptions {
 }
 
 const SH_LABELS = ["só cor (grau 0)", "grau 1", "grau 2", "grau 3"];
+/** O que cada grau mantém, para o menu. */
+const SH_HINTS = ["sem reflexos, o menor arquivo", "reflexos suaves", "reflexos mais nítidos"];
 
 interface Props {
   os: Os | undefined;
@@ -124,18 +125,18 @@ export function ExportPanel(p: Props) {
           />
         </div>
         <Field label="Bandas SH" hint="brilho que muda com o ângulo; cortar reduz bastante o arquivo">
-          <select
-            className="input"
-            value={shDegree ?? ""}
-            onChange={(e) => set({ shDegree: e.currentTarget.value === "" ? null : Number(e.currentTarget.value) })}
-          >
-            <option value="">Manter ({SH_LABELS[trained]})</option>
-            {SH_LABELS.slice(0, trained).map((label, d) => (
-              <option key={d} value={d}>
-                {label[0].toUpperCase() + label.slice(1)}
-              </option>
-            ))}
-          </select>
+          <Select<number | null>
+            value={shDegree}
+            onChange={(shDegree) => set({ shDegree })}
+            options={[
+              { value: null, label: `Manter (${SH_LABELS[trained]})` },
+              ...SH_LABELS.slice(0, trained).map((label, d) => ({
+                value: d,
+                label: label[0].toUpperCase() + label.slice(1),
+                hint: SH_HINTS[d],
+              })),
+            ]}
+          />
         </Field>
       </fieldset>
 
@@ -179,8 +180,8 @@ export function ExportPanel(p: Props) {
             <button className={`btn-sm ${p.previewing ? "on" : ""}`} onClick={() => p.onPreview(!p.previewing)}>
               {p.previewing ? "Ver original" : "Ver no 3D"}
             </button>
-            <button className="btn-sm ghost" onClick={() => revealItemInDir(last.path)}>
-              Mostrar no {fileManager(p.os)}
+            <button className="btn-sm ghost" onClick={() => host.reveal(last.path)}>
+              {revealLabel(p.os)}
             </button>
           </div>
         </div>

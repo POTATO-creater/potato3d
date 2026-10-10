@@ -15,6 +15,8 @@ export interface SfmOptions {
   closedLoop: boolean;
   /** Máscaras `<nome sem extensão>.png` (0 = ignorar): features só no sujeito. */
   masksDir?: FileSystemDirectoryHandle;
+  /** Cancela: os workers são encerrados e a promessa rejeita. */
+  signal?: AbortSignal;
 }
 
 export const DEFAULT_SFM: SfmOptions = { maxSide: 1600, maxFeatures: 4000, window: 8, closedLoop: true };
@@ -23,8 +25,6 @@ export interface SfmRun {
   model: SfmModel;
   files: Record<string, Blob>;
   names: string[];
-  /** Keypoints de cada imagem (pixels), para regravar o modelo com outros nomes. */
-  xy: Float32Array[];
   timings: Record<string, number>;
 }
 
@@ -71,6 +71,7 @@ async function extractAll(
         (w) =>
           new Promise<void>((resolve, reject) => {
             const send = () => {
+              if (opts.signal?.aborted) return reject(new DOMException("cancelado", "AbortError"));
               if (next >= files.length) return resolve();
               const id = next++;
               const req: FeatureRequest = { id, file: files[id], maxSide: opts.maxSide, maxFeatures: opts.maxFeatures, mask: masks[id] };
@@ -155,6 +156,10 @@ export async function runSfm(
       w.terminate();
       reject(new Error(`worker do SfM: ${e.message}`));
     };
+    opts.signal?.addEventListener("abort", () => {
+      w.terminate();
+      reject(new DOMException("cancelado", "AbortError"));
+    });
     w.postMessage({ imgs, matches });
   });
   timings.reconstruction = performance.now() - t2;
@@ -163,6 +168,5 @@ export async function runSfm(
     `Reconstrução: ${model.stats.registered}/${names.length} câmeras, ${model.stats.points} pontos, ` +
       `erro médio ${Number(model.stats.meanError).toFixed(2)} px, f = ${model.f.toFixed(1)} em ${(timings.reconstruction / 1000).toFixed(1)} s`,
   );
-  const xy = feats.map((f) => f.xy);
-  return { model, files: colmapFiles(model, names, xy), names, xy, timings };
+  return { model, files: colmapFiles(model, names, feats.map((f) => f.xy)), names, timings };
 }

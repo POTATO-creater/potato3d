@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Compila o Brush para WebAssembly (bindings `brush-js`) para o protótipo web.
+// Compila o Brush para WebAssembly (bindings `brush-js`) para a versão web.
 //
 //   pnpm web:wasm             clona/atualiza o Brush, aplica o patch e compila
 //   pnpm web:wasm --dev       build de debug (mais rápido, wasm bem maior)
@@ -7,7 +7,7 @@
 //
 // - Fonte: github.com/ArthurBrussee/brush num commit fixo, em web/.brush/.
 // - Patch: web/brush/*.patch, consertos do brush-js para rodar de verdade no
-//   navegador (ver README, "Protótipo web").
+//   navegador (ver README, "Versão web").
 // - Saída: web/pkg/ (módulo ES + .wasm, alvo `web` do wasm-pack).
 // - Requer rustup, wasm-pack e Rust >= 1.95 (o Burn do Brush exige). Usa o
 //   toolchain de BRUSH_TOOLCHAIN (padrão 1.99) sem mexer no `stable`.

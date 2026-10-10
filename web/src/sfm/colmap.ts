@@ -126,3 +126,22 @@ export async function writeModel(dir: FileSystemDirectoryHandle, files: Record<s
     await w.close();
   }
 }
+
+/** Cópia do images.bin com os nomes das imagens trocados (ex.: .jpg → .png
+ *  do dataset com transparência); o resto do registro fica igual. */
+export function renameImages(imagesBin: ArrayBuffer, rename: (name: string) => string): Blob {
+  const v = new DataView(imagesBin);
+  const bytes = new Uint8Array(imagesBin);
+  const parts: BlobPart[] = [bytes.slice(0, 8)];
+  let o = 8;
+  for (let i = Number(v.getBigUint64(0, true)); i > 0; i--) {
+    const head = o + 4 + 7 * 8 + 4; // id, qvec, tvec, camera_id
+    const end = bytes.indexOf(0, head);
+    parts.push(bytes.slice(o, head), new TextEncoder().encode(rename(new TextDecoder().decode(bytes.subarray(head, end)))), new Uint8Array(1));
+    o = end + 1;
+    const next = o + 8 + Number(v.getBigUint64(o, true)) * 24;
+    parts.push(bytes.slice(o, next));
+    o = next;
+  }
+  return new Blob(parts);
+}

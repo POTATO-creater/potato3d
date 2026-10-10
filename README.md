@@ -212,13 +212,23 @@ real; a exportação é simulada e devolve o `lastExport` gravado nele por
 `cli export`. Use uma pasta fora de `~/Downloads`/`~/Documents`: o macOS pode
 bloquear o acesso do Vite a elas e o servidor trava.
 
-## Protótipo web (treino no navegador)
+## Versão web (tudo no navegador)
 
-`web/` é um protótipo que roda **só o treino** no navegador: o Brush compilado
-para WebAssembly (bindings `brush-js`) treina na GPU via WebGPU, com prévias
-no mesmo visualizador Spark do app e download do `.ply` no fim. Frames,
-recorte e poses continuam no app desktop (ou em qualquer ferramenta que
-exporte COLMAP).
+`web/` roda o pipeline inteiro no navegador, com a **mesma interface** do app
+desktop: o `web/src/main.tsx` monta o `src/App.tsx` e os componentes de
+`src/components/`. O que muda entre as duas versões fica atrás da interface
+`Host` (`src/lib/api.ts`):
+
+- **Desktop** (`src/lib/tauri.ts`): comandos do backend em Rust via Tauri,
+  diálogos e "Mostrar no Finder".
+- **Web** (`web/src/host/`): os mesmos comandos (`startJob`, `loadProject`,
+  `exportSplat`…) e os mesmos eventos (`JobEvent`), implementados com WebGPU,
+  WASM e OPFS. `job.ts` segue as regras do `pipeline.rs` (etapas, retomada,
+  `project.json`).
+
+Uma funcionalidade nova na interface aparece nas duas versões; o que depende
+do sistema usa `tools.os` (`"web"` no navegador), como já era feito para
+macOS e Windows.
 
 ```bash
 pnpm web:wasm           # clona o Brush num commit fixo, aplica web/brush/*.patch e compila (~5 min)
@@ -227,17 +237,27 @@ pnpm web:dev            # http://localhost:1440
 
 O `web:wasm` precisa de `rustup` e `wasm-pack`; instala sozinho um toolchain
 Rust 1.99 lado a lado (o Burn do Brush exige ≥ 1.95) sem mexer no `stable`.
+Navegador: Chrome ou Edge desktop com WebGPU e a extensão `subgroups`.
 
-- **Entrada:** a pasta `dataset` (ou `dataset_alpha`) de um projeto do
-  SplatForge, ou qualquer export COLMAP com `images/` e `sparse/0`. No Chrome
-  e no Edge a pasta é lida direto (`showDirectoryPicker`); nos outros
-  navegadores é copiada para o OPFS. `?dataset=<url>` baixa um dataset servido
-  por HTTP (os nomes das imagens vêm do `images.bin`); em dev,
-  `WEB_FS_ANY=1 pnpm web:dev` e `?dataset=/@fs/<caminho absoluto>`.
-- **Navegador:** Chrome/Edge desktop com WebGPU e a extensão `subgroups`.
-- **Desempenho (M4, dataset sintético de 72 imagens 480×360, 3 mil passos,
-  SH 1):** 38 s no Chrome (~100 passos/s), contra 12 s do Brush nativo; PSNR
-  27,8 dB (nativo v0.3.0: 26,2 dB). O `.ply` sai no mesmo formato do export nativo.
+Diferenças em relação ao desktop:
+
+- **Projetos** ficam no armazenamento do navegador (OPFS), em
+  `/projects/<nome do vídeo>`, com o mesmo layout e o mesmo `project.json`;
+  ficam os 3 mais recentes. Ao soltar o mesmo vídeo de novo, o projeto volta
+  com as etapas prontas. **Importar…** (no lugar de "Alterar…") copia uma
+  pasta de projeto do desktop ou um dataset COLMAP (`images/` + `sparse/0`).
+- **Arquivos:** "Mostrar no Finder" vira **Baixar**.
+- **Recorte:** RMBG-1.4 e cor sólida. O RMBG (176 MB, licença não comercial)
+  é baixado pelo mesmo aviso de primeiro uso do desktop, com SHA-256
+  conferido.
+- **Poses:** SfM próprio (abaixo); as opções do COLMAP (features, modelo de
+  câmera, órbita plana) não aparecem.
+- **Exportação:** a mesma do desktop (PLY ou SOG, poda, corte de bandas SH e
+  decimação), portada para TypeScript em `web/src/export/` e rodando num
+  worker. O WebP sem perdas vem do libwebp em WASM do splat-transform (MIT,
+  `web/src/export/webp/`), porque o canvas pré-multiplica o alfa.
+- **fps do vídeo:** lido do contêiner MP4/MOV, como o ffprobe; em outros
+  formatos é medido durante a reprodução.
 
 O que foi preciso consertar para o treino rodar (e rodar rápido) no navegador:
 
@@ -261,10 +281,7 @@ O que foi preciso consertar para o treino rodar (e rodar rápido) no navegador:
   - `Training.exportPly()`: o mesmo export do Brush nativo (piso de escala
     embutido, unidades do dataset restauradas).
 
-### Vídeo → splat no navegador
-
-O painel **Vídeo** faz no navegador as etapas que faltavam, com a mesma lógica
-do app desktop, num projeto no OPFS (`dataset/`, `masks/`, `dataset_alpha/`):
+### Etapas no navegador
 
 1. **Frames:** o navegador decodifica o vídeo (um seek por candidato).
    Candidatos uniformes no trecho (`frames × candidatos`, no máximo o fps do
@@ -273,19 +290,34 @@ do app desktop, num projeto no OPFS (`dataset/`, `masks/`, `dataset_alpha/`):
    no `frames.rs`. O seek vai meio quadro adiante para pegar o quadro mais
    próximo do instante, como o filtro `fps` do ffmpeg.
 2. **Recorte:**
-   - **IA (RMBG-1.4)**: 176 MB, licença não comercial, só com aceite. Roda no
-     ONNX Runtime Web com WebGPU, com o mesmo pré/pós-processamento do
-     `masks.rs`. O modelo vem do mesmo endereço fixado do instalador, com
-     SHA-256 conferido, e fica em cache no OPFS. É o único modelo de IA da
-     versão web: o Vision é só do macOS, o BiRefNet é lento até em GPU
-     dedicada e o MODNet (pessoas) ficou de fora por decisão do projeto.
+   - **RMBG-1.4**: ONNX Runtime Web com WebGPU, com o mesmo pré/pós-
+     processamento do `masks.rs`, modelo do mesmo endereço fixado do
+     instalador. É o único modelo de IA da versão web: o Vision é só do macOS,
+     o BiRefNet é lento até em GPU dedicada e o MODNet (pessoas) ficou de fora
+     por decisão do projeto.
    - **Cor sólida** e **despill**: port exato do Rust (testes em
      `web/src/pipeline/*.test.ts`, `pnpm test:web`, com os casos do
      `masks.rs`).
    - `dataset_alpha`: PNG RGBA com alfa direto (encoder próprio: o canvas
-     pré-multiplica o alfa) e poses com os nomes `.png`. "Usar o recorte
-     também nas poses" descarta as features onde a máscara é 0.
-3. **Poses:** o SfM descrito abaixo, já com o recorte se pedido.
+     pré-multiplica o alfa) e o `images.bin` com os nomes `.png`. "Usar o
+     recorte também nas poses" descarta as features onde a máscara é 0.
+3. **Poses:** SfM sem o COLMAP (`web/src/sfm/`):
+   1. **Features:** AKAZE do OpenCV.js (`@techstark/opencv-js` 4.12, que não
+      traz SIFT nem as funções de geometria epipolar) em Web Workers.
+   2. **Matching:** força bruta por distância de Hamming num compute shader
+      WebGPU, com teste de razão e checagem mútua; mesmos pares do app (janela do
+      preset + saltos 16/32/64, órbita fechada).
+   3. **Verificação:** matriz fundamental por RANSAC (8 pontos normalizado).
+   4. **Reconstrução incremental** num worker (`web/src/sfm/`): tracks por
+      union-find, par inicial escolhido por paralaxe (≥ 2°) e número de pontos,
+      com até 3 tentativas em regiões diferentes da órbita se a primeira
+      registrar menos de 90% das câmeras, PnP partindo da pose do frame
+      vizinho (com DLT + RANSAC de reserva), triangulação, BA local a cada frame
+      e global periódico (Levenberg–Marquardt com complemento de Schur, Huber,
+      focal compartilhada). No fim, BA com limiar decrescente reaproveita as
+      observações que fecham a órbita.
+4. **Treino:** Brush em WASM + WebGPU, com prévias a cada "Prévia a cada"
+   passos no visualizador.
 
 Medido num vídeo de tela verde sintético (`synth-orbit.py --green`: 120
 quadros 960×720, 24 fps, verde rebatido nos objetos), preset Prévia (90
@@ -305,30 +337,9 @@ encostam na borda e saem junto com a tela (o mesmo acontece no app desktop);
 o RMBG + despill as mantém. Num painel ou aba oculta o navegador limita os
 seeks e a extração de frames fica ~10× mais lenta.
 
-### Poses no navegador (prova de conceito)
-
-Com uma pasta que tenha `images/`, o botão **"Calcular poses no navegador"**
-faz o SfM sem o COLMAP, numa cópia das imagens no OPFS (a pasta original não
-é alterada), e grava um `sparse/0` que o treino usa em seguida:
-
-1. **Features:** AKAZE do OpenCV.js (`@techstark/opencv-js` 4.12, que não
-   traz SIFT nem as funções de geometria epipolar) em Web Workers.
-2. **Matching:** força bruta por distância de Hamming num compute shader
-   WebGPU, com teste de razão e checagem mútua; mesmos pares do app (janela do
-   preset + saltos 16/32/64, órbita fechada).
-3. **Verificação:** matriz fundamental por RANSAC (8 pontos normalizado).
-4. **Reconstrução incremental** num worker (`web/src/sfm/`): tracks por
-   union-find, par inicial escolhido por paralaxe (≥ 2°) e número de pontos,
-   com até 3 tentativas em regiões diferentes da órbita se a primeira
-   registrar menos de 90% das câmeras, PnP partindo da pose do frame
-   vizinho (com DLT + RANSAC de reserva), triangulação, BA local a cada frame
-   e global periódico (Levenberg–Marquardt com complemento de Schur, Huber,
-   focal compartilhada). No fim, BA com limiar decrescente reaproveita as
-   observações que fecham a órbita.
-
-Medido no M4 com um vídeo orbital sintético de 120 frames 960×720 e poses
-verdadeiras conhecidas (`synth2.py`: textura procedural, chão e parede ao
-fundo):
+Poses medidas num vídeo orbital sintético de 120 frames 960×720 com poses
+verdadeiras conhecidas (`synth-orbit.py`: textura procedural, chão e parede
+ao fundo):
 
 | | Tempo | Câmeras | Pontos | Focal | Posição (mediana) | Rotação (mediana) | PSNR do treino |
 |---|---|---|---|---|---|---|---|
@@ -336,7 +347,8 @@ fundo):
 | COLMAP 4.2 nativo (SIFT, global) | 14 s | 120/120 | 2 mil | +0,07% | 0,73% do raio | 0,19° | 36,2 dB |
 | Poses verdadeiras | — | — | — | — | — | — | 41,2 dB |
 
-PSNR: Brush web, 5 mil passos a 960 px, SH 1, 8 vistas de avaliação.
+PSNR: Brush web, 5 mil passos a 960 px, SH 1, 8 vistas de avaliação. O treino
+roda a ~40 passos/s nesse dataset (contra ~3× isso no Brush nativo).
 
 Para repetir a medição (`scripts/web-bench/`, com `WEB_FS_ANY=1 pnpm web:dev`
 rodando):
@@ -345,19 +357,24 @@ rodando):
 python3 scripts/web-bench/synth-orbit.py /tmp/orbit 120 960 720
 ```
 ```bash
-node scripts/web-bench/headless.mjs poses "http://localhost:1440/?dataset=/@fs/tmp/orbit" --out /tmp/orbit-web
+ffmpeg -framerate 24 -i /tmp/orbit/images/%05d.jpg -c:v libx264 -pix_fmt yuv420p /tmp/orbit.mp4
+```
+```bash
+node scripts/web-bench/headless.mjs poses "http://localhost:1440/?video=/@fs/tmp/orbit.mp4&dataset=/@fs/tmp/orbit" --out /tmp/orbit-web
 ```
 ```bash
 python3 scripts/web-bench/eval-poses.py /tmp/orbit/gt.json /tmp/orbit-web/sparse/0
 ```
 ```bash
-node scripts/web-bench/headless.mjs train "http://localhost:1440/?dataset=/@fs/tmp/orbit-web" --steps 5000 --max-res 960
+node scripts/web-bench/headless.mjs train "http://localhost:1440/?video=/@fs/tmp/orbit.mp4&dataset=/@fs/tmp/orbit-web" --steps 5000 --max-res 960
 ```
 
-O `synth-orbit.py` gera um dataset já com as poses verdadeiras em `sparse/0`
-(treino de referência) e o `gt.json`; o `headless.mjs` roda o protótipo num
-Chrome headless (sem o throttling de abas ocultas) nos modos `poses`, `train`
-e `profile` (perfil de CPU do treino; com `pnpm web:wasm --profiling` sai com
+O `headless.mjs` usa a interface num Chrome headless (sem o throttling de abas
+ocultas). `?video=` abre o vídeo como se ele fosse solto na janela;
+`?dataset=` faz o projeto desse vídeo começar com um dataset COLMAP (imagens e
+poses), para treinar ou recalcular as poses a partir da etapa certa. Modos:
+`video` (do vídeo ao splat, com `--mask chroma|rmbg`), `poses`, `train` e
+`profile` (perfil de CPU do treino; com `pnpm web:wasm --profiling` sai com
 os nomes das funções do WASM).
 
 Ainda não foi testado em vídeos reais de IA (desfoque, pouca textura,

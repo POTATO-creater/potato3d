@@ -1,7 +1,7 @@
 import { useRef, type ReactNode } from "react";
 import { fileUrl, type MaskOptions, type Settings, type Stage, type VideoInfo } from "../lib/api";
 import { PRESETS, type PresetId } from "../lib/presets";
-import { Field, NumField, Segmented, Toggle } from "./fields";
+import { Field, NumField, Segmented, Select, Toggle } from "./fields";
 import { VideoPlayer } from "./VideoPlayer";
 import { MasksPanel } from "./MasksPanel";
 import { basename, fileManager, type Os } from "../lib/platform";
@@ -37,6 +37,9 @@ const fmtTime = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padS
 
 export function Sidebar(p: Props) {
   const videoEl = useRef<HTMLVideoElement>(null);
+  // No web os projetos ficam no armazenamento do navegador e as poses saem
+  // do SfM próprio (sem as opções do COLMAP).
+  const web = p.os === "web";
   const s = p.settings;
   const set = <K extends keyof Settings>(k: K, patch: Partial<Settings[K]>) =>
     p.onSettings({ ...s, [k]: { ...s[k], ...patch } });
@@ -81,7 +84,7 @@ export function Sidebar(p: Props) {
                   </span>
                   <span>{p.video.fps.toFixed(p.video.fps % 1 ? 2 : 0)} fps</span>
                   <span>{fmtTime(p.video.duration)}</span>
-                  <span>{p.video.codec}</span>
+                  {p.video.codec && <span>{p.video.codec}</span>}
                 </div>
               )}
               <div className="trim">
@@ -139,11 +142,18 @@ export function Sidebar(p: Props) {
           <header className="panel-head">
             <h2>Projeto</h2>
             <span className="panel-actions">
-              <button className="link" onClick={p.onRevealProject} disabled={!p.projectDir}>
-                {fileManager(p.os)}
-              </button>
-              <button className="link" onClick={p.onPickProject} disabled={locked || !p.videoPath}>
-                Alterar…
+              {!web && (
+                <button className="link" onClick={p.onRevealProject} disabled={!p.projectDir}>
+                  {fileManager(p.os)}
+                </button>
+              )}
+              <button
+                className="link"
+                onClick={p.onPickProject}
+                disabled={locked || !p.videoPath}
+                title={web ? "Importa uma pasta de projeto do SplatForge ou um dataset COLMAP (images/ + sparse/0)" : undefined}
+              >
+                {web ? "Importar…" : "Alterar…"}
               </button>
             </span>
           </header>
@@ -186,7 +196,8 @@ export function Sidebar(p: Props) {
                   onChange={(v) => set("frames", { oversample: v })} />
               </div>
 
-              <h3>Poses (COLMAP)</h3>
+              <h3>{web ? "Poses" : "Poses (COLMAP)"}</h3>
+              {!web && (
               <Field
                 label="Features"
                 hint={
@@ -197,32 +208,40 @@ export function Sidebar(p: Props) {
                       : "registra bem, mas ~10× mais lento na CPU"
                 }
               >
-                <select
-                  className="input"
+                <Select
                   value={s.poses.features}
-                  onChange={(e) => set("poses", { features: e.currentTarget.value as Settings["poses"]["features"] })}
-                >
-                  <option value="sift">SIFT (rápido)</option>
-                  <option value="siftPlus">SIFT reforçado</option>
-                  <option value="aliked">ALIKED + LightGlue</option>
-                </select>
+                  onChange={(features) => set("poses", { features })}
+                  options={[
+                    { value: "sift", label: "SIFT (rápido)" },
+                    { value: "siftPlus", label: "SIFT reforçado", hint: "~2× o tempo" },
+                    { value: "aliked", label: "ALIKED + LightGlue", hint: "~10× mais lento na CPU" },
+                  ]}
+                />
               </Field>
+              )}
               <div className="grid2">
                 <NumField label="Vizinhos casados" value={s.poses.matchWindow} min={3} max={40}
                   onChange={(v) => set("poses", { matchWindow: v })} />
+                {!web && (
                 <Field label="Câmera">
-                  <select className="input" value={s.poses.cameraModel}
-                    onChange={(e) => set("poses", { cameraModel: e.currentTarget.value as Settings["poses"]["cameraModel"] })}>
-                    <option value="SIMPLE_PINHOLE">Pinhole simples</option>
-                    <option value="PINHOLE">Pinhole (fx ≠ fy)</option>
-                  </select>
+                  <Select
+                    value={s.poses.cameraModel}
+                    onChange={(cameraModel) => set("poses", { cameraModel })}
+                    options={[
+                      { value: "SIMPLE_PINHOLE", label: "Pinhole simples" },
+                      { value: "PINHOLE", label: "Pinhole (fx ≠ fy)" },
+                    ]}
+                  />
                 </Field>
+                )}
               </div>
               <Toggle label="Órbita fechada (360°)" hint="casa o fim com o começo" checked={s.poses.closedLoop}
                 onChange={(v) => set("poses", { closedLoop: v })} />
-              <Toggle label="Forçar órbita plana" hint="câmeras na mesma altura; só para vídeos que giram em nível"
-                checked={s.poses.flatOrbit ?? false}
-                onChange={(v) => set("poses", { flatOrbit: v })} />
+              {!web && (
+                <Toggle label="Forçar órbita plana" hint="câmeras na mesma altura; só para vídeos que giram em nível"
+                  checked={s.poses.flatOrbit ?? false}
+                  onChange={(v) => set("poses", { flatOrbit: v })} />
+              )}
 
               <h3>Treino (Brush)</h3>
               <div className="grid2">

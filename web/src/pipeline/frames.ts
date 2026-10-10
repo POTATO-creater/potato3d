@@ -4,22 +4,10 @@
 // mais nítido (variância do Laplaciano) de cada janela vira 00000.jpg, …
 // O próprio navegador decodifica (um seek por candidato).
 
-export interface FrameOptions {
-  targetFrames: number;
-  maxSide: number;
-  oversample: number;
-  trimStart: number;
-  trimEnd: number | null;
-}
+import type { FrameOptions, VideoInfo } from "../../../src/lib/api";
 
-export interface VideoInfo {
-  width: number;
-  height: number;
-  duration: number;
-  fps: number;
-}
-
-export interface FrameInfo {
+/** Frame escolhido: nome em images/ e de onde saiu no vídeo. */
+export interface PickedFrame {
   name: string;
   time: number;
   sharpness: number;
@@ -43,14 +31,77 @@ function release(video: HTMLVideoElement) {
   video.load();
 }
 
-/** fps pelo intervalo entre quadros apresentados (requestVideoFrameCallback). */
+/** fps do contêiner MP4/MOV (como o ffprobe): amostras ÷ duração na trilha
+ *  de vídeo (mdhd + stts). null se não for MP4 ou faltar alguma caixa. */
+export async function containerFps(file: Blob): Promise<number | null> {
+  const read = async (at: number, n: number) => new DataView(await file.slice(at, at + n).arrayBuffer());
+  // caixas de primeiro nível até achar o moov (pode estar no fim do arquivo)
+  let moov: DataView | null = null;
+  for (let at = 0; at + 8 <= file.size; ) {
+    const h = await read(at, 16);
+    let size = h.getUint32(0);
+    const type = String.fromCharCode(h.getUint8(4), h.getUint8(5), h.getUint8(6), h.getUint8(7));
+    let head = 8;
+    if (size === 1) {
+      size = Number(h.getBigUint64(8));
+      head = 16;
+    } else if (size === 0) size = file.size - at;
+    if (size < head) return null;
+    if (type === "moov") {
+      moov = await read(at + head, size - head);
+      break;
+    }
+    at += size;
+  }
+  if (!moov) return null;
+  const v = moov;
+  const type = (o: number) => String.fromCharCode(v.getUint8(o + 4), v.getUint8(o + 5), v.getUint8(o + 6), v.getUint8(o + 7));
+  /** Filhos de [start, end) como [tipo, início do conteúdo, fim]. */
+  const children = (start: number, end: number) => {
+    const out: [string, number, number][] = [];
+    for (let o = start; o + 8 <= end; ) {
+      const size = v.getUint32(o);
+      if (size < 8 || o + size > end) break;
+      out.push([type(o), o + 8, o + size]);
+      o += size;
+    }
+    return out;
+  };
+  const child = (start: number, end: number, name: string) => children(start, end).find((c) => c[0] === name);
+  for (const [t, s, e] of children(0, v.byteLength)) {
+    if (t !== "trak") continue;
+    const mdia = child(s, e, "mdia");
+    if (!mdia) continue;
+    const hdlr = child(mdia[1], mdia[2], "hdlr");
+    const mdhd = child(mdia[1], mdia[2], "mdhd");
+    const stbl = (() => {
+      const minf = child(mdia[1], mdia[2], "minf");
+      return minf && child(minf[1], minf[2], "stbl");
+    })();
+    const stts = stbl && child(stbl[1], stbl[2], "stts");
+    if (!hdlr || !mdhd || !stts || type(hdlr[1] + 4) !== "vide") continue;
+    const timescale = v.getUint32(mdhd[1] + (v.getUint8(mdhd[1]) === 1 ? 20 : 12));
+    let samples = 0, ticks = 0;
+    for (let i = 0, n = v.getUint32(stts[1] + 4); i < n; i++) {
+      const count = v.getUint32(stts[1] + 8 + 8 * i);
+      samples += count;
+      ticks += count * v.getUint32(stts[1] + 12 + 8 * i);
+    }
+    return samples && ticks && timescale ? Math.round(((samples * timescale) / ticks) * 1000) / 1000 : null;
+  }
+  return null;
+}
+
+/** fps pelo intervalo entre quadros apresentados (requestVideoFrameCallback),
+ *  para contêineres sem `containerFps`. O menor intervalo resiste a quadros
+ *  pulados (aba em segundo plano), que só aumentam os outros. */
 async function measureFps(video: HTMLVideoElement): Promise<number> {
   if (!("requestVideoFrameCallback" in video)) return 30;
   const times: number[] = [];
   const done = new Promise<void>((resolve) => {
     const tick = (_: number, meta: VideoFrameCallbackMetadata) => {
       times.push(meta.mediaTime);
-      if (times.length >= 12) resolve();
+      if (times.length >= 24) resolve();
       else video.requestVideoFrameCallback(tick);
     };
     video.requestVideoFrameCallback(tick);
@@ -62,17 +113,22 @@ async function measureFps(video: HTMLVideoElement): Promise<number> {
   const d = times
     .slice(1)
     .map((t, i) => t - times[i])
-    .filter((x) => x > 1e-4)
-    .sort((a, b) => a - b);
-  const med = d[d.length >> 1];
-  return med ? Math.round((1 / med) * 1000) / 1000 : 30;
+    .filter((x) => x > 1e-4);
+  if (!d.length) return 30;
+  // Cada intervalo cobre round(d/mín) quadros; a média no trecho todo tira o
+  // arredondamento dos timestamps (WebM: ms inteiros, 41/42 ms a 24 fps).
+  const min = Math.min(...d);
+  const frames = d.reduce((s, x) => s + Math.max(1, Math.round(x / min)), 0);
+  return Math.round((frames / d.reduce((s, x) => s + x, 0)) * 1000) / 1000;
 }
 
 export async function probeVideo(file: File): Promise<VideoInfo> {
   const video = await loadVideo(file);
   try {
-    const fps = await measureFps(video);
-    return { width: video.videoWidth, height: video.videoHeight, duration: video.duration, fps };
+    const fps = (await containerFps(file).catch(() => null)) ?? (await measureFps(video));
+    // O navegador não expõe o codec; o tipo do arquivo é o que há.
+    const codec = file.type.replace(/^video\//, "") || (file.name.split(".").pop() ?? "").toLowerCase();
+    return { width: video.videoWidth, height: video.videoHeight, duration: video.duration, fps, codec };
   } finally {
     release(video);
   }
@@ -111,7 +167,7 @@ export async function extractFrames(
   opts: FrameOptions,
   imagesDir: FileSystemDirectoryHandle,
   progress: (frac: number, msg: string) => void,
-): Promise<FrameInfo[]> {
+): Promise<PickedFrame[]> {
   const start = Math.max(0, opts.trimStart);
   const end = Math.min(opts.trimEnd != null && opts.trimEnd > start ? opts.trimEnd : info.duration, info.duration);
   const span = end - start;
@@ -143,7 +199,7 @@ export async function extractFrames(
   }
 
   const video = await loadVideo(file);
-  const frames: FrameInfo[] = [];
+  const frames: PickedFrame[] = [];
   let best: { score: number; blob: Blob; k: number } | null = null;
   const flush = async () => {
     if (!best) return;
