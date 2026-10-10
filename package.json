@@ -13,7 +13,8 @@
     "dev:mock": "VITE_MOCK=1 vite --port 1430 --strictPort",
     "web:wasm": "node scripts/build-brush-web.mjs",
     "web:dev": "vite --config web/vite.config.ts",
-    "web:build": "vite build --config web/vite.config.ts"
+    "web:build": "vite build --config web/vite.config.ts",
+    "test:web": "node --test web/src/pipeline/*.test.ts"
   },
   "dependencies": {
     "@sparkjsdev/spark": "^2.3.1",
@@ -21,6 +22,7 @@
     "@tauri-apps/plugin-dialog": "^2.8.1",
     "@tauri-apps/plugin-opener": "^2",
     "@techstark/opencv-js": "4.12.0-release.1",
+    "onnxruntime-web": "1.30.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "three": "^0.186.1"

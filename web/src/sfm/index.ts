@@ -13,6 +13,8 @@ export interface SfmOptions {
   /** Vizinhos casados de cada lado (como o `matchWindow` do app). */
   window: number;
   closedLoop: boolean;
+  /** Máscaras `<nome sem extensão>.png` (0 = ignorar): features só no sujeito. */
+  masksDir?: FileSystemDirectoryHandle;
 }
 
 export const DEFAULT_SFM: SfmOptions = { maxSide: 1600, maxFeatures: 4000, window: 8, closedLoop: true };
@@ -21,6 +23,8 @@ export interface SfmRun {
   model: SfmModel;
   files: Record<string, Blob>;
   names: string[];
+  /** Keypoints de cada imagem (pixels), para regravar o modelo com outros nomes. */
+  xy: Float32Array[];
   timings: Record<string, number>;
 }
 
@@ -50,6 +54,7 @@ export function orbitPairs(n: number, window: number, closed: boolean): [number,
 
 async function extractAll(
   files: File[],
+  masks: (File | undefined)[],
   opts: SfmOptions,
   progress: (done: number) => void,
 ): Promise<FeatureResult[]> {
@@ -68,7 +73,7 @@ async function extractAll(
             const send = () => {
               if (next >= files.length) return resolve();
               const id = next++;
-              const req: FeatureRequest = { id, file: files[id], maxSide: opts.maxSide, maxFeatures: opts.maxFeatures };
+              const req: FeatureRequest = { id, file: files[id], maxSide: opts.maxSide, maxFeatures: opts.maxFeatures, mask: masks[id] };
               w.postMessage(req);
             };
             w.onmessage = (ev: MessageEvent<FeatureResult>) => {
@@ -102,8 +107,14 @@ export async function runSfm(
   if (names.length < 3) throw new Error("Poucas imagens em images/.");
   const files = await Promise.all(names.map(async (n) => (await imagesDir.getFileHandle(n)).getFile()));
 
+  const masks = await Promise.all(
+    names.map(async (n) => {
+      if (!opts.masksDir) return undefined;
+      return (await opts.masksDir.getFileHandle(n.replace(/\.[^.]+$/, ".png"))).getFile();
+    }),
+  );
   progress(0, "Extraindo features");
-  const feats = await extractAll(files, opts, (d) => progress((0.3 * d) / names.length, `Features ${d}/${names.length}`));
+  const feats = await extractAll(files, masks, opts, (d) => progress((0.3 * d) / names.length, `Features ${d}/${names.length}`));
   timings.features = performance.now() - t0;
   const meanFeat = feats.reduce((s, f) => s + f.n, 0) / feats.length;
   log(`Features AKAZE: média ${meanFeat.toFixed(0)}/imagem em ${(timings.features / 1000).toFixed(1)} s`);
@@ -152,6 +163,6 @@ export async function runSfm(
     `Reconstrução: ${model.stats.registered}/${names.length} câmeras, ${model.stats.points} pontos, ` +
       `erro médio ${Number(model.stats.meanError).toFixed(2)} px, f = ${model.f.toFixed(1)} em ${(timings.reconstruction / 1000).toFixed(1)} s`,
   );
-  const files2 = colmapFiles(model, names, feats.map((f) => f.xy));
-  return { model, files: files2, names, timings };
+  const xy = feats.map((f) => f.xy);
+  return { model, files: colmapFiles(model, names, xy), names, xy, timings };
 }

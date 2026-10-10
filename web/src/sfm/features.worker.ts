@@ -9,6 +9,8 @@ export interface FeatureRequest {
   file: File;
   maxSide: number;
   maxFeatures: number;
+  /** Máscara do frame (PNG, mesmo tamanho): 0 = ignorar, como no COLMAP. */
+  mask?: File;
 }
 
 export interface FeatureResult {
@@ -39,7 +41,7 @@ const ready: Promise<{ cv: CV }> = new Promise((resolve) => {
 });
 
 self.onmessage = async (ev: MessageEvent<FeatureRequest>) => {
-  const { id, file, maxSide, maxFeatures } = ev.data;
+  const { id, file, maxSide, maxFeatures, mask } = ev.data;
   const { cv } = await ready;
   const t0 = performance.now();
   const bmp = await createImageBitmap(file);
@@ -77,12 +79,25 @@ self.onmessage = async (ev: MessageEvent<FeatureRequest>) => {
   akaze.delete();
   gray.delete();
 
+  let maskPx: Uint8ClampedArray | null = null;
+  if (mask) {
+    const mb = await createImageBitmap(mask);
+    const mc = new OffscreenCanvas(W, H).getContext("2d", { willReadFrequently: true })!;
+    mc.drawImage(mb, 0, 0, W, H);
+    mb.close();
+    maskPx = mc.getImageData(0, 0, W, H).data;
+  }
   const total = kps.size();
-  const order = [...Array(total).keys()];
+  const order = [...Array(total).keys()].filter((i) => {
+    if (!maskPx) return true;
+    const p = kps.get(i).pt;
+    const x = Math.min(W - 1, Math.floor((p.x + 0.5) / scale)), y = Math.min(H - 1, Math.floor((p.y + 0.5) / scale));
+    return maskPx[(y * W + x) * 4] > 0;
+  });
   const resp = new Float32Array(total);
   for (let i = 0; i < total; i++) resp[i] = kps.get(i).response;
   order.sort((a, b) => resp[b] - resp[a]);
-  const n = Math.min(total, maxFeatures);
+  const n = Math.min(order.length, maxFeatures);
   const xy = new Float32Array(n * 2);
   const out = new Uint32Array(n * 16);
   const rgb = new Uint8Array(n * 3);

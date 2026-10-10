@@ -6,6 +6,7 @@
 //   node scripts/web-bench/headless.mjs train <url> [--steps 3000] [--max-res 960] [--out splat.ply]
 //   node scripts/web-bench/headless.mjs poses <url> [--out <pasta>]
 //   node scripts/web-bench/headless.mjs profile <url> [--seconds 10]
+//   node scripts/web-bench/headless.mjs video <url> [--mask chroma|rmbg] [--for-poses] [--runs 1] [--out <pasta>]
 //
 // <url>: http://localhost:1440/?dataset=/@fs/<caminho absoluto do dataset>
 // - train:   treina com os passos/resolução dados e a prévia manual; imprime o
@@ -13,6 +14,11 @@
 // - poses:   clica em "Calcular poses no navegador"; --out grava o modelo em
 //            <pasta>/sparse/0 (e liga <pasta>/images às imagens do dataset,
 //            para a pasta servir de dataset de treino).
+// - video:   <url> com ?video=/@fs/<vídeo>; processa frames, recorte (com
+//            --mask; rmbg aceita a licença não comercial) e poses; --out copia
+//            o projeto do OPFS (dataset/, masks/, dataset_alpha/) para <pasta>,
+//            mais um frames.json com o instante de cada frame no vídeo;
+//            --runs N processa N vezes na mesma página (ex.: cache do modelo).
 // - profile: perfil de CPU de alguns segundos de treino (após o passo 100),
 //            com as funções que mais gastam. Use `pnpm web:wasm --profiling`
 //            para ter os nomes das funções do WASM.
@@ -29,8 +35,8 @@ const opt = (name, def) => {
   const i = rest.indexOf(`--${name}`);
   return i >= 0 ? rest[i + 1] : def;
 };
-if (!["train", "poses", "profile"].includes(mode) || !url) {
-  console.error("uso: headless.mjs train|poses|profile <url> [opções]  (ver o cabeçalho do arquivo)");
+if (!["train", "poses", "profile", "video"].includes(mode) || !url) {
+  console.error("uso: headless.mjs train|poses|profile|video <url> [opções]  (ver o cabeçalho do arquivo)");
   process.exit(2);
 }
 
@@ -119,15 +125,76 @@ await send("Page.enable");
 await send("Page.navigate", { url });
 const trainButton = `[...document.querySelectorAll('button')].find(b => b.textContent.includes('Treinar no navegador'))`;
 const posesButton = `document.querySelector('.web-sfm')`;
-// dataset carregado e WebGPU pronto
+// dataset (ou vídeo) carregado e WebGPU pronto
 for (let i = 0; ; i++) {
   await sleep(500);
   const kv = await evaluate(`[...document.querySelectorAll('.web-kv')].map(e => e.innerText).join(' ')`);
-  if (kv?.includes("Imagens") && kv.includes("Adaptador")) break;
+  if (kv?.includes(mode === "video" ? "fps" : "Imagens") && kv.includes("Adaptador")) break;
   if (i > 120) {
     console.error("Timeout carregando a página:", await evaluate("document.body.innerText.slice(0, 400)"));
     process.exit(1);
   }
+}
+
+/** Copia uma pasta do OPFS da página para o disco, recursivamente. */
+async function copyOut(handleExpr, dest) {
+  const list = await evaluate(`(async () => {
+    const out = [];
+    const walk = async (d, p) => { for await (const [n, h] of d.entries()) h.kind === 'file' ? out.push(p + n) : await walk(h, p + n + '/'); };
+    await walk(${handleExpr}, '');
+    return out;
+  })()`);
+  for (const rel of list) {
+    const parts = rel.split("/");
+    const expr = `(async () => { let d = ${handleExpr}; for (const p of ${JSON.stringify(parts.slice(0, -1))}) d = await d.getDirectoryHandle(p); return await (await d.getFileHandle(${JSON.stringify(parts.at(-1))})).getFile(); })()`;
+    mkdirSync(join(dest, ...parts.slice(0, -1)), { recursive: true });
+    writeFileSync(join(dest, ...parts), await fetchBytes(`await ${expr}`));
+  }
+  return list.length;
+}
+
+if (mode === "video") {
+  const mask = opt("mask");
+  const click = (text) => evaluate(`[...document.querySelectorAll('button, label')].find(b => b.textContent.includes(${JSON.stringify(text)}))?.click()`);
+  if (mask) {
+    await evaluate(`[...document.querySelectorAll('.toggle')].find(t => t.textContent.includes('Isolar o sujeito')).querySelector('input').click()`);
+    await sleep(200);
+    await click({ chroma: "Cor sólida", rmbg: "IA (RMBG-1.4)" }[mask]);
+    await sleep(200);
+    if (mask === "rmbg") await evaluate(`[...document.querySelectorAll('.toggle')].find(t => t.textContent.includes('Aceito a licença')).querySelector('input').click()`);
+    if (rest.includes("--for-poses")) await evaluate(`[...document.querySelectorAll('.toggle')].find(t => t.textContent.includes('nas poses')).querySelector('input').click()`);
+    await sleep(200);
+  }
+  const runs = Number(opt("runs", "1"));
+  let shown = 0, lastStatus = "";
+  for (let run = 1; run <= runs; run++) {
+  await waitEnabled(`document.querySelector('.web-process')`);
+  await evaluate(`document.querySelector('.web-process').click()`);
+  for (;;) {
+    await sleep(2000);
+    const log = await logText();
+    if (log.length > shown) {
+      console.log(log.slice(shown).trim());
+      shown = log.length;
+    }
+    const st = (await evaluate(`document.querySelector('.web-process')?.textContent`)) ?? "";
+    if (st !== lastStatus && /%/.test(st)) process.stdout.write(`  … ${st}\n`);
+    lastStatus = st;
+    const err = await errorBanner();
+    if (err) {
+      console.log("ERRO:", err);
+      process.exit(1);
+    }
+    if ((log.match(/Vídeo processado/g) ?? []).length >= run) break;
+  }
+  }
+  const out = opt("out");
+  if (out) {
+    console.log(`${await copyOut("window.__splatforgeProject.project", out)} arquivos copiados para ${out}`);
+    // nome de cada frame e o instante do vídeo de onde saiu (para comparar com a verdade)
+    writeFileSync(join(out, "frames.json"), JSON.stringify(await evaluate("window.__splatforgeProject.frames"), null, 1));
+  }
+  process.exit(0);
 }
 
 if (mode === "poses") {

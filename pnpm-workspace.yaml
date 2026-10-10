@@ -1,0 +1,3 @@
+allowBuilds:
+  # postinstall do protobufjs (dependência do onnxruntime-web) só confere versões
+  protobufjs: false

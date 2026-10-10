@@ -261,6 +261,50 @@ O que foi preciso consertar para o treino rodar (e rodar rápido) no navegador:
   - `Training.exportPly()`: o mesmo export do Brush nativo (piso de escala
     embutido, unidades do dataset restauradas).
 
+### Vídeo → splat no navegador
+
+O painel **Vídeo** faz no navegador as etapas que faltavam, com a mesma lógica
+do app desktop, num projeto no OPFS (`dataset/`, `masks/`, `dataset_alpha/`):
+
+1. **Frames:** o navegador decodifica o vídeo (um seek por candidato).
+   Candidatos uniformes no trecho (`frames × candidatos`, no máximo o fps do
+   vídeo), escala que cabe no lado máximo sem ampliar, e o mais nítido de cada
+   janela (variância do Laplaciano na miniatura de 640 px, luma Rec.709), como
+   no `frames.rs`. O seek vai meio quadro adiante para pegar o quadro mais
+   próximo do instante, como o filtro `fps` do ffmpeg.
+2. **Recorte:**
+   - **IA (RMBG-1.4)**: 176 MB, licença não comercial, só com aceite. Roda no
+     ONNX Runtime Web com WebGPU, com o mesmo pré/pós-processamento do
+     `masks.rs`. O modelo vem do mesmo endereço fixado do instalador, com
+     SHA-256 conferido, e fica em cache no OPFS. É o único modelo de IA da
+     versão web: o Vision é só do macOS, o BiRefNet é lento até em GPU
+     dedicada e o MODNet (pessoas) ficou de fora por decisão do projeto.
+   - **Cor sólida** e **despill**: port exato do Rust (testes em
+     `web/src/pipeline/*.test.ts`, `pnpm test:web`, com os casos do
+     `masks.rs`).
+   - `dataset_alpha`: PNG RGBA com alfa direto (encoder próprio: o canvas
+     pré-multiplica o alfa) e poses com os nomes `.png`. "Usar o recorte
+     também nas poses" descarta as features onde a máscara é 0.
+3. **Poses:** o SfM descrito abaixo, já com o recorte se pedido.
+
+Medido num vídeo de tela verde sintético (`synth-orbit.py --green`: 120
+quadros 960×720, 24 fps, verde rebatido nos objetos), preset Prévia (90
+frames), no Chrome headless do M4:
+
+| Etapa | Tempo | Resultado |
+|---|---|---|
+| Frames | 3,1 s | 90 de 120 candidatos |
+| Recorte, cor sólida | 2,4 s | IoU 0,91 com as máscaras verdadeiras (mín. 0,83) |
+| Recorte, RMBG-1.4 (WebGPU) | 32 s (+12 s no 1º uso: download e verificação) | IoU 0,996 (mín. 0,99), ~0,36 s/frame |
+| Poses | 29–31 s | 90/90 câmeras, posição 0,15% do raio, rotação 0,12°, focal −0,4% |
+| PNG com transparência | 4,5 s | pixels do sujeito com verde dominante: 16% → 0% |
+| Treino (3 mil passos, cor sólida) | — | PSNR 36,7 dB, 0,4% das gaussianas visíveis verdes |
+
+O chroma key não chega a IoU 1 porque o cubo tem manchas verde-azuladas que
+encostam na borda e saem junto com a tela (o mesmo acontece no app desktop);
+o RMBG + despill as mantém. Num painel ou aba oculta o navegador limita os
+seeks e a extração de frames fica ~10× mais lenta.
+
 ### Poses no navegador (prova de conceito)
 
 Com uma pasta que tenha `images/`, o botão **"Calcular poses no navegador"**

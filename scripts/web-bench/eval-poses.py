@@ -2,7 +2,10 @@
 # alinha os centros das câmeras por Sim(3) (Umeyama) e mede o erro de posição
 # (em % do raio da órbita), o de rotação e o da focal.
 #
-#   python3 scripts/web-bench/eval-poses.py <gt.json> <pasta com cameras.bin e images.bin>
+#   python3 scripts/web-bench/eval-poses.py <gt.json> <pasta com cameras.bin e images.bin> [frames.json fps]
+#
+# Com frames.json (do `headless.mjs video --out`) e o fps do vídeo, cada frame
+# extraído é comparado com o frame verdadeiro do mesmo instante.
 import json, struct, sys
 import numpy as np
 
@@ -36,6 +39,10 @@ def read_focal(p):
         return model_id, params
 
 est = read_images(f"{model}/images.bin")
+if len(sys.argv) > 4:
+    fps = float(sys.argv[4])
+    times = {f["name"]: f["time"] for f in json.load(open(sys.argv[3]))}
+    est = {f"{round(times[n] * fps):05d}.jpg": v for n, v in est.items() if n in times}
 model_id, params = read_focal(f"{model}/cameras.bin")
 names = [p["name"] for p in gt["poses"] if p["name"] in est]
 G = {p["name"]: p for p in gt["poses"]}

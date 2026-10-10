@@ -9,6 +9,7 @@ import { copyImages, datasetFromFiles, datasetFromUrl } from "./opfs";
 import { writeModel } from "./sfm/colmap";
 import { DEFAULT_SFM, runSfm } from "./sfm";
 import { inspectDataset, type DatasetInfo } from "./scene";
+import { VideoPanel } from "./VideoPanel";
 
 type Phase = "idle" | "running" | "paused" | "done" | "error";
 
@@ -50,6 +51,7 @@ export default function App() {
   const [result, setResult] = useState<Uint8Array | null>(null);
   const [importing, setImporting] = useState<string | null>(null);
   const [sfmStatus, setSfmStatus] = useState<string | null>(null);
+  const [videoBusy, setVideoBusy] = useState(false);
   const run = useRef<TrainRun | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const samples = useRef<{ iter: number; t: number }[]>([]);
@@ -255,11 +257,22 @@ export default function App() {
           <span className="web-badge">web · protótipo</span>
         </div>
         <div className="sidebar-scroll">
+          <VideoPanel
+            preset={preset}
+            disabled={busy || !gpu || !!importing || !!sfmStatus}
+            log={addLog}
+            onBusy={setVideoBusy}
+            onDone={async (d) => {
+              setDir(d);
+              setDataset(await inspectDataset(d));
+            }}
+            onError={setError}
+          />
           <section className="panel">
             <div className="panel-head">
               <h2>Dataset</h2>
             </div>
-            <button className="btn-sm wide" onClick={pickFolder} disabled={busy || !!importing || !!sfmStatus}>
+            <button className="btn-sm wide" onClick={pickFolder} disabled={busy || !!importing || !!sfmStatus || videoBusy}>
               {importing ?? (dir ? "Trocar pasta…" : "Escolher pasta…")}
             </button>
             {/* Sem showDirectoryPicker (Safari, Firefox): a pasta é copiada para o OPFS. */}
@@ -295,7 +308,7 @@ export default function App() {
               <button
                 className="btn-sm wide web-sfm"
                 onClick={computePoses}
-                disabled={busy || !!importing || !!sfmStatus || !gpu}
+                disabled={busy || !!importing || !!sfmStatus || !gpu || videoBusy}
                 title="Experimental: AKAZE + matching na GPU + SfM incremental, numa cópia das imagens"
               >
                 {sfmStatus ?? (dataset.model ? "Recalcular poses no navegador" : "Calcular poses no navegador")}
@@ -402,7 +415,7 @@ export default function App() {
             <button
               className="btn-primary"
               onClick={start}
-              disabled={!dir || !dataset?.model || !gpu || !!unsupported || !!sfmStatus}
+              disabled={!dir || !dataset?.model || !gpu || !!unsupported || !!sfmStatus || videoBusy}
             >
               Treinar no navegador
             </button>

@@ -113,20 +113,21 @@ export function reconstruct(
   }
   const trackObs: [number, number][][] = [];
   const featTrack = imgs.map((im) => new Int32Array(im.n).fill(-1));
-  for (const g of groups.values()) {
+  let dropped = 0;
+  for (const g0 of groups.values()) {
+    if (g0.length < 2) continue;
+    // Duas features da mesma imagem no mesmo track: um match errado encadeou
+    // pontos diferentes. Saem só essas observações, não o track inteiro.
+    const count = new Map<number, number>();
+    for (const x of g0) count.set(nodeImg[x], (count.get(nodeImg[x]) ?? 0) + 1);
+    const g = g0.filter((x) => count.get(nodeImg[x]) === 1);
+    dropped += g0.length - g.length;
     if (g.length < 2) continue;
-    const seen = new Set<number>();
-    let conflict = false;
-    for (const x of g) {
-      if (seen.has(nodeImg[x])) conflict = true;
-      seen.add(nodeImg[x]);
-    }
-    if (conflict) continue; // dois pontos da mesma imagem: track ambíguo
     const id = trackObs.length;
     trackObs.push(g.map((x) => [nodeImg[x], x - off[nodeImg[x]]]));
     for (const x of g) featTrack[nodeImg[x]][x - off[nodeImg[x]]] = id;
   }
-  log(`Tracks: ${trackObs.length}`);
+  log(`Tracks: ${trackObs.length} (${dropped} observações ambíguas descartadas)`);
 
   // ---- 3. pares iniciais candidatos ----
   // Paralaxe (ângulo mediano de triangulação ≥ 2°) e número de pontos, não a

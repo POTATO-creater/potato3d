@@ -4,9 +4,10 @@
 
 const MODEL_FILES = ["cameras.bin", "images.bin", "points3D.bin"];
 
-async function freshDir(name: string, keep?: FileSystemDirectoryHandle) {
+/** Pasta nova em `<group>/<carimbo>/<name>`, apagando as anteriores do grupo. */
+export async function freshDir(name: string, keep?: FileSystemDirectoryHandle, group = "datasets") {
   const root = await navigator.storage.getDirectory();
-  const datasets = await root.getDirectoryHandle("datasets", { create: true });
+  const datasets = await root.getDirectoryHandle(group, { create: true });
   // `keep` pode estar no próprio OPFS (ex.: a origem de uma cópia).
   const keepSlot = keep ? (await root.resolve(keep))?.[1] : undefined;
   // Um dataset por vez: os anteriores saem para não acumular GBs na origem.
