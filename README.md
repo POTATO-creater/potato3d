@@ -81,6 +81,15 @@ Ou dispare manualmente em **Actions → release → Run workflow**.
    **Início aqui / Fim aqui**.
 3. Escolha um preset e clique em **Gerar splat**.
 
+Também dá para começar de frames já extraídos: arraste várias imagens
+(.jpg, .png, .webp) ou uma pasta delas, ou use **Pasta…**. Das pastas entra
+só o primeiro nível. As imagens seguem a ordem natural dos nomes
+(`frame2` antes de `frame10`), que deve ser a ordem da órbita. Com mais
+imagens que o número de frames do preset, fica a mais nítida de cada trecho.
+Elas são giradas conforme o EXIF, reduzidas ao lado máximo e gravadas como
+JPEG. Todas precisam ter o mesmo tamanho, porque o COLMAP e o Brush usam uma
+câmera só.
+
 ### Recorte do sujeito
 
 Com **"Isolar o sujeito"** ligado, cada frame ganha uma máscara do sujeito e o

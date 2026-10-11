@@ -37,16 +37,19 @@ export function StageStrip({
   totalSteps,
   tools,
   masks: maskOpts,
+  images,
 }: {
   job: JobState;
   totalSteps: number;
   tools: Tools | null;
   masks: MaskOptions;
+  /** Os frames vêm de imagens, não de um vídeo. */
+  images?: boolean;
 }) {
   const { t, tm } = useI18n();
   const tl = t.stageStrip;
   const { stages, frames, masks, poses, train, evals } = job;
-  const labels = stageToolLabels(t, tools, maskOpts);
+  const labels = stageToolLabels(t, tools, maskOpts, images);
 
   const medianSharp = (() => {
     if (!frames.length) return null;

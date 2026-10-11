@@ -4,6 +4,8 @@
 //
 // Variáveis (em .env.local):
 //   VITE_MOCK_VIDEO   caminho de um vídeo de teste
+//   VITE_MOCK_IMAGES  imagens de teste separadas por vírgula (escolher arquivos
+//                     ou pasta abre esse conjunto)
 //   VITE_MOCK_EVENTS  arquivo .jsonl com os eventos gravados
 //   VITE_MOCK_SCENE   JSON de `cli scene <projeto>`
 //
@@ -17,6 +19,7 @@ import type { JobEvent } from "../lib/api";
 const params = new URLSearchParams(location.search);
 const env = {
   VITE_MOCK_VIDEO: params.get("video") ?? import.meta.env.VITE_MOCK_VIDEO,
+  VITE_MOCK_IMAGES: params.get("images") ?? import.meta.env.VITE_MOCK_IMAGES,
   VITE_MOCK_EVENTS: params.get("events") ?? import.meta.env.VITE_MOCK_EVENTS,
   VITE_MOCK_SCENE: params.get("scene") ?? import.meta.env.VITE_MOCK_SCENE,
   project: params.get("project"),
@@ -136,6 +139,11 @@ export function installMock() {
           };
         case "probe_video":
           return { width: 960, height: 540, fps: 24, duration: 10, codec: "h264" };
+        case "probe_images": {
+          const paths = (env.VITE_MOCK_IMAGES?.split(",") ?? args.paths).filter((p: string) => /\.(jpe?g|png|webp)$/i.test(p));
+          if (!paths.length) throw new Error("nenhuma imagem (jpg, jpeg, png, webp) encontrada");
+          return { paths, dir: paths[0].replace(/\/[^/]*$/, ""), width: 960, height: 540 };
+        }
         case "load_project":
           return (
             (env.project && (await readJson(`${env.project}/project.json`))) ?? {
@@ -187,7 +195,8 @@ export function installMock() {
           cancelled = true;
           return null;
         case "plugin:dialog|open":
-          return args.options?.directory ? "/tmp/projeto" : env.VITE_MOCK_VIDEO;
+          if (args.options?.directory) return env.VITE_MOCK_IMAGES ? "/tmp/frames" : "/tmp/projeto";
+          return args.options?.multiple ? [env.VITE_MOCK_IMAGES ? env.VITE_MOCK_IMAGES.split(",")[0] : env.VITE_MOCK_VIDEO] : env.VITE_MOCK_VIDEO;
         case "plugin:opener|reveal_item_in_dir":
           console.info("[mock] revelar", args);
           return null;

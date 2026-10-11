@@ -1,8 +1,9 @@
 import { useRef, type ReactNode } from "react";
-import { fileUrl, type MaskOptions, type Settings, type Stage, type VideoInfo } from "../lib/api";
+import { fileUrl, type ImageSet, type MaskOptions, type Settings, type Stage, type VideoInfo } from "../lib/api";
 import { PRESETS, type PresetId } from "../lib/presets";
 import { Field, NumField, Segmented, Select, Toggle } from "./fields";
 import { VideoPlayer } from "./VideoPlayer";
+import { ImageSequence } from "./ImageSequence";
 import { MasksPanel } from "./MasksPanel";
 import { basename, fileManager, type Os } from "../lib/platform";
 import { useI18n } from "../i18n";
@@ -11,9 +12,14 @@ interface Props {
   os: Os | undefined;
   videoPath: string | null;
   video: VideoInfo | null;
+  /** Frames já extraídos, no lugar do vídeo. */
+  imageSet: ImageSet | null;
   trim: { start: number; end: number | null };
   onTrim: (t: { start: number; end: number | null }) => void;
-  onPickVideo: () => void;
+  /** Um vídeo ou várias imagens. */
+  onPickFiles: () => void;
+  /** Uma pasta de frames. */
+  onPickFolder: () => void;
   projectDir: string | null;
   onPickProject: () => void;
   onRevealProject: () => void;
@@ -60,10 +66,15 @@ export function Sidebar(p: Props) {
       <div className="sidebar-scroll">
         <section className="panel">
           <header className="panel-head">
-            <h2>{ts.video}</h2>
-            <button className="link" onClick={p.onPickVideo} disabled={locked}>
-              {p.videoPath ? ts.changeVideo : ts.chooseVideo}
-            </button>
+            <h2>{p.imageSet ? ts.images : p.videoPath ? ts.video : ts.source}</h2>
+            <span className="panel-actions">
+              <button className="link" onClick={p.onPickFiles} disabled={locked}>
+                {p.videoPath || p.imageSet ? ts.changeVideo : ts.chooseVideo}
+              </button>
+              <button className="link" onClick={p.onPickFolder} disabled={locked} title={ts.chooseFolderTitle}>
+                {ts.chooseFolder}
+              </button>
+            </span>
           </header>
 
           {p.videoPath ? (
@@ -130,8 +141,22 @@ export function Sidebar(p: Props) {
                 <p className="help">{ts.trimHelp}</p>
               </div>
             </>
+          ) : p.imageSet ? (
+            <>
+              <ImageSequence paths={p.imageSet.paths} />
+              <div className="file-name" title={p.imageSet.dir}>
+                {basename(p.imageSet.dir)}
+              </div>
+              <div className="meta-row">
+                <span>{ts.imageCount(p.imageSet.paths.length)}</span>
+                <span>
+                  {p.imageSet.width}×{p.imageSet.height}
+                </span>
+              </div>
+              <p className="help">{ts.imagesHelp}</p>
+            </>
           ) : (
-            <button className="dropzone" onClick={p.onPickVideo}>
+            <button className="dropzone" onClick={p.onPickFiles}>
               <strong>{ts.dropTitle}</strong>
               <span>{ts.dropHint}</span>
             </button>
@@ -150,7 +175,7 @@ export function Sidebar(p: Props) {
               <button
                 className="link"
                 onClick={p.onPickProject}
-                disabled={locked || !p.videoPath}
+                disabled={locked || !(p.videoPath || p.imageSet)}
                 title={web ? ts.importTitle : undefined}
               >
                 {web ? ts.importProject : ts.changeProject}

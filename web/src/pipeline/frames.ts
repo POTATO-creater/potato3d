@@ -2,7 +2,8 @@
 // candidatos uniformes no trecho (targetFrames × oversample, no máximo o fps
 // do vídeo), escala que cabe em maxSide × maxSide sem ampliar, e o candidato
 // mais nítido (variância do Laplaciano) de cada janela vira 00000.jpg, …
-// O próprio navegador decodifica (um seek por candidato).
+// O próprio navegador decodifica (um seek por candidato). Imagens soltas
+// passam pela mesma escolha (framesFromImages).
 
 import type { FrameOptions, VideoInfo } from "../../../src/lib/api";
 
@@ -11,6 +12,28 @@ export interface PickedFrame {
   name: string;
   time: number;
   sharpness: number;
+  /** Imagem de origem, quando não veio de um vídeo. */
+  source?: string;
+}
+
+/** Janela de cada candidato quando `total` viram `target` frames:
+ *  lo(w) = ⌊w·total/target⌋, como no frames.rs. */
+function windowsOf(total: number, target: number) {
+  const windowOf = new Int32Array(total);
+  for (let w = 0; w < target; w++) {
+    const lo = Math.floor((w * total) / target);
+    const hi = Math.max(Math.floor(((w + 1) * total) / target), lo + 1);
+    for (let k = lo; k < Math.min(hi, total); k++) windowOf[k] = w;
+  }
+  return windowOf;
+}
+
+const frameName = (i: number) => `${String(i).padStart(5, "0")}.jpg`;
+
+async function writeBlob(dir: FileSystemDirectoryHandle, name: string, blob: Blob) {
+  const w = await (await dir.getFileHandle(name, { create: true })).createWritable();
+  await w.write(blob);
+  await w.close();
 }
 
 function loadVideo(file: File): Promise<HTMLVideoElement> {
@@ -190,23 +213,15 @@ export async function extractFrames(
     c.imageSmoothingQuality = "high";
   }
 
-  // janela de cada candidato: lo(w) = ⌊w·total/target⌋
-  const windowOf = new Int32Array(total);
-  for (let w = 0; w < target; w++) {
-    const lo = Math.floor((w * total) / target);
-    const hi = Math.max(Math.floor(((w + 1) * total) / target), lo + 1);
-    for (let k = lo; k < Math.min(hi, total); k++) windowOf[k] = w;
-  }
+  const windowOf = windowsOf(total, target);
 
   const video = await loadVideo(file);
   const frames: PickedFrame[] = [];
   let best: { score: number; blob: Blob; k: number } | null = null;
   const flush = async () => {
     if (!best) return;
-    const name = `${String(frames.length).padStart(5, "0")}.jpg`;
-    const w = await (await imagesDir.getFileHandle(name, { create: true })).createWritable();
-    await w.write(best.blob);
-    await w.close();
+    const name = frameName(frames.length);
+    await writeBlob(imagesDir, name, best.blob);
     frames.push({ name, time: opts.trimStart + best.k / sampleFps, sharpness: best.score });
     best = null;
   };
@@ -229,6 +244,81 @@ export async function extractFrames(
     await flush();
   } finally {
     release(video);
+  }
+  return frames;
+}
+
+/** Frames a partir de imagens, na ordem dada: a mais nítida de cada janela,
+ *  girada pelo EXIF (createImageBitmap) e reduzida para caber em maxSide. */
+export async function framesFromImages(
+  files: File[],
+  opts: FrameOptions,
+  imagesDir: FileSystemDirectoryHandle,
+  progress: (frac: number) => void,
+): Promise<PickedFrame[]> {
+  const total = files.length;
+  if (!total) throw new Error("Nenhuma imagem para usar como frame.");
+  const target = Math.min(Math.max(1, opts.targetFrames), total);
+  const windowOf = windowsOf(total, target);
+  const thumb = new OffscreenCanvas(1, 1);
+  const tctx = thumb.getContext("2d", { willReadFrequently: true })!;
+  const full = new OffscreenCanvas(1, 1);
+  const fctx = full.getContext("2d")!;
+  let size: { w: number; h: number; from: string } | null = null;
+
+  const frames: PickedFrame[] = [];
+  let best: { score: number; bmp: ImageBitmap; k: number } | null = null;
+  const flush = async () => {
+    if (!best) return;
+    const { bmp, k, score } = best;
+    best = null;
+    const s = Math.min(1, opts.maxSide / Math.max(bmp.width, bmp.height));
+    const W = Math.max(1, Math.round(bmp.width * s)), H = Math.max(1, Math.round(bmp.height * s));
+    // O SfM e o Brush usam uma câmera só para todos os frames.
+    size ??= { w: W, h: H, from: files[k].name };
+    if (W !== size.w || H !== size.h) {
+      bmp.close();
+      throw new Error(
+        `As imagens têm tamanhos diferentes (${size.from}: ${size.w}×${size.h}, ${files[k].name}: ${W}×${H}); use imagens de uma mesma câmera.`,
+      );
+    }
+    full.width = W;
+    full.height = H;
+    fctx.imageSmoothingEnabled = true;
+    fctx.imageSmoothingQuality = "high";
+    fctx.drawImage(bmp, 0, 0, W, H);
+    bmp.close();
+    const name = frameName(frames.length);
+    await writeBlob(imagesDir, name, await full.convertToBlob({ type: "image/jpeg", quality: 0.95 }));
+    frames.push({ name, time: 0, sharpness: score, source: files[k].name });
+  };
+  try {
+    for (let k = 0; k < total; k++) {
+      if (k > 0 && windowOf[k] !== windowOf[k - 1]) await flush();
+      const bmp = await createImageBitmap(files[k]).catch(() => {
+        throw new Error(`O navegador não conseguiu abrir ${files[k].name}.`);
+      });
+      // Miniatura que cabe em 640×640, como na extração do vídeo.
+      const ts = Math.min(1, 640 / Math.max(bmp.width, bmp.height));
+      const tw = Math.max(1, Math.round(bmp.width * ts)), th = Math.max(1, Math.round(bmp.height * ts));
+      if (thumb.width !== tw || thumb.height !== th) {
+        thumb.width = tw;
+        thumb.height = th;
+      }
+      tctx.imageSmoothingEnabled = true;
+      tctx.imageSmoothingQuality = "high";
+      tctx.drawImage(bmp, 0, 0, tw, th);
+      const score = sharpness(tctx.getImageData(0, 0, tw, th).data, tw, th);
+      // empate: fica o último, como o max_by do Rust
+      if (!best || score >= best.score) {
+        best?.bmp.close();
+        best = { score, bmp, k };
+      } else bmp.close();
+      progress((k + 1) / total);
+    }
+    await flush();
+  } finally {
+    (best as { bmp: ImageBitmap } | null)?.bmp.close();
   }
   return frames;
 }

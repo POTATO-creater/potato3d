@@ -31,7 +31,11 @@ pub enum Stage {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct JobConfig {
+    /// O vídeo, ou a pasta das imagens quando `images` vem preenchido.
     pub video_path: String,
+    /// Frames já extraídos (na ordem da órbita) em vez do vídeo.
+    #[serde(default)]
+    pub images: Option<Vec<String>>,
     pub project_dir: String,
     pub from_stage: Stage,
     pub frames: FrameOptions,
@@ -205,48 +209,30 @@ async fn run_inner(
     if cfg.from_stage <= Stage::Frames {
         *current = Some(Stage::Frames);
         let t0 = Instant::now();
-        let ffmpeg = Tools::require(&tools.ffmpeg, "ffmpeg", install_hint("ffmpeg"))?;
-        let ffprobe = Tools::require(&tools.ffprobe, "ffprobe", install_hint("ffmpeg"))?;
         let rep = Reporter::new(emit, Stage::Frames);
-
-        rep.progress(0.0, msg!("frames.reading"));
-        let info: VideoInfo = frames::probe(&ffprobe, &video).await?;
-        rep.log(&format!(
-            "{}x{} @ {:.2} fps, {:.1}s, {}",
-            info.width, info.height, info.fps, info.duration, info.codec
-        ));
-
-        let raw = layout.raw_frames();
-        let sample_fps = frames::extract(
-            &ffmpeg,
-            &video,
-            &info,
-            &cfg.frames,
-            &raw,
-            cancel,
-            |f| rep.progress(0.6 * f, msg!("frames.decoding")),
-            |l| rep.log(l),
-        )
-        .await?;
-
-        let images = layout.images();
-        let opts = cfg.frames.clone();
-        let progress_emit = emit.clone();
-        let picked = tokio::task::spawn_blocking(move || {
-            let last = std::sync::Mutex::new(Instant::now());
-            frames::select(&raw, &images, &opts, sample_fps, |f| {
-                let mut last = last.lock().unwrap();
-                if f >= 1.0 || last.elapsed() > Duration::from_millis(66) {
-                    *last = Instant::now();
-                    progress_emit(JobEvent::Progress {
-                        stage: Stage::Frames,
-                        fraction: 0.6 + 0.4 * f,
-                        message: msg!("frames.sharpness"),
-                    });
-                }
-            })
-        })
-        .await??;
+        let picked = match cfg.images.as_deref() {
+            Some(sources) if !sources.is_empty() => {
+                rep.log(&format!("{} imagens de {}", sources.len(), cfg.video_path));
+                let sources: Vec<PathBuf> = sources.iter().map(PathBuf::from).collect();
+                let (images, opts, progress_emit) = (layout.images(), cfg.frames.clone(), emit.clone());
+                tokio::task::spawn_blocking(move || {
+                    let last = std::sync::Mutex::new(Instant::now() - Duration::from_secs(1));
+                    frames::from_images(&sources, &images, &opts, |f| {
+                        let mut last = last.lock().unwrap();
+                        if f >= 1.0 || last.elapsed() > Duration::from_millis(66) {
+                            *last = Instant::now();
+                            progress_emit(JobEvent::Progress {
+                                stage: Stage::Frames,
+                                fraction: f,
+                                message: if f < 0.5 { msg!("frames.sharpness") } else { msg!("frames.converting") },
+                            });
+                        }
+                    })
+                })
+                .await??
+            }
+            _ => extract_video(cfg, tools, emit, &rep, cancel, &layout, &video).await?,
+        };
         rep.progress(1.0, msg!("frames.selected", n = picked.len()));
 
         // Etapas seguintes ficam inválidas.
@@ -392,6 +378,59 @@ async fn run_inner(
     layout.save(&state)?;
     emit(JobEvent::StageDone { stage: Stage::Train, seconds: t0.elapsed().as_secs_f64() });
     Ok(ply)
+}
+
+/// Frames do vídeo: candidatos pelo ffmpeg e o mais nítido de cada janela.
+async fn extract_video(
+    cfg: &JobConfig,
+    tools: &Tools,
+    emit: &Emit,
+    rep: &Reporter<'_>,
+    cancel: &CancellationToken,
+    layout: &Layout,
+    video: &Path,
+) -> Result<Vec<FrameInfo>> {
+    let ffmpeg = Tools::require(&tools.ffmpeg, "ffmpeg", install_hint("ffmpeg"))?;
+    let ffprobe = Tools::require(&tools.ffprobe, "ffprobe", install_hint("ffmpeg"))?;
+
+    rep.progress(0.0, msg!("frames.reading"));
+    let info: VideoInfo = frames::probe(&ffprobe, video).await?;
+    rep.log(&format!(
+        "{}x{} @ {:.2} fps, {:.1}s, {}",
+        info.width, info.height, info.fps, info.duration, info.codec
+    ));
+
+    let raw = layout.raw_frames();
+    let sample_fps = frames::extract(
+        &ffmpeg,
+        video,
+        &info,
+        &cfg.frames,
+        &raw,
+        cancel,
+        |f| rep.progress(0.6 * f, msg!("frames.decoding")),
+        |l| rep.log(l),
+    )
+    .await?;
+
+    let images = layout.images();
+    let opts = cfg.frames.clone();
+    let progress_emit = emit.clone();
+    tokio::task::spawn_blocking(move || {
+        let last = std::sync::Mutex::new(Instant::now());
+        frames::select(&raw, &images, &opts, sample_fps, |f| {
+            let mut last = last.lock().unwrap();
+            if f >= 1.0 || last.elapsed() > Duration::from_millis(66) {
+                *last = Instant::now();
+                progress_emit(JobEvent::Progress {
+                    stage: Stage::Frames,
+                    fraction: 0.6 + 0.4 * f,
+                    message: msg!("frames.sharpness"),
+                });
+            }
+        })
+    })
+    .await?
 }
 
 /// Exporta o splat final do projeto com os ajustes de otimização e guarda o

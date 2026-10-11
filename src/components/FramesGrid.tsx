@@ -3,6 +3,8 @@ import { fileUrl, type FrameInfo } from "../lib/api";
 import { useI18n } from "../i18n";
 
 const stemOf = (p: string) => (p.split(/[\\/]/).pop() ?? p).replace(/\.[^.]+$/, "");
+/** De onde o frame veio: o instante no vídeo ou a imagem de origem. */
+const origin = (f: FrameInfo) => f.source ?? `${f.time.toFixed(2)} s`;
 
 /** Miniaturas dos frames escolhidos, com a nitidez relativa de cada um.
  *  Frames bem abaixo da mediana costumam virar borrão no splat. Com recorte,
@@ -67,7 +69,7 @@ export function FramesGrid({
             <button key={f.path} className={`thumb ${weak ? "weak" : ""} ${cut ? "cut" : ""}`} onClick={() => setOpen(i)}>
               <img src={fileUrl(f.path, version)} loading="lazy" decoding="async" alt={`frame ${i}`} style={maskStyle(f)} />
               <span className="thumb-meta mono">
-                #{i} · {f.time.toFixed(2)} s
+                #{i} · {origin(f)}
               </span>
               <span className="thumb-bar" style={{ width: `${(f.sharpness / max) * 100}%` }} />
             </button>
@@ -78,7 +80,7 @@ export function FramesGrid({
         <div className={`lightbox ${cut ? "cut" : ""}`} onClick={() => setOpen(null)}>
           <img src={fileUrl(frames[open].path, version)} alt="" style={maskStyle(frames[open])} />
           <span className="mono">
-            #{open} · {frames[open].time.toFixed(2)} s · {tf.sharpness} {frames[open].sharpness.toFixed(0)}
+            #{open} · {origin(frames[open])} · {tf.sharpness} {frames[open].sharpness.toFixed(0)}
           </span>
         </div>
       )}
