@@ -456,7 +456,8 @@ visualizador só passa `xrCompatible` ao WebGPU quando o binding existe.
   R2, e quem criou pode **Revogar** antes (o app guarda o token de remoção no
   aparelho).
 - **Validade escolhida:** com o segredo `SHARE_ADMIN_TOKEN` configurado, quem
-  digita essa chave em **Compartilhar → Tenho uma chave de acesso** escolhe a
+  abre o app com `?admin=true` (ex.: `https://orbit.gausify.com/?admin=true`)
+  e digita essa chave em **Compartilhar → Tenho uma chave de acesso** escolhe a
   validade (6 h a 1 ano, ou sem expiração). A chave fica só naquele aparelho.
   Esses links vão para `p/`, fora da regra de ciclo de vida, e o cron apaga os
   que vencerem; os sem expiração ficam até alguém **Revogar**.

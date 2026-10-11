@@ -186,6 +186,16 @@ export function saveShare(key: string, link: ShareLink | null) {
 // Chave de acesso que libera escolher a validade; fica só neste aparelho.
 const ACCESS_KEY = "splatforge.shareAccess.v1";
 
+/** `?admin=true` na URL mostra o campo da chave e o seletor de validade.
+ *  Sem ele, o painel é o de todo mundo, mesmo com a chave salva. */
+export const shareAdmin = (() => {
+  try {
+    return new URLSearchParams(location.search).get("admin") === "true";
+  } catch {
+    return false;
+  }
+})();
+
 export function shareAccessKey(): string | null {
   try {
     return localStorage.getItem(ACCESS_KEY);

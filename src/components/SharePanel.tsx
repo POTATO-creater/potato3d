@@ -9,6 +9,7 @@ import {
   setShareAccessKey,
   SHARE_TTLS,
   shareAccessKey,
+  shareAdmin,
   ShareError,
   shareKey,
   shareView,
@@ -29,8 +30,8 @@ interface Props {
 }
 
 /** Link privado e temporário para a exportação (src/lib/share.ts). Aparece
- *  abaixo do resultado da exportação, aberto pelo botão "Compartilhar". Com a
- *  chave de acesso salva no aparelho, dá para escolher a validade. */
+ *  abaixo do resultado da exportação, aberto pelo botão "Compartilhar". Com
+ *  `?admin=true` na URL e a chave de acesso salva, dá para escolher a validade. */
 export function SharePanel({ path, bytes, frame, onClose }: Props) {
   const { t, locale } = useI18n();
   const ts = t.share;
@@ -39,7 +40,7 @@ export function SharePanel({ path, bytes, frame, onClose }: Props) {
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [accessKey, setAccessKey] = useState(shareAccessKey);
+  const [accessKey, setAccessKey] = useState(() => (shareAdmin ? shareAccessKey() : null));
   const [keyDraft, setKeyDraft] = useState<string | null>(null);
   const [ttl, setTtl] = useState<ShareTtl>(SHARE_TTLS[0]);
   const upload = useRef<AbortController | null>(null);
@@ -224,6 +225,7 @@ export function SharePanel({ path, bytes, frame, onClose }: Props) {
               {ts.forgetKey}
             </button>
           ) : (
+            shareAdmin &&
             keyDraft === null && (
               <button className="link share-key-toggle" onClick={() => setKeyDraft("")}>
                 {ts.haveKey}
