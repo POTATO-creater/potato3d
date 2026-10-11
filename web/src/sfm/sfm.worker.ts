@@ -10,7 +10,7 @@ export type SfmWorkerMessage =
   | { kind: "done"; model: SfmModel }
   | { kind: "error"; text: string };
 
-self.onmessage = (ev: MessageEvent<{ imgs: ImageFeatures[]; matches: PairMatches[] }>) => {
+self.onmessage = (ev: MessageEvent<{ imgs: ImageFeatures[]; matches: PairMatches[]; closedLoop: boolean }>) => {
   const post = (m: SfmWorkerMessage) => (self as unknown as Worker).postMessage(m);
   try {
     const model = reconstruct(
@@ -18,6 +18,7 @@ self.onmessage = (ev: MessageEvent<{ imgs: ImageFeatures[]; matches: PairMatches
       ev.data.matches,
       (text) => post({ kind: "log", text }),
       (frac, msg) => post({ kind: "progress", frac, msg }),
+      ev.data.closedLoop,
     );
     post({ kind: "done", model });
   } catch (e) {
