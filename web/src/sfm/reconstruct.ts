@@ -13,7 +13,7 @@ import {
   triAngle,
   triangulate,
 } from "./geometry";
-import { eye3, type Mat3, type Vec3 } from "./linalg";
+import { cross, eye3, expSO3, inv3, type Mat3, mul3, mulVec3, symEig, transpose3, type Vec3 } from "./linalg";
 import type { PairMatches } from "./matcher";
 
 export interface ImageFeatures {
@@ -52,6 +52,7 @@ export function reconstruct(
   matches: PairMatches[],
   log: (s: string) => void,
   progress: (frac: number, msg: Msg) => void,
+  closedLoop = false,
 ): SfmModel {
   const N = imgs.length;
   const { width: W, height: H } = imgs[0];
@@ -128,17 +129,26 @@ export function reconstruct(
     trackObs.push(g.map((x) => [nodeImg[x], x - off[nodeImg[x]]]));
     for (const x of g) featTrack[nodeImg[x]][x - off[nodeImg[x]]] = id;
   }
+  const pairInliers = new Map(verified.map((v) => [`${v.a},${v.b}`, v.ia.length]));
   log(`Tracks: ${trackObs.length} (${dropped} observações ambíguas descartadas)`);
 
   // ---- 3. pares iniciais candidatos ----
   // Paralaxe (ângulo mediano de triangulação ≥ 2°) e número de pontos, não a
   // distância em frames: num vídeo com poucos frames, 3 frames já são 27°.
   const uv0 = (img: number, feat: number): [number, number] => [imgs[img].xy[2 * feat], imgs[img].xy[2 * feat + 1]];
+  // Os pares com mais matches são quase sempre vizinhos imediatos, com pouca
+  // paralaxe (numa teleobjetiva, < 1° entre frames). Avalia os melhores de cada
+  // faixa de distância (√2 entre faixas, até N/4), não só os de mais matches.
   const candidates: InitPair[] = [];
-  const pool = verified
-    .filter((v) => Math.min(v.b - v.a, N - (v.b - v.a)) <= N / 4)
-    .sort((x, y) => y.ia.length - x.ia.length)
-    .slice(0, 60);
+  const bands = new Map<number, typeof verified>();
+  for (const v of verified) {
+    const gap = Math.min(v.b - v.a, N - (v.b - v.a));
+    if (gap > N / 4) continue;
+    const band = Math.floor(2 * Math.log2(gap));
+    bands.get(band)?.push(v) ?? bands.set(band, [v]);
+  }
+  const perBand = Math.ceil(60 / Math.max(1, bands.size));
+  const pool = [...bands.values()].flatMap((b) => b.sort((x, y) => y.ia.length - x.ia.length).slice(0, perBand));
   for (const v of pool) {
     const n = v.ia.length;
     const p1 = new Float64Array(n * 2), p2 = new Float64Array(n * 2);
@@ -194,7 +204,7 @@ export function reconstruct(
     };
 
     /** Triangula tracks sem ponto que tenham ≥2 observações registradas. */
-    const triangulateTracks = (tracks: Iterable<number>) => {
+    const triangulateTracks = (tracks: Iterable<number>, maxErr = MAX_ERR) => {
       let added = 0;
       for (const tr of tracks) {
         if (trackPoint[tr] >= 0) continue;
@@ -206,7 +216,7 @@ export function reconstruct(
         );
         if (!X) continue;
         let ok = 0, maxAng = 0;
-        for (const [i, k] of obs) if (reprojErr(i, k, X) < MAX_ERR) ok++;
+        for (const [i, k] of obs) if (reprojErr(i, k, X) < maxErr) ok++;
         if (ok < 2 || ok < obs.length * 0.5) continue;
         const c0 = center(pose(obs[0][0])!);
         for (const [i] of obs.slice(1)) maxAng = Math.max(maxAng, triAngle(c0, center(pose(i)!), X));
@@ -365,7 +375,98 @@ export function reconstruct(
       if (failed.size && order.length % 5 === 0) failed.clear();
     }
 
-    // ---- 5. fechamento: reaproveita observações com limiar decrescente ----
+    // ---- 5. fecha a órbita ----
+    // O registro cresce para os dois lados do par inicial e cada lado encolhe
+    // um pouco os passos de ângulo (focal × profundidade × rotação quase se
+    // compensam). Onde as frentes se encontram sobra um salto de dezenas de
+    // graus, e as observações que atravessam o salto ficam fora de qualquer
+    // limiar do BA, que não consegue fechar sozinho. Gira cada câmera em torno
+    // do eixo da órbita para espalhar o excesso por todos os passos e
+    // retriangula; o BA abaixo assenta a focal com a órbita já fechada.
+    const closeOrbit = () => {
+      const ring = [...Array(N).keys()].filter((i) => R[i]);
+      if (ring.length < Math.max(12, 0.8 * N)) return;
+      const C = ring.map((i) => center(pose(i)!));
+      const m = [0, 1, 2].map((a) => C.reduce((s, c) => s + c[a], 0) / C.length);
+      const cov = new Float64Array(9);
+      for (const c of C)
+        for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) cov[a * 3 + b] += (c[a] - m[a]) * (c[b] - m[b]);
+      const { values, V } = symEig(cov, 3);
+      if (values[0] > 0.2 * values[1]) return; // centros longe de um plano: não é órbita
+      const axis: Vec3 = [V[0], V[3], V[6]];
+      const e1: Vec3 = [V[2], V[5], V[8]];
+      const e2 = cross(axis, e1);
+      // círculo por mínimos quadrados no plano: x² + y² = 2ax + 2by + c
+      const P = C.map((c) => {
+        const d = [c[0] - m[0], c[1] - m[1], c[2] - m[2]];
+        return [d[0] * e1[0] + d[1] * e1[1] + d[2] * e1[2], d[0] * e2[0] + d[1] * e2[1] + d[2] * e2[2]];
+      });
+      const A = new Float64Array(9), rhs = new Float64Array(3);
+      for (const [x, y] of P) {
+        const row = [2 * x, 2 * y, 1], r2 = x * x + y * y;
+        for (let a = 0; a < 3; a++) {
+          rhs[a] += row[a] * r2;
+          for (let b = 0; b < 3; b++) A[a * 3 + b] += row[a] * row[b];
+        }
+      }
+      const Ai = inv3(A);
+      if (!Ai) return;
+      const sol = mulVec3(Ai, rhs);
+      const o: Vec3 = [0, 1, 2].map((a) => m[a] + sol[0] * e1[a] + sol[1] * e2[a]) as Vec3;
+      const theta = P.map(([x, y]) => Math.atan2(y - sol[1], x - sol[0]));
+      const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
+      let steps = ring.map((_, k) => wrap(theta[(k + 1) % ring.length] - theta[k]));
+      const sorted = [...steps].sort((x, y) => x - y);
+      const dir = Math.sign(sorted[sorted.length >> 1]) || 1;
+      steps = steps.map((d) => d * dir);
+      const total = steps.reduce((s, d) => s + d, 0);
+      if (Math.abs(total - 2 * Math.PI) > 0.2) return; // não dá uma volta só
+      let seam = 0;
+      steps.forEach((d, k) => d > steps[seam] && (seam = k));
+      const around: number[] = [];
+      for (let d = -4; d <= 4; d++) if (d) around.push(steps[(seam + d + ring.length) % ring.length]);
+      around.sort((x, y) => x - y);
+      const expected = Math.max(0, (around[3] + around[4]) / 2);
+      const excess = steps[seam] - expected;
+      const deg = (r: number) => (r * 180) / Math.PI;
+      if (excess < (2 * Math.PI) / 180 || steps[seam] < 3 * Math.max(expected, sorted[sorted.length >> 1] * dir)) return;
+      // Só fecha se o par do salto casa tão bem quanto vizinhos de verdade:
+      // num vídeo que não dá a volta inteira o salto é real e casa pouco.
+      const inliers = (i: number, j: number) => pairInliers.get(`${Math.min(i, j)},${Math.max(i, j)}`) ?? 0;
+      const consecutive = ring.map((i, k) => inliers(i, ring[(k + 1) % ring.length])).sort((x, y) => x - y);
+      if (inliers(ring[seam], ring[(seam + 1) % ring.length]) < 0.5 * consecutive[consecutive.length >> 1]) return;
+      // novo ângulo de cada câmera, a partir da que vem logo depois do salto
+      const scale = (total - expected) / (total - steps[seam]);
+      const delta = new Float64Array(ring.length);
+      let cum = 0;
+      for (let j = 0; j < ring.length; j++) {
+        const k = (seam + 1 + j) % ring.length;
+        delta[k] = (scale - 1) * cum;
+        cum += steps[k];
+      }
+      const ref = delta[ring.indexOf(order[0])]; // a primeira câmera fica fixa no BA
+      ring.forEach((i, k) => {
+        const Q = expSO3(axis.map((a) => a * dir * (delta[k] - ref)));
+        const c = C[k];
+        const qc = mulVec3(Q, [c[0] - o[0], c[1] - o[1], c[2] - o[2]]);
+        const cNew: Vec3 = [o[0] + qc[0], o[1] + qc[1], o[2] + qc[2]];
+        R[i] = mul3(R[i]!, transpose3(Q));
+        const t = mulVec3(R[i]!, cNew);
+        T[i] = [-t[0], -t[1], -t[2]];
+      });
+      // os pontos antigos seguem a geometria sem o fechamento: refaz todos
+      trackPoint.fill(-1);
+      ptX.length = 0;
+      ptTrack.length = 0;
+      triangulateTracks(trackObs.keys(), 24);
+      log(
+        `Órbita fechada: salto de ${deg(steps[seam]).toFixed(1)}° entre ${imgs[ring[seam]].name} e ` +
+          `${imgs[ring[(seam + 1) % ring.length]].name} espalhado (passos ×${scale.toFixed(3)}), ${ptTrack.length} pontos`,
+      );
+    };
+    if (closedLoop) closeOrbit();
+
+    // ---- 6. fechamento: reaproveita observações com limiar decrescente ----
     for (const thr of [24, 12, 6, MAX_ERR]) {
       triangulateTracks(trackObs.keys());
       const g = runBA(order.slice(1), true, 25, thr);
@@ -410,3 +511,4 @@ export function reconstruct(
   }
   return best!;
 }
+

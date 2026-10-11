@@ -161,7 +161,7 @@ export async function runSfm(
       w.terminate();
       reject(new DOMException("cancelado", "AbortError"));
     });
-    w.postMessage({ imgs, matches });
+    w.postMessage({ imgs, matches, closedLoop: opts.closedLoop });
   });
   timings.reconstruction = performance.now() - t2;
   timings.total = performance.now() - t0;
