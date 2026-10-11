@@ -161,7 +161,7 @@ export const enUS: Messages = {
         label: "SAM 2.1",
         hint:
           "Meta's SAM 2.1 on the GPU: follows the same object through every frame, consistently. " +
-          "Mark the subject on the video; without a mark, it uses whatever is in the center. Downloads 165 MB the first time. Apache-2.0 license.",
+          "Mark the subject on the video; without a mark, it uses whatever is in the center. Downloads 84 MB the first time (165 MB on GPUs without fp16). Apache-2.0 license.",
       },
       people: { label: "People", hint: "MODNet on the GPU: fast, but only recognizes people." },
       general: { label: "Objects", hint: "BiRefNet: any subject, much slower." },

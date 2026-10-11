@@ -161,7 +161,7 @@ export const es: Messages = {
         label: "SAM 2.1",
         hint:
           "SAM 2.1 de Meta en la GPU: sigue el mismo objeto en todos los frames, sin variar entre uno y otro. " +
-          "Marca el sujeto en el video; sin marca, usa lo que está en el centro. Descarga 165 MB la primera vez. Licencia Apache-2.0.",
+          "Marca el sujeto en el video; sin marca, usa lo que está en el centro. Descarga 84 MB la primera vez (165 MB en GPUs sin fp16). Licencia Apache-2.0.",
       },
       people: { label: "Personas", hint: "MODNet en la GPU: rápido, pero solo reconoce personas." },
       general: { label: "Objetos", hint: "BiRefNet: cualquier sujeto, mucho más lento." },

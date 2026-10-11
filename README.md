@@ -258,8 +258,9 @@ Diferenças em relação ao desktop:
 - **Arquivos:** "Mostrar no Finder" vira **Baixar**.
 - **Recorte:** RMBG-1.4, SAM 2.1 (só no web, por enquanto) e cor sólida. O
   RMBG (176 MB, licença não comercial) é baixado pelo mesmo aviso de primeiro
-  uso do desktop, com SHA-256 conferido. O SAM 2.1 (165 MB, Apache-2.0) é
-  baixado no primeiro recorte. Com ele, o player ganha o botão ⌖ para marcar o
+  uso do desktop, com SHA-256 conferido. O SAM 2.1 (Apache-2.0) é baixado
+  no primeiro recorte: 84 MB em fp16 onde a GPU tem `shader-f16` (o Chrome no
+  Mac tem), 165 MB em fp32 nas outras. Com ele, o player ganha o botão ⌖ para marcar o
   sujeito (no vídeo ou nas imagens soltas): arrastar faz uma caixa, clicar
   marca um ponto do sujeito, Alt+clique (ou botão direito) marca um ponto de
   fundo e Shift+clique apaga um ponto ou a caixa. No vídeo só se marca dentro
@@ -319,16 +320,21 @@ O que foi preciso consertar para o treino rodar (e rodar rápido) no navegador:
      máscara para a frente e depois para trás, com a memória do modelo. Assim
      o recorte não varia de um frame para outro, como acontece com o RMBG,
      que decide cada frame sozinho. Os quatro grafos são o export de vídeo de
-     `jax-image-tools/sam21-tiny-video-onnx` (commit e SHA-256 fixados). O
+     `jax-image-tools/sam21-tiny-video-onnx` ou, com `shader-f16`, a versão
+     fp16 dele que publicamos em `obraia/sam2.1-tiny-video-onnx-fp16` (commit
+     e SHA-256 fixados nos dois). O fp16 sai de
+     `scripts/sam2-export/export_fp16.py`, que troca os dois `If` do encoder
+     pelo ramo que sempre roda e converte com o conversor do ONNX Runtime
+     (posição em fp32); o script reproduz os arquivos byte a byte. O
      banco de memória (quadros condicionantes, os 6 últimos rastreados e até
      16 ponteiros de objeto com codificação temporal) é TypeScript e espelha
      o `Sam2VideoModel` do Transformers 4.57. Os três parâmetros que ele usa
      fora dos grafos estão em `sam2-params.bin` (68 KB, extraídos de
      `facebook/sam2.1-hiera-tiny`). O encoder exportado declara um shape
      errado num ramo de `If` que nunca roda, e o ORT Web 1.30 recusa o modelo
-     por isso: `fixVisionShape` troca esse byte em memória (5 → 4).
-     `scripts/web-bench/sam2.mjs` roda o tracker sobre uma pasta de frames
-     e grava os logits.
+     por isso: `fixVisionShape` troca esse byte em memória (5 → 4); o fp16
+     já vem sem esse `If`. `scripts/web-bench/sam2.mjs` roda o tracker sobre
+     uma pasta de frames e grava os logits (`--variant fp16|fp32`).
    - **Cor sólida** e **despill**: port exato do Rust (testes em
      `web/src/pipeline/*.test.ts`, `pnpm test:web`, com os casos do
      `masks.rs`).
@@ -366,11 +372,12 @@ frames), no Chrome headless do M4:
 | PNG com transparência | 4,5 s | pixels do sujeito com verde dominante: 16% → 0% |
 | Treino (3 mil passos, cor sólida) | — | PSNR 36,7 dB, 0,4% das gaussianas visíveis verdes |
 
-SAM 2.1 (WebGPU, M4): ~1 s/frame. São ~0,35 s do encoder e até ~0,65 s da
-atenção sobre a memória cheia (~28 mil tokens em fp32), o que fica perto do
-limite da GPU sem atenção fusionada; fp16 exigiria reexportar os grafos. A
-saída bate com a propagação do Transformers em PyTorch (IoU médio 0,997 por
-frame). Numa órbita com cenário poluído (toro sobre pedestal, com cone, cubo
+SAM 2.1 (WebGPU, M4): ~0,75 s/frame em fp16 e ~1,1 s em fp32. Em fp32 são
+~0,35 s do encoder e até ~0,65 s da atenção sobre a memória cheia (~28 mil
+tokens). As máscaras do fp16 ficam com IoU ≥ 0,993 por frame contra as do
+fp32, sem mudança contra as máscaras verdadeiras. A saída bate com a
+propagação do Transformers em PyTorch (IoU médio por frame: 0,997 em fp32 e
+0,996 em fp16). Numa órbita com cenário poluído (toro sobre pedestal, com cone, cubo
 e esfera em volta), o RMBG variou a cobertura entre 10% e 64% (pegou o chão
 inteiro em alguns frames; IoU entre frames vizinhos de até 0,16). O SAM 2.1,
 marcado com uma caixa, ficou no toro + pedestal em todos os frames. Ele segue
