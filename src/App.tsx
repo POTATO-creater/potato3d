@@ -3,7 +3,9 @@ import {
   api,
   DEFAULT_CHROMA,
   host,
+  IMAGE_EXT,
   type ExportStats,
+  type ImageSet,
   type JobEvent,
   type MaskOptions,
   type SceneFrame,
@@ -29,6 +31,7 @@ import { I18nProvider, useI18n } from "./i18n";
 import "./styles.css";
 
 const VIDEO_EXT = ["mp4", "mov", "m4v", "webm", "mkv", "avi"];
+const isVideo = (p: string) => VIDEO_EXT.includes(p.split(".").pop()?.toLowerCase() ?? "");
 const STORE_KEY = "splatforge.settings.v3";
 const MASKS_KEY = "splatforge.masks.v1";
 
@@ -94,7 +97,9 @@ function AppView() {
   const [tools, setTools] = useState<Tools | null>(null);
   const [videoPath, setVideoPath] = useState<string | null>(null);
   const [video, setVideo] = useState<VideoInfo | null>(null);
-  const [videoError, setVideoError] = useState<string | null>(null);
+  /** Frames já extraídos, no lugar do vídeo. */
+  const [imageSet, setImageSet] = useState<ImageSet | null>(null);
+  const [sourceError, setSourceError] = useState<{ kind: "video" | "images"; message: string } | null>(null);
   const [trim, setTrim] = useState<{ start: number; end: number | null }>({ start: 0, end: null });
   const [projectDir, setProjectDir] = useState<string | null>(null);
   const [preset, setPreset] = useState<PresetId | "custom">(stored.preset);
@@ -175,35 +180,77 @@ function AppView() {
     async (path: string) => {
       setVideoPath(path);
       setVideo(null);
-      setVideoError(null);
+      setImageSet(null);
+      setSourceError(null);
       setTrim({ start: 0, end: null });
       logs.current = [];
       setLogLines([]);
       try {
         setVideo(await api.probeVideo(path));
       } catch (e) {
-        setVideoError(String(e));
+        setSourceError({ kind: "video", message: String(e) });
       }
       await openProject(await api.defaultProjectDir(path));
     },
     [openProject],
   );
 
-  // Arrastar e soltar um vídeo em qualquer lugar da janela.
+  const chooseImages = useCallback(
+    async (paths: string[]) => {
+      setSourceError(null);
+      let set: ImageSet;
+      try {
+        set = await api.probeImages(paths);
+      } catch (e) {
+        // Mantém a entrada anterior: nada aqui serve como frame.
+        setSourceError({ kind: "images", message: String(e) });
+        return;
+      }
+      setVideoPath(null);
+      setVideo(null);
+      setImageSet(set);
+      setTrim({ start: 0, end: null });
+      logs.current = [];
+      setLogLines([]);
+      await openProject(await api.defaultProjectDir(set.dir));
+    },
+    [openProject],
+  );
+
+  /** Um vídeo, ou então imagens e pastas de frames. */
+  const openPaths = useCallback(
+    (paths: string[]) => {
+      const v = paths.find(isVideo);
+      if (v) chooseVideo(v);
+      else if (paths.length) chooseImages(paths);
+    },
+    [chooseVideo, chooseImages],
+  );
+
+  // Arrastar e soltar um vídeo, imagens ou uma pasta em qualquer lugar da janela.
   useEffect(
     () =>
       host.onDrop((paths) => {
-        if (job.running) return;
-        const p = paths.find((x) => VIDEO_EXT.includes(x.split(".").pop()?.toLowerCase() ?? ""));
-        if (p) chooseVideo(p);
+        if (!job.running) openPaths(paths);
       }),
-    [chooseVideo, job.running],
+    [openPaths, job.running],
   );
 
-  async function pickVideo() {
-    const p = await host.pickVideo(VIDEO_EXT);
-    if (p) chooseVideo(p);
+  async function pickFiles() {
+    openPaths(await host.pickFiles([...VIDEO_EXT, ...IMAGE_EXT]));
   }
+
+  async function pickFramesFolder() {
+    try {
+      const paths = await host.pickFramesFolder();
+      if (paths.length) chooseImages(paths);
+    } catch (e) {
+      setSourceError({ kind: "images", message: String(e) });
+    }
+  }
+
+  /** O vídeo ou a pasta das imagens. */
+  const sourcePath = videoPath ?? imageSet?.dir ?? null;
 
   async function pickProject() {
     const p = await host.pickFolder(projectDir ?? undefined);
@@ -232,7 +279,7 @@ function AppView() {
   }
 
   async function run() {
-    if (!videoPath || !projectDir) return;
+    if (!sourcePath || !projectDir) return;
     if (fromStage !== "train") setFrame(null);
     dispatch({ type: "start", from: fromStage });
     // Um novo treino invalida a exportação (o backend também a esquece).
@@ -242,7 +289,8 @@ function AppView() {
     try {
       await api.startJob(
         {
-          videoPath,
+          videoPath: sourcePath,
+          images: imageSet?.paths ?? null,
           projectDir,
           fromStage,
           frames: { ...settings.frames, trimStart: trim.start, trimEnd: trim.end },
@@ -271,7 +319,8 @@ function AppView() {
   const missing = tools
     ? (
         [
-          { name: "ffmpeg", key: "ffmpeg", ok: !!tools.ffmpeg && !!tools.ffprobe },
+          // Imagens dispensam a decodificação de vídeo.
+          { name: "ffmpeg", key: "ffmpeg", ok: (!!tools.ffmpeg && !!tools.ffprobe) || !!imageSet },
           { name: "COLMAP", key: "colmap", ok: !!tools.colmap },
           { name: "Brush", key: "brush", ok: !!tools.brush },
           // O recorte só é exigido quando ativado.
@@ -299,9 +348,11 @@ function AppView() {
         os={tools?.os}
         videoPath={videoPath}
         video={video}
+        imageSet={imageSet}
         trim={trim}
         onTrim={setTrim}
-        onPickVideo={pickVideo}
+        onPickFiles={pickFiles}
+        onPickFolder={pickFramesFolder}
         projectDir={projectDir}
         onPickProject={pickProject}
         onRevealProject={() => projectDir && host.reveal(job.finalPly ?? projectDir)}
@@ -325,7 +376,7 @@ function AppView() {
         onFromStage={setFromStage}
         available={available}
         running={job.running}
-        canRun={!!videoPath && !!projectDir && !!video && missing.length === 0}
+        canRun={!!projectDir && (!!video || !!imageSet) && missing.length === 0}
         onRun={run}
         onCancel={() => api.cancelJob()}
         exportPanel={
@@ -388,7 +439,11 @@ function AppView() {
             onInstalled={() => api.detectTools().then(setTools)}
           />
         )}
-        {videoError && <div className="banner error">{t.app.videoError(videoError)}</div>}
+        {sourceError && (
+          <div className="banner error">
+            {sourceError.kind === "video" ? t.app.videoError(sourceError.message) : t.app.imagesError(sourceError.message)}
+          </div>
+        )}
         {job.error && (
           <div className="banner error">
             <strong>{job.error.stage ? t.app.failedAt(t.stages[job.error.stage]) : t.app.failed}</strong>
@@ -418,7 +473,7 @@ function AppView() {
                       <strong>{t.stages.train}</strong>: {blurbs.train}
                     </li>
                   </ol>
-                  {!videoPath && <p className="muted">{t.app.dropToStart}</p>}
+                  {!sourcePath && <p className="muted">{t.app.dropToStart}</p>}
                 </div>
               }
             />
@@ -435,7 +490,7 @@ function AppView() {
           )}
         </div>
 
-        <StageStrip job={job} totalSteps={settings.train.totalSteps} tools={tools} masks={maskOpts} />
+        <StageStrip job={job} totalSteps={settings.train.totalSteps} tools={tools} masks={maskOpts} images={!!imageSet} />
       </main>
     </div>
   );

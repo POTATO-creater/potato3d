@@ -1,13 +1,25 @@
 // Host da versão web: os mesmos comandos do backend em Rust, implementados
 // no navegador (WebGPU, WASM, OPFS). A interface (src/) é a mesma do desktop.
 
-import type { Api, Host, InstallEvent, JobEvent, Tools } from "../../../src/lib/api";
+import { IMAGE_EXT, type Api, type Host, type InstallEvent, type JobEvent, type Tools } from "../../../src/lib/api";
 import { brushRuntime } from "../brush";
 import { probeVideo } from "../pipeline/frames";
 import { cachedModel, downloadModel, MODELS } from "../pipeline/segment";
 import { readFrame, readLens } from "../scene";
 import { exportSplat, splatInfo } from "./export";
-import { addVideo, basename, readFile, readPublished, publish, urlOf, video, writeFile } from "./files";
+import {
+  addImages,
+  addVideo,
+  basename,
+  groupName,
+  inputImage,
+  readFile,
+  readPublished,
+  publish,
+  urlOf,
+  video,
+  writeFile,
+} from "./files";
 import { applyUpdate, onUpdate } from "./update";
 import { runJob } from "./job";
 import { importFolder, importUrl, layout, openProject, projectFor, readState, saveState } from "./project";
@@ -46,6 +58,19 @@ const api: Api = {
   async probeVideo(path) {
     const v = video(path);
     return (v.info ??= await probeVideo(v.file));
+  },
+
+  async probeImages(paths) {
+    // As pastas já chegam abertas em arquivos (addImages).
+    const files = paths
+      .filter((p) => isImage(basename(p)))
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+    if (!files.length) throw new Error(`nenhuma imagem (${IMAGE_EXT.join(", ")}) encontrada`);
+    // Na orientação do EXIF, como a extração.
+    const bmp = await createImageBitmap(inputImage(files[0]));
+    const set = { paths: files, dir: files[0].replace(/\/[^/]*$/, ""), width: bmp.width, height: bmp.height };
+    bmp.close();
+    return set;
   },
 
   defaultProjectDir: async (videoPath) => projectFor(videoPath),
@@ -134,14 +159,52 @@ const api: Api = {
 const dropHandlers = new Set<(paths: string[]) => void>();
 const dropped = (paths: string[]) => dropHandlers.forEach((h) => h(paths));
 
+const ext = (name: string) => name.split(".").pop()?.toLowerCase() ?? "";
+// `._foo.jpg`: metadados do macOS em discos exFAT/FAT, não imagens.
+const isImage = (name: string) => !name.startsWith(".") && IMAGE_EXT.includes(ext(name));
+
+/** Arquivos escolhidos ou soltos → caminhos: vídeos à parte, imagens
+ *  agrupadas (as de uma pasta sob o nome dela). */
+function register(loose: File[], folders: { name: string; files: File[] }[] = []): string[] {
+  const images = loose.filter((f) => isImage(f.name));
+  const paths = loose.filter((f) => !isImage(f.name)).map(addVideo);
+  if (images.length) paths.push(...addImages(images, groupName(images.map((f) => f.name))));
+  for (const d of folders) paths.push(...addImages(d.files.filter((f) => isImage(f.name)), d.name));
+  return paths;
+}
+
+/** Arquivos do primeiro nível de uma pasta solta na janela. */
+async function readFolder(dir: FileSystemDirectoryEntry): Promise<File[]> {
+  const reader = dir.createReader();
+  const entries: FileSystemEntry[] = [];
+  // readEntries devolve em lotes (~100) até vir vazio.
+  for (;;) {
+    const batch = await new Promise<FileSystemEntry[]>((res, rej) => reader.readEntries(res, rej));
+    if (!batch.length) break;
+    entries.push(...batch);
+  }
+  return Promise.all(
+    entries
+      .filter((e): e is FileSystemFileEntry => e.isFile && isImage(e.name))
+      .map((e) => new Promise<File>((res, rej) => e.file(res, rej))),
+  );
+}
+
 addEventListener("dragover", (e) => {
   if (e.dataTransfer?.types.includes("Files")) e.preventDefault();
 });
 addEventListener("drop", (e) => {
-  const files = [...(e.dataTransfer?.files ?? [])];
-  if (!files.length) return;
+  const items = [...(e.dataTransfer?.items ?? [])].filter((i) => i.kind === "file");
+  if (!items.length) return;
   e.preventDefault();
-  dropped(files.map(addVideo));
+  // Entradas e arquivos só podem ser lidos durante o evento.
+  const taken = items.map((i) => ({ entry: i.webkitGetAsEntry?.() ?? null, file: i.getAsFile() }));
+  const loose = taken.filter((t) => !t.entry?.isDirectory && t.file).map((t) => t.file!);
+  const dirs = taken.map((t) => t.entry).filter((d): d is FileSystemDirectoryEntry => !!d?.isDirectory);
+  Promise.all(dirs.map(async (d) => ({ name: d.name, files: await readFolder(d) }))).then(
+    (folders) => dropped(register(loose, folders)),
+    (err) => console.error("não foi possível ler a pasta solta:", err),
+  );
 });
 
 // `?video=<url>`: abre um vídeo servido por HTTP, como se tivesse sido solto
@@ -156,13 +219,15 @@ function openUrlVideo() {
   urlVideo.then((p) => dropped([p]), (e) => console.error(e));
 }
 
-function pickFile(accept: string): Promise<File | null> {
+function pickFiles(accept: string, folder = false): Promise<File[]> {
   return new Promise((resolve) => {
     const input = document.createElement("input");
     input.type = "file";
     input.accept = accept;
-    input.onchange = () => resolve(input.files?.[0] ?? null);
-    input.oncancel = () => resolve(null);
+    input.multiple = true;
+    input.webkitdirectory = folder;
+    input.onchange = () => resolve([...(input.files ?? [])]);
+    input.oncancel = () => resolve([]);
     input.click();
   });
 }
@@ -179,9 +244,19 @@ export const webHost: Host = {
   api,
   // As URLs mudam a cada publicação, então o cache-buster não é preciso.
   fileUrl: (path) => urlOf(path),
-  async pickVideo(extensions) {
-    const file = await pickFile(["video/*", ...extensions.map((e) => `.${e}`)].join(","));
-    return file ? addVideo(file) : null;
+  async pickFiles(extensions) {
+    const files = await pickFiles(["video/*", "image/*", ...extensions.map((e) => `.${e}`)].join(","));
+    // Um vídeo de cada vez: entre vários arquivos, o vídeo tem prioridade.
+    const video = files.find((f) => !isImage(f.name));
+    return video ? register([video]) : register(files);
+  },
+  async pickFramesFolder() {
+    const files = await pickFiles("", true);
+    // Só o primeiro nível da pasta: "pasta/arquivo".
+    if (!files.length) return [];
+    const top = files.filter((f) => f.webkitRelativePath.split("/").length === 2 && isImage(f.name));
+    if (!top.length) throw new Error(`nenhuma imagem (${IMAGE_EXT.join(", ")}) no primeiro nível da pasta`);
+    return register([], [{ name: top[0].webkitRelativePath.split("/")[0], files: top }]);
   },
   /** "Importar…": copia uma pasta de projeto do Gausify Orbit ou um dataset
    *  COLMAP para um projeto no navegador. */

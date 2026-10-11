@@ -225,7 +225,8 @@ button:disabled {
   aspect-ratio: 16 / 9;
   cursor: pointer;
 }
-.player-stage video {
+.player-stage video,
+.player-stage img {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -330,6 +331,15 @@ button:disabled {
   margin: 0 auto 0 6px;
   font-size: 11px;
   color: var(--text);
+}
+.player-name {
+  min-width: 0;
+  max-width: 55%;
+  padding-right: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
 }
 
 .file-name {

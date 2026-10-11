@@ -19,19 +19,21 @@ export const es: Messages = {
     tabs: { viewer: "3D", frames: "Frames", log: "Registro" },
     readyIn: (d) => `Listo en ${d}`,
     videoError: (e) => `No se pudo leer el video: ${e}`,
+    imagesError: (e) => `No se pudieron usar las imágenes: ${e}`,
     failed: "Falló.",
     failedAt: (stage) => `Falló en la etapa ${stage}.`,
     logError: (e) => `ERROR: ${e}`,
     exported: (name) => `Exportado · ${name}`,
     hero: "Video orbital → Gaussian Splatting",
     optional: "opcional",
-    dropToStart: "Arrastra un video a la ventana para empezar.",
+    dropToStart: "Arrastra un video, imágenes o una carpeta de frames a la ventana para empezar.",
     maskModel: "Modelo de recorte",
     masker: "Recortador",
   },
 
   platform: {
     browserDecoder: "decodificador del navegador",
+    yourImages: "tus imágenes · nitidez",
     solidColor: "color sólido",
     webPoses: "AKAZE · WebGPU · SfM incremental",
     hwDecode: "decodificación por hardware",
@@ -45,13 +47,13 @@ export const es: Messages = {
     reveal: (fileManager, what) => `Mostrar${what ? ` ${what}` : ""} en ${fileManager}`,
     blurbs: {
       web: {
-        frames: "el navegador decodifica el video y elige los frames más nítidos.",
+        frames: "el navegador decodifica el video (o lee tus imágenes) y elige los frames más nítidos.",
         masks: "aísla al sujeto para que el splat salga sin el fondo.",
         poses: "features AKAZE, matching circular en la GPU (cierra la órbita) y SfM incremental.",
         train: "Brush en WebAssembly + WebGPU, con vistas previas en vivo aquí.",
       },
       desktop: {
-        frames: "ffmpeg decodifica por hardware y elige los frames más nítidos.",
+        frames: "ffmpeg decodifica el video por hardware (o lee tus imágenes) y elige los frames más nítidos.",
         masks: "aísla al sujeto para que el splat salga sin el fondo.",
         poses: "COLMAP con matching circular (cierra la órbita) y mapeador global.",
         train: "Brush en la GPU, con vistas previas en vivo aquí.",
@@ -67,6 +69,13 @@ export const es: Messages = {
 
   sidebar: {
     video: "Video",
+    images: "Imágenes",
+    source: "Video o imágenes",
+    chooseFolder: "Carpeta…",
+    chooseFolderTitle: "Usar una carpeta con los frames ya extraídos",
+    imageCount: (n) => `${n} imágenes`,
+    imagesHelp:
+      "Se usan en el orden de los nombres, que debe seguir la órbita. Con más imágenes que el número de frames, queda la más nítida de cada tramo.",
     changeVideo: "Cambiar…",
     chooseVideo: "Elegir…",
     trim: "Tramo",
@@ -75,13 +84,13 @@ export const es: Messages = {
     wholeVideo: "Video completo",
     trimHelp:
       'Arrastra las asas naranjas en la línea de tiempo o usa los botones. Usa solo el tramo en que el objeto se mantiene consistente: el video de IA suele "derretirse" al final de la órbita.',
-    dropTitle: "Arrastra un video orbital aquí",
-    dropHint: "o haz clic para elegir (.mp4, .mov, .webm)",
+    dropTitle: "Arrastra un video orbital, imágenes o una carpeta de frames",
+    dropHint: "o haz clic para elegir (.mp4, .mov, .webm, .jpg, .png)",
     project: "Proyecto",
     importProject: "Importar…",
     importTitle: "Importa una carpeta de proyecto de Gausify Orbit o un dataset COLMAP (images/ + sparse/0)",
     changeProject: "Cambiar…",
-    pickVideoFirst: "Elige un video primero",
+    pickVideoFirst: "Elige un video o imágenes primero",
     quality: "Calidad",
     custom: "personalizado",
     advanced: "Parámetros avanzados",
@@ -308,6 +317,8 @@ export const es: Messages = {
     play: "Reproducir (espacio)",
     prevFrame: "Frame anterior (←)",
     nextFrame: "Frame siguiente (→)",
+    prevImage: "Imagen anterior (←)",
+    nextImage: "Imagen siguiente (→)",
     loop: "Repetir solo el tramo seleccionado",
   },
 
@@ -341,6 +352,7 @@ export const es: Messages = {
     "frames.decoding": () => "Decodificando video",
     "frames.decodingSharpness": () => "Decodificando y midiendo nitidez",
     "frames.sharpness": () => "Midiendo nitidez",
+    "frames.converting": () => "Convirtiendo imágenes",
     "frames.selected": (a: Args) => `${a.n} frames seleccionados`,
 
     "masks.detecting": () => "Detectando al sujeto",

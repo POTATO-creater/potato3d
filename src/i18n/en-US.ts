@@ -19,19 +19,21 @@ export const enUS: Messages = {
     tabs: { viewer: "3D", frames: "Frames", log: "Log" },
     readyIn: (d) => `Done in ${d}`,
     videoError: (e) => `Couldn't read the video: ${e}`,
+    imagesError: (e) => `Couldn't use the images: ${e}`,
     failed: "Failed.",
     failedAt: (stage) => `Failed at the ${stage} stage.`,
     logError: (e) => `ERROR: ${e}`,
     exported: (name) => `Exported · ${name}`,
     hero: "Orbital video → Gaussian Splatting",
     optional: "optional",
-    dropToStart: "Drag a video into the window to get started.",
+    dropToStart: "Drag a video, images or a folder of frames into the window to get started.",
     maskModel: "Cutout model",
     masker: "Cutout tool",
   },
 
   platform: {
     browserDecoder: "browser decoder",
+    yourImages: "your images · sharpness",
     solidColor: "solid color",
     webPoses: "AKAZE · WebGPU · incremental SfM",
     hwDecode: "hardware decoding",
@@ -45,13 +47,13 @@ export const enUS: Messages = {
     reveal: (fileManager, what) => `Show${what ? ` ${what}` : ""} in ${fileManager}`,
     blurbs: {
       web: {
-        frames: "the browser decodes the video and picks the sharpest frames.",
+        frames: "the browser decodes the video (or reads your images) and picks the sharpest frames.",
         masks: "isolates the subject so the splat comes out without the background.",
         poses: "AKAZE features, circular matching on the GPU (closes the orbit) and incremental SfM.",
         train: "Brush in WebAssembly + WebGPU, with live previews right here.",
       },
       desktop: {
-        frames: "ffmpeg decodes in hardware and picks the sharpest frames.",
+        frames: "ffmpeg decodes the video in hardware (or reads your images) and picks the sharpest frames.",
         masks: "isolates the subject so the splat comes out without the background.",
         poses: "COLMAP with circular matching (closes the orbit) and the global mapper.",
         train: "Brush on the GPU, with live previews right here.",
@@ -67,6 +69,13 @@ export const enUS: Messages = {
 
   sidebar: {
     video: "Video",
+    images: "Images",
+    source: "Video or images",
+    chooseFolder: "Folder…",
+    chooseFolderTitle: "Use a folder of already extracted frames",
+    imageCount: (n) => `${n} images`,
+    imagesHelp:
+      "Used in file name order, which should follow the orbit. With more images than the frame count, the sharpest of each stretch is kept.",
     changeVideo: "Change…",
     chooseVideo: "Choose…",
     trim: "Range",
@@ -75,13 +84,13 @@ export const enUS: Messages = {
     wholeVideo: "Whole video",
     trimHelp:
       'Drag the orange handles on the timeline or use the buttons. Only use the part where the object stays consistent: AI video tends to "melt" at the end of the orbit.',
-    dropTitle: "Drag an orbital video here",
-    dropHint: "or click to choose (.mp4, .mov, .webm)",
+    dropTitle: "Drag an orbital video, images or a folder of frames",
+    dropHint: "or click to choose (.mp4, .mov, .webm, .jpg, .png)",
     project: "Project",
     importProject: "Import…",
     importTitle: "Imports a Gausify Orbit project folder or a COLMAP dataset (images/ + sparse/0)",
     changeProject: "Change…",
-    pickVideoFirst: "Choose a video first",
+    pickVideoFirst: "Choose a video or images first",
     quality: "Quality",
     custom: "custom",
     advanced: "Advanced settings",
@@ -308,6 +317,8 @@ export const enUS: Messages = {
     play: "Play (space)",
     prevFrame: "Previous frame (←)",
     nextFrame: "Next frame (→)",
+    prevImage: "Previous image (←)",
+    nextImage: "Next image (→)",
     loop: "Loop only the selected range",
   },
 
@@ -341,6 +352,7 @@ export const enUS: Messages = {
     "frames.decoding": () => "Decoding video",
     "frames.decodingSharpness": () => "Decoding and measuring sharpness",
     "frames.sharpness": () => "Measuring sharpness",
+    "frames.converting": () => "Converting images",
     "frames.selected": (a: Args) => `${a.n} frames selected`,
 
     "masks.detecting": () => "Detecting the subject",

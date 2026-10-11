@@ -4,12 +4,12 @@ import type { Messages } from "../i18n";
 export type Os = Tools["os"];
 
 /** Rótulo curto da ferramenta de cada etapa, conforme o sistema e a GPU. */
-export function stageToolLabels(t: Messages, tools: Tools | null, masks?: MaskOptions): Record<Stage, string> {
+export function stageToolLabels(t: Messages, tools: Tools | null, masks?: MaskOptions, images?: boolean): Record<Stage, string> {
   const os = tools?.os ?? "macos";
   const p = t.platform;
   if (os === "web")
     return {
-      frames: p.browserDecoder,
+      frames: images ? p.yourImages : p.browserDecoder,
       masks: masks?.method === "chroma" ? p.solidColor : "RMBG-1.4 · WebGPU",
       poses: p.webPoses,
       train: "Brush · WebGPU",
@@ -17,7 +17,7 @@ export function stageToolLabels(t: Messages, tools: Tools | null, masks?: MaskOp
   const decode = os === "macos" ? "VideoToolbox" : p.hwDecode;
   const gpu = os === "macos" ? "Metal" : os === "windows" ? "Vulkan/DX12" : "Vulkan";
   return {
-    frames: `ffmpeg · ${decode}`,
+    frames: images ? p.yourImages : `ffmpeg · ${decode}`,
     masks:
       masks?.method === "chroma"
         ? p.solidColor

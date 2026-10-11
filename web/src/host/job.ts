@@ -3,11 +3,11 @@
 
 import type { JobConfig, JobEvent, Msg, ProjectState, Stage } from "../../../src/lib/api";
 import { train } from "../brush";
-import { extractFrames, probeVideo } from "../pipeline/frames";
+import { extractFrames, framesFromImages, probeVideo, type PickedFrame } from "../pipeline/frames";
 import { buildAlpha, makeMasks } from "../pipeline/masks";
 import { DEFAULT_SFM, runSfm } from "../sfm";
 import { renameImages, writeModel } from "../sfm/colmap";
-import { dirAt, exists, publish, publishDir, readFile, remove, stem, unpublishUnder, video, writeFile } from "./files";
+import { dirAt, exists, inputImage, publish, publishDir, readFile, remove, stem, unpublishUnder, video, writeFile } from "./files";
 import { IMAGE_EXT, layout, pruneProjects, readState, saveState } from "./project";
 
 const ORDER: Stage[] = ["frames", "masks", "poses", "train"];
@@ -57,20 +57,30 @@ async function run(cfg: JobConfig, emit: (e: JobEvent) => void, signal: AbortSig
   if (before(from, "frames")) {
     at.stage = "frames";
     const t = performance.now();
-    const v = video(cfg.videoPath);
     const rep = reporter(emit, "frames", signal);
     await pruneProjects(l.root);
-    rep.progress(0, { key: "frames.reading" });
-    const info = (v.info ??= await probeVideo(v.file));
-    rep.log(`${info.width}x${info.height} @ ${info.fps.toFixed(2)} fps, ${info.duration.toFixed(1)}s, ${info.codec}`);
     // Etapas seguintes ficam inválidas.
-    for (const p of [l.images, `${l.dataset}/sparse`, l.masks, l.alpha, l.training, l.finalPly, l.exports]) await remove(p);
-    const picked = await extractFrames(v.file, info, cfg.frames, await dirAt(l.images, true), (f) =>
-      rep.progress(f, { key: "frames.decodingSharpness" }),
-    );
+    const clear = async () => {
+      for (const p of [l.images, `${l.dataset}/sparse`, l.masks, l.alpha, l.training, l.finalPly, l.exports]) await remove(p);
+      return dirAt(l.images, true);
+    };
+    let picked: PickedFrame[];
+    if (cfg.images?.length) {
+      const sources = cfg.images.map(inputImage);
+      rep.log(`${sources.length} imagens de ${cfg.videoPath}`);
+      picked = await framesFromImages(sources, cfg.frames, await clear(), (f) => rep.progress(f, { key: "frames.sharpness" }));
+    } else {
+      const v = video(cfg.videoPath);
+      rep.progress(0, { key: "frames.reading" });
+      const info = (v.info ??= await probeVideo(v.file));
+      rep.log(`${info.width}x${info.height} @ ${info.fps.toFixed(2)} fps, ${info.duration.toFixed(1)}s, ${info.codec}`);
+      picked = await extractFrames(v.file, info, cfg.frames, await clear(), (f) =>
+        rep.progress(f, { key: "frames.decodingSharpness" }),
+      );
+    }
     await publishDir(l.images, IMAGE_EXT);
     rep.progress(1, { key: "frames.selected", args: { n: picked.length } });
-    const frames = picked.map((f) => ({ path: `${l.images}/${f.name}`, time: f.time, sharpness: f.sharpness }));
+    const frames = picked.map((f) => ({ path: `${l.images}/${f.name}`, time: f.time, sharpness: f.sharpness, source: f.source }));
     state = { ...state, videoPath: cfg.videoPath, frames, masks: null, masksDir: null, poses: null, finalPly: null, lastPsnr: null, lastExport: null };
     await saveState(l.root, state);
     emit({ type: "framesReady", frames });

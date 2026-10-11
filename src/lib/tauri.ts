@@ -15,6 +15,7 @@ function channel<T>(onMessage: (m: T) => void) {
 const api: Api = {
   detectTools: () => invoke("detect_tools"),
   probeVideo: (path) => invoke("probe_video", { path }),
+  probeImages: (paths) => invoke("probe_images", { paths }),
   defaultProjectDir: (videoPath) => invoke("default_project_dir", { videoPath }),
   loadProject: (projectDir) => invoke("load_project", { projectDir }),
   sceneFrame: (projectDir) => invoke("scene_frame", { projectDir }),
@@ -35,9 +36,13 @@ export const tauriHost: Host = {
     const url = convertFileSrc(path);
     return bust === undefined ? url : `${url}?v=${bust}`;
   },
-  async pickVideo(extensions) {
-    const p = await open({ multiple: false, filters: [{ name: "Vídeo", extensions }] });
-    return typeof p === "string" ? p : null;
+  async pickFiles(extensions) {
+    const p = await open({ multiple: true, filters: [{ name: "Vídeo ou imagens", extensions }] });
+    return p ?? [];
+  },
+  async pickFramesFolder() {
+    const p = await open({ directory: true, multiple: false });
+    return typeof p === "string" ? [p] : [];
   },
   async pickFolder(defaultPath) {
     const p = await open({ directory: true, multiple: false, defaultPath });

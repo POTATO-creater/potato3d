@@ -35,6 +35,20 @@ export interface VideoInfo {
   codec: string;
 }
 
+/** Frames já extraídos (imagens soltas ou uma pasta), no lugar do vídeo. */
+export interface ImageSet {
+  /** Na ordem da órbita: ordem natural dos nomes. */
+  paths: string[];
+  /** Pasta das imagens: dá nome ao projeto. */
+  dir: string;
+  /** Da primeira imagem, já girada conforme o EXIF. */
+  width: number;
+  height: number;
+}
+
+/** Extensões aceitas como frames. */
+export const IMAGE_EXT = ["jpg", "jpeg", "png", "webp"];
+
 export interface FrameOptions {
   targetFrames: number;
   maxSide: number;
@@ -113,7 +127,10 @@ export interface Settings {
 }
 
 export interface JobConfig extends Omit<Settings, "frames"> {
+  /** O vídeo, ou a pasta das imagens quando `images` vem preenchido. */
   videoPath: string;
+  /** Frames já extraídos, na ordem da órbita, em vez do vídeo. */
+  images: string[] | null;
   projectDir: string;
   fromStage: Stage;
   frames: FrameOptions;
@@ -124,6 +141,9 @@ export interface FrameInfo {
   path: string;
   time: number;
   sharpness: number;
+  /** Nome da imagem de origem quando os frames vieram de imagens (aí `time`
+   *  não se aplica). */
+  source?: string;
 }
 
 export interface ModelStats {
@@ -232,6 +252,8 @@ export type InstallEvent =
 export interface Api {
   detectTools(): Promise<Tools>;
   probeVideo(path: string): Promise<VideoInfo>;
+  /** Imagens e pastas (só o primeiro nível) → conjunto ordenado. */
+  probeImages(paths: string[]): Promise<ImageSet>;
   defaultProjectDir(videoPath: string): Promise<string>;
   loadProject(projectDir: string): Promise<ProjectState>;
   sceneFrame(projectDir: string): Promise<SceneFrame>;
@@ -256,11 +278,15 @@ export interface Host {
   api: Api;
   /** URL servível de um arquivo (com cache-buster opcional). */
   fileUrl(path: string, bust?: string | number): string;
-  pickVideo(extensions: string[]): Promise<string | null>;
+  /** Um vídeo ou várias imagens; lista vazia se cancelado. */
+  pickFiles(extensions: string[]): Promise<string[]>;
+  /** Pasta de frames, para `probeImages`; lista vazia se cancelado. Pode
+   *  falhar quando a pasta não tem imagens. */
+  pickFramesFolder(): Promise<string[]>;
   pickFolder(defaultPath?: string): Promise<string | null>;
   /** Mostra o arquivo no gerenciador de arquivos (no web, baixa). */
   reveal(path: string): Promise<void>;
-  /** Arquivos soltos na janela; devolve a função que para de ouvir. */
+  /** Arquivos e pastas soltos na janela; devolve a função que para de ouvir. */
   onDrop(handler: (paths: string[]) => void): () => void;
   /** Conteúdo de um arquivo (no desktop, pelo protocolo `asset:`). */
   readBlob(path: string): Promise<Blob>;

@@ -2,6 +2,7 @@
 // no desktop; aqui eles apontam para:
 //   /projects/<nome>/…  pastas e arquivos no OPFS (armazenamento da origem)
 //   /videos/<nome>      vídeos abertos nesta aba (só em memória)
+//   /inputs/<pasta>/…   imagens usadas como frames, idem
 // e `fileUrl` precisa ser síncrono, então cada arquivo que a interface vai
 // exibir é "publicado" antes: ganha uma URL blob: guardada num mapa.
 
@@ -10,6 +11,7 @@ import type { VideoInfo } from "../../../src/lib/api";
 export const PROJECTS = "/projects";
 
 const videos = new Map<string, { file: File; info?: VideoInfo }>();
+const images = new Map<string, File>();
 const urls = new Map<string, string>();
 
 export const basename = (p: string) => p.split("/").pop() ?? p;
@@ -27,6 +29,34 @@ export function video(path: string) {
   const v = videos.get(path);
   if (!v) throw new Error("O vídeo não está aberto nesta aba: arraste-o para a janela de novo.");
   return v;
+}
+
+/** Imagens de uma pasta (ou soltas, agrupadas sob `name`) para usar como
+ *  frames. Abrir o mesmo nome de novo troca o conjunto. */
+export function addImages(files: File[], name: string): string[] {
+  const dir = `/inputs/${name.replace(/[\\/]/g, "_") || "imagens"}`;
+  for (const p of images.keys()) if (p.startsWith(`${dir}/`)) images.delete(p);
+  unpublishUnder(dir);
+  return files.map((file) => {
+    const path = `${dir}/${file.name}`;
+    images.set(path, file);
+    publish(path, file);
+    return path;
+  });
+}
+
+export function inputImage(path: string): File {
+  const f = images.get(path);
+  if (!f) throw new Error("As imagens não estão abertas nesta aba: arraste-as para a janela de novo.");
+  return f;
+}
+
+/** Nome de um grupo de imagens soltas: o prefixo comum ("frame_0001.png",
+ *  "frame_0002.png" → "frame"). */
+export function groupName(names: string[]): string {
+  let prefix = names[0] ?? "";
+  for (const n of names) while (!n.startsWith(prefix)) prefix = prefix.slice(0, -1);
+  return prefix.replace(/[\d\s._-]+$/, "") || "imagens";
 }
 
 /** URL do arquivo publicado, ou "" se ainda não foi. */

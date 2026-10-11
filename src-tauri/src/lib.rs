@@ -44,6 +44,17 @@ async fn probe_video(path: String) -> CmdResult<frames::VideoInfo> {
     frames::probe(&ffprobe, &PathBuf::from(path)).await.map_err(|e| format!("{e:#}"))
 }
 
+/// Imagens soltas e pastas de frames → lista ordenada (pode varrer uma pasta
+/// grande num disco lento, então fora da thread principal).
+#[tauri::command]
+async fn probe_images(paths: Vec<String>) -> CmdResult<frames::ImageSetInfo> {
+    let paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
+    tauri::async_runtime::spawn_blocking(move || frames::probe_images(&paths))
+        .await
+        .map_err(err)?
+        .map_err(|e| format!("{e:#}"))
+}
+
 #[tauri::command]
 fn default_project_dir(video_path: String) -> String {
     pipeline::default_project_dir(&PathBuf::from(video_path)).to_string_lossy().into_owned()
@@ -171,6 +182,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             detect_tools,
             probe_video,
+            probe_images,
             default_project_dir,
             load_project,
             scene_frame,
