@@ -98,7 +98,8 @@ async function run(cfg: JobConfig, emit: (e: JobEvent) => void, signal: AbortSig
       const rep = reporter(emit, "masks", signal);
       rep.progress(0, { key: "masks.detecting" });
       await remove(l.masks);
-      const stats = await makeMasks(await dirAt(l.images), await dirAt(l.masks, true), m, rep.log, rep.progress);
+      const times = new Map(state.frames.flatMap((f) => (f.time == null ? [] : [[f.path.split("/").pop()!, f.time] as const])));
+      const stats = await makeMasks(await dirAt(l.images), await dirAt(l.masks, true), m, rep.log, rep.progress, times);
       await publishDir(l.masks, /\.png$/i);
       rep.progress(1, m.method === "chroma" ? { key: "masks.doneChroma", args: { n: stats.count } } : { key: "masks.done", args: { n: stats.count, backend: stats.backend } });
       state = { ...state, masks: stats, masksDir: l.masks };

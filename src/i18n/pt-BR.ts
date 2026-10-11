@@ -162,6 +162,12 @@ export const ptBR = {
           "RMBG-1.4 na GPU: bordas mais limpas, qualquer sujeito. Baixa 176 MB na primeira vez. " +
           "Licença da BRIA AI só para uso não comercial.",
       },
+      sam2: {
+        label: "SAM 2.1",
+        hint:
+          "SAM 2.1 da Meta na GPU: segue o mesmo objeto por todos os frames, sem variar entre um e outro. " +
+          "Marque o sujeito no vídeo; sem marcação, usa o que está no centro. Baixa 165 MB na primeira vez. Licença Apache-2.0.",
+      },
       people: { label: "Pessoas", hint: "MODNet na GPU: rápido, mas só reconhece pessoas." },
       general: { label: "Objetos", hint: "BiRefNet: qualquer sujeito, bem mais lento." },
       auto: { label: "Vision", hint: "Recorte nativo do macOS, na GPU: qualquer sujeito." },
@@ -178,6 +184,14 @@ export const ptBR = {
     despillStrength: "Intensidade do despill",
     forPoses: "Usar o recorte também nas poses",
     forPosesHint: "ajuda se o fundo muda entre frames; atrapalha em sujeitos com pouca textura",
+    prompt: {
+      none: "Sem marcação: segue o objeto no centro do primeiro frame.",
+      marked: (time: string, what: string) => `Sujeito marcado em ${time} (${what}).`,
+      box: "caixa",
+      points: (n: number) => (n === 1 ? "1 ponto" : `${n} pontos`),
+      clear: "Limpar",
+      howTo: "No vídeo, toque no alvo ⌖ e arraste uma caixa em volta do sujeito ou clique nele. Alt+clique marca o fundo.",
+    },
   },
 
   export: {
@@ -334,6 +348,9 @@ export const ptBR = {
     prevImage: "Imagem anterior (←)",
     nextImage: "Próxima imagem (→)",
     loop: "Repetir só o trecho selecionado",
+    mark: "Marcar o sujeito para o SAM 2.1",
+    markDone: "Concluir a marcação",
+    markHint: "Arraste uma caixa ou clique no sujeito · Alt+clique: fundo",
   },
 
   viewer: {

@@ -156,6 +156,12 @@ export const es: Messages = {
           "RMBG-1.4 en la GPU: bordes más limpios, cualquier sujeto. Descarga 176 MB la primera vez. " +
           "Licencia de BRIA AI solo para uso no comercial.",
       },
+      sam2: {
+        label: "SAM 2.1",
+        hint:
+          "SAM 2.1 de Meta en la GPU: sigue el mismo objeto en todos los frames, sin variar entre uno y otro. " +
+          "Marca el sujeto en el video; sin marca, usa lo que está en el centro. Descarga 165 MB la primera vez. Licencia Apache-2.0.",
+      },
       people: { label: "Personas", hint: "MODNet en la GPU: rápido, pero solo reconoce personas." },
       general: { label: "Objetos", hint: "BiRefNet: cualquier sujeto, mucho más lento." },
       auto: { label: "Vision", hint: "Recorte nativo de macOS, en la GPU: cualquier sujeto." },
@@ -172,6 +178,14 @@ export const es: Messages = {
     despillStrength: "Intensidad del despill",
     forPoses: "Usar el recorte también en las poses",
     forPosesHint: "ayuda si el fondo cambia entre frames; estorba en sujetos con poca textura",
+    prompt: {
+      none: "Sin marca: sigue el objeto del centro del primer frame.",
+      marked: (time: string, what: string) => `Sujeto marcado en ${time} (${what}).`,
+      box: "caja",
+      points: (n: number) => (n === 1 ? "1 punto" : `${n} puntos`),
+      clear: "Borrar",
+      howTo: "En el video, toca el objetivo ⌖ y arrastra una caja alrededor del sujeto o haz clic en él. Alt+clic marca el fondo.",
+    },
   },
 
   export: {
@@ -323,6 +337,9 @@ export const es: Messages = {
     prevImage: "Imagen anterior (←)",
     nextImage: "Imagen siguiente (→)",
     loop: "Repetir solo el tramo seleccionado",
+    mark: "Marcar el sujeto para SAM 2.1",
+    markDone: "Terminar de marcar",
+    markHint: "Arrastra una caja o haz clic en el sujeto · Alt+clic: fondo",
   },
 
   viewer: {

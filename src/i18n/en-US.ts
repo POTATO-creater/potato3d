@@ -156,6 +156,12 @@ export const enUS: Messages = {
           "RMBG-1.4 on the GPU: cleaner edges, any subject. Downloads 176 MB the first time. " +
           "BRIA AI license, non-commercial use only.",
       },
+      sam2: {
+        label: "SAM 2.1",
+        hint:
+          "Meta's SAM 2.1 on the GPU: follows the same object through every frame, consistently. " +
+          "Mark the subject on the video; without a mark, it uses whatever is in the center. Downloads 165 MB the first time. Apache-2.0 license.",
+      },
       people: { label: "People", hint: "MODNet on the GPU: fast, but only recognizes people." },
       general: { label: "Objects", hint: "BiRefNet: any subject, much slower." },
       auto: { label: "Vision", hint: "Native macOS cutout, on the GPU: any subject." },
@@ -172,6 +178,14 @@ export const enUS: Messages = {
     despillStrength: "Despill strength",
     forPoses: "Also use the cutout for poses",
     forPosesHint: "helps if the background changes between frames; hurts on low-texture subjects",
+    prompt: {
+      none: "No mark: follows the object in the center of the first frame.",
+      marked: (time: string, what: string) => `Subject marked at ${time} (${what}).`,
+      box: "box",
+      points: (n: number) => (n === 1 ? "1 point" : `${n} points`),
+      clear: "Clear",
+      howTo: "On the video, tap the target ⌖ and drag a box around the subject or click it. Alt+click marks background.",
+    },
   },
 
   export: {
@@ -323,6 +337,9 @@ export const enUS: Messages = {
     prevImage: "Previous image (←)",
     nextImage: "Next image (→)",
     loop: "Loop only the selected range",
+    mark: "Mark the subject for SAM 2.1",
+    markDone: "Finish marking",
+    markHint: "Drag a box or click the subject · Alt+click: background",
   },
 
   viewer: {

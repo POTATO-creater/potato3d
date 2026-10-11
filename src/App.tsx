@@ -50,7 +50,8 @@ function loadMasks(): MaskOptions {
     // despill ficava dentro do chroma.
     if (raw) {
       const { chroma: { despill, ...chroma } = {} as never, ...saved } = JSON.parse(raw);
-      return { ...base, despill: despill ?? base.despill, ...saved, chroma: { ...DEFAULT_CHROMA, ...chroma } };
+      // A marcação do SAM 2.1 é do vídeo da sessão anterior: não serve mais.
+      return { ...base, despill: despill ?? base.despill, ...saved, chroma: { ...DEFAULT_CHROMA, ...chroma }, prompt: null };
     }
   } catch {
     /* armazenamento indisponível */
@@ -77,7 +78,9 @@ function matchPreset(s: Settings): PresetId | "custom" {
 
 /** O recorte por IA tem o que precisa neste sistema? */
 function maskToolReady(tools: Tools, m: MaskOptions) {
-  // No web o único recorte por IA é o RMBG.
+  // O SAM 2.1 (só no web) baixa os modelos durante o recorte.
+  if (m.method === "sam2") return tools.os === "web";
+  // No web o outro recorte por IA é o RMBG.
   if (m.method === "rmbg" || tools.os === "web") return !!tools.rmbgModel;
   if (tools.os !== "windows") return !!tools.masker;
   return m.method === "general" ? !!tools.birefnetModel : !!tools.modnetModel;
@@ -185,6 +188,7 @@ function AppView() {
       setImageSet(null);
       setSourceError(null);
       setTrim({ start: 0, end: null });
+      setMaskOpts((m) => (m.prompt ? { ...m, prompt: null } : m));
       logs.current = [];
       setLogLines([]);
       try {
@@ -212,6 +216,7 @@ function AppView() {
       setVideo(null);
       setImageSet(set);
       setTrim({ start: 0, end: null });
+      setMaskOpts((m) => (m.prompt ? { ...m, prompt: null } : m));
       logs.current = [];
       setLogLines([]);
       await openProject(await api.defaultProjectDir(set.dir));

@@ -57,8 +57,19 @@ export interface FrameOptions {
   trimEnd: number | null;
 }
 
-/** auto: Vision (macOS) / MODNet (Windows) · people: MODNet · general: BiRefNet · rmbg: RMBG-1.4 · chroma: cor sólida */
-export type MaskMethod = "auto" | "people" | "general" | "rmbg" | "chroma";
+/** auto: Vision (macOS) / MODNet (Windows) · people: MODNet · general: BiRefNet · rmbg: RMBG-1.4 ·
+ *  sam2: SAM 2.1 com propagação entre frames (só no web) · chroma: cor sólida */
+export type MaskMethod = "auto" | "people" | "general" | "rmbg" | "sam2" | "chroma";
+
+/** Onde está o sujeito, para o SAM 2.1, em coordenadas normalizadas (0–1) do quadro. */
+export interface SubjectPrompt {
+  /** Instante do vídeo em que foi marcado (s); null = primeiro frame. */
+  time: number | null;
+  /** Caixa [x0, y0, x1, y1]. */
+  box: [number, number, number, number] | null;
+  /** label 1 = sujeito, 0 = fundo. */
+  points: { x: number; y: number; label: 0 | 1 }[];
+}
 
 export interface ChromaOptions {
   autoColor: boolean;
@@ -88,6 +99,8 @@ export interface MaskOptions {
   despill: boolean;
   /** 0–100 */
   despillStrength: number;
+  /** SAM 2.1: sujeito marcado no vídeo; null = o que estiver no centro do primeiro frame. */
+  prompt?: SubjectPrompt | null;
 }
 
 export interface MaskStats {

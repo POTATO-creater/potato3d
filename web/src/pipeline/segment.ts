@@ -63,23 +63,25 @@ async function sha256(buf: ArrayBuffer) {
 
 const modelsDir = async () => (await navigator.storage.getDirectory()).getDirectoryHandle("models", { create: true });
 
-/** O modelo já está no cache do OPFS (com o tamanho certo)? */
-export async function cachedModel(id: ModelId): Promise<File | null> {
+/** Um arquivo de modelo baixado de um endereço fixo, com SHA-256 conferido. */
+export type ModelFile = Pick<ModelSpec, "label" | "file" | "url" | "sha256" | "bytes">;
+
+/** O arquivo já está no cache do OPFS (com o tamanho certo)? */
+export async function cachedModel(spec: ModelFile): Promise<File | null> {
   try {
-    const file = await (await (await modelsDir()).getFileHandle(MODELS[id].file)).getFile();
-    return file.size === MODELS[id].bytes ? file : null;
+    const file = await (await (await modelsDir()).getFileHandle(spec.file)).getFile();
+    return file.size === spec.bytes ? file : null;
   } catch {
     return null;
   }
 }
 
-/** Baixa o modelo para o cache, conferindo tamanho e SHA-256. */
+/** Baixa o arquivo para o cache, conferindo tamanho e SHA-256. */
 export async function downloadModel(
-  id: ModelId,
+  spec: ModelFile,
   onProgress: (done: number, total: number) => void,
   signal?: AbortSignal,
 ): Promise<ArrayBuffer> {
-  const spec = MODELS[id];
   // Sem Referer: o Hugging Face responde 404 (sem CORS) quando ele é um
   // *.workers.dev, onde a versão web é publicada.
   const res = await fetch(spec.url, { signal, referrerPolicy: "no-referrer" });
@@ -103,13 +105,13 @@ export async function downloadModel(
   return buf.buffer;
 }
 
-/** Modelo do cache, ou baixado na hora. */
-export async function loadModel(id: ModelId, onProgress: (done: number, total: number) => void): Promise<ArrayBuffer> {
-  const file = await cachedModel(id);
-  return file ? file.arrayBuffer() : downloadModel(id, onProgress);
+/** Arquivo do cache, ou baixado na hora. */
+export async function loadModel(spec: ModelFile, onProgress: (done: number, total: number) => void): Promise<ArrayBuffer> {
+  const file = await cachedModel(spec);
+  return file ? file.arrayBuffer() : downloadModel(spec, onProgress);
 }
 
-type Ort = typeof import("onnxruntime-web/webgpu");
+export type Ort = typeof import("onnxruntime-web/webgpu");
 
 /** O .wasm do ONNX Runtime publicado gzipado (web/ort-wasm-plugin.ts). Se o
  *  servidor já tiver descompactado (Content-Encoding), usa como veio. */
@@ -120,6 +122,15 @@ async function ortWasmBinary(url: string): Promise<ArrayBuffer> {
   const head = new Uint8Array(buf, 0, 2);
   if (head[0] !== 0x1f || head[1] !== 0x8b) return buf;
   return new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer();
+}
+
+/** ONNX Runtime Web pronto para criar sessões. */
+export async function loadOrt(): Promise<Ort> {
+  const ort = await import("onnxruntime-web/webgpu");
+  // Import dinâmico: os testes (Node) importam este arquivo e não resolvem módulos virtuais do Vite.
+  const { default: ortWasmGz } = await import("virtual:ort-wasm-gz");
+  if (ortWasmGz) ort.env.wasm.wasmBinary ??= await ortWasmBinary(ortWasmGz);
+  return ort;
 }
 
 export class Segmenter {
@@ -136,11 +147,8 @@ export class Segmenter {
   }
 
   static async create(id: ModelId, onProgress: (done: number, total: number) => void): Promise<Segmenter> {
-    const model = await loadModel(id, onProgress);
-    const ort = await import("onnxruntime-web/webgpu");
-    // Import dinâmico: os testes (Node) importam este arquivo e não resolvem módulos virtuais do Vite.
-    const { default: ortWasmGz } = await import("virtual:ort-wasm-gz");
-    if (ortWasmGz) ort.env.wasm.wasmBinary ??= await ortWasmBinary(ortWasmGz);
+    const model = await loadModel(MODELS[id], onProgress);
+    const ort = await loadOrt();
     const opts = { freeDimensionOverrides: { batch_size: 1 } };
     try {
       const s = await ort.InferenceSession.create(model, { ...opts, executionProviders: ["webgpu"] });

@@ -256,9 +256,13 @@ Diferenças em relação ao desktop:
   com as etapas prontas. **Importar…** (no lugar de "Alterar…") copia uma
   pasta de projeto do desktop ou um dataset COLMAP (`images/` + `sparse/0`).
 - **Arquivos:** "Mostrar no Finder" vira **Baixar**.
-- **Recorte:** RMBG-1.4 e cor sólida. O RMBG (176 MB, licença não comercial)
-  é baixado pelo mesmo aviso de primeiro uso do desktop, com SHA-256
-  conferido.
+- **Recorte:** RMBG-1.4, SAM 2.1 (só no web, por enquanto) e cor sólida. O
+  RMBG (176 MB, licença não comercial) é baixado pelo mesmo aviso de primeiro
+  uso do desktop, com SHA-256 conferido. O SAM 2.1 (165 MB, Apache-2.0) é
+  baixado no primeiro recorte. Com ele, o player ganha o botão ⌖ para marcar o
+  sujeito: arrastar faz uma caixa, clicar marca um ponto do sujeito e
+  Alt+clique (ou botão direito) marca um ponto de fundo. Sem marcação, vale o
+  objeto no centro do primeiro frame.
 - **Poses:** SfM próprio (abaixo); as opções do COLMAP (features, modelo de
   câmera, órbita plana) não aparecem.
 - **Exportação:** a mesma do desktop (PLY ou SOG, poda, corte de bandas SH e
@@ -304,6 +308,20 @@ O que foi preciso consertar para o treino rodar (e rodar rápido) no navegador:
      instalador. É o único modelo de IA da versão web: o Vision é só do macOS,
      o BiRefNet é lento até em GPU dedicada e o MODNet (pessoas) ficou de fora
      por decisão do projeto.
+   - **SAM 2.1 tiny** (`sam2.ts`): segmenta o frame marcado e propaga a
+     máscara para a frente e depois para trás, com a memória do modelo. Assim
+     o recorte não varia de um frame para outro, como acontece com o RMBG,
+     que decide cada frame sozinho. Os quatro grafos são o export de vídeo de
+     `jax-image-tools/sam21-tiny-video-onnx` (commit e SHA-256 fixados). O
+     banco de memória (quadros condicionantes, os 6 últimos rastreados e até
+     16 ponteiros de objeto com codificação temporal) é TypeScript e espelha
+     o `Sam2VideoModel` do Transformers 4.57. Os três parâmetros que ele usa
+     fora dos grafos estão em `sam2-params.bin` (68 KB, extraídos de
+     `facebook/sam2.1-hiera-tiny`). O encoder exportado declara um shape
+     errado num ramo de `If` que nunca roda, e o ORT Web 1.30 recusa o modelo
+     por isso: `fixVisionShape` troca esse byte em memória (5 → 4).
+     `scripts/web-bench/sam2.mjs` roda o tracker sobre uma pasta de frames
+     e grava os logits.
    - **Cor sólida** e **despill**: port exato do Rust (testes em
      `web/src/pipeline/*.test.ts`, `pnpm test:web`, com os casos do
      `masks.rs`).
@@ -340,6 +358,19 @@ frames), no Chrome headless do M4:
 | Poses | 29–31 s | 90/90 câmeras, posição 0,15% do raio, rotação 0,12°, focal −0,4% |
 | PNG com transparência | 4,5 s | pixels do sujeito com verde dominante: 16% → 0% |
 | Treino (3 mil passos, cor sólida) | — | PSNR 36,7 dB, 0,4% das gaussianas visíveis verdes |
+
+SAM 2.1 (WebGPU, M4): ~1 s/frame. São ~0,35 s do encoder e até ~0,65 s da
+atenção sobre a memória cheia (~28 mil tokens em fp32), o que fica perto do
+limite da GPU sem atenção fusionada; fp16 exigiria reexportar os grafos. A
+saída bate com a propagação do Transformers em PyTorch (IoU médio 0,997 por
+frame). Numa órbita com cenário poluído (toro sobre pedestal, com cone, cubo
+e esfera em volta), o RMBG variou a cobertura entre 10% e 64% (pegou o chão
+inteiro em alguns frames; IoU entre frames vizinhos de até 0,16). O SAM 2.1,
+marcado com uma caixa, ficou no toro + pedestal em todos os frames. Ele segue
+só o que foi marcado: um objeto escondido no frame marcado (o cubo atrás da
+esfera no `synth-orbit.py --green`) fica de fora. Além disso, no modo
+multimáscara do rastreio, um sujeito de várias partes pode perder uma delas
+quando a aparência muda (o PyTorch faz o mesmo).
 
 O chroma key não chega a IoU 1 porque o cubo tem manchas verde-azuladas que
 encostam na borda e saem junto com a tela (o mesmo acontece no app desktop);

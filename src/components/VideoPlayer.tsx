@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
+import type { SubjectPrompt } from "../lib/api";
 import { useI18n } from "../i18n";
 
 interface Trim {
@@ -16,6 +17,9 @@ interface Props {
   /** Bloqueia a edição do trecho (o vídeo continua navegável). */
   locked?: boolean;
   videoRef: RefObject<HTMLVideoElement | null>;
+  /** Marcação do sujeito (SAM 2.1); com `onPrompt`, o player ganha o modo de marcar. */
+  prompt?: SubjectPrompt | null;
+  onPrompt?: (p: SubjectPrompt | null) => void;
 }
 
 const MIN_SPAN = 0.2;
@@ -33,6 +37,12 @@ const Icon = {
   ),
   prev: <path d="M4 3.5v9M12 3.5v9L6 8z" stroke="currentColor" strokeWidth="1.4" fill="currentColor" strokeLinejoin="round" />,
   next: <path d="M12 3.5v9M4 3.5v9L10 8z" stroke="currentColor" strokeWidth="1.4" fill="currentColor" strokeLinejoin="round" />,
+  target: (
+    <g fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round">
+      <circle cx="8" cy="8" r="4.5" />
+      <path d="M8 1.5v3M8 11.5v3M1.5 8h3M11.5 8h3" />
+    </g>
+  ),
   loop: (
     <path
       d="M3 7.5V7a3 3 0 0 1 3-3h6.5M10.5 2 12.5 4l-2 2M13 8.5V9a3 3 0 0 1-3 3H3.5M5.5 14l-2-2 2-2"
@@ -54,7 +64,96 @@ function Svg({ children }: { children: React.ReactNode }) {
 }
 
 /** Player compacto com linha do tempo que mostra e edita o trecho usado. */
-export function VideoPlayer({ src, duration: probed, fps, trim, onTrim, locked, videoRef }: Props) {
+/** Sobreposição da marcação, no retângulo que o vídeo ocupa (object-fit: contain). */
+function PromptLayer({
+  prompt,
+  aspect,
+  editing,
+  onAdd,
+}: {
+  prompt: SubjectPrompt | null;
+  aspect: number;
+  editing: boolean;
+  onAdd: (p: { box: [number, number, number, number] } | { point: { x: number; y: number; label: 0 | 1 } }) => void;
+}) {
+  const start = useRef<{ x: number; y: number } | null>(null);
+  const [drag, setDrag] = useState<[number, number, number, number] | null>(null);
+  const stage = 16 / 9;
+  const style =
+    aspect > stage
+      ? { left: 0, width: "100%", top: `${((1 - stage / aspect) / 2) * 100}%`, height: `${(stage / aspect) * 100}%` }
+      : { top: 0, height: "100%", left: `${((1 - aspect / stage) / 2) * 100}%`, width: `${(aspect / stage) * 100}%` };
+  const at = (e: React.PointerEvent) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    return { x: clamp((e.clientX - r.left) / r.width, 0, 1), y: clamp((e.clientY - r.top) / r.height, 0, 1) };
+  };
+  const rect = (a: { x: number; y: number }, b: { x: number; y: number }): [number, number, number, number] => [
+    Math.min(a.x, b.x),
+    Math.min(a.y, b.y),
+    Math.max(a.x, b.x),
+    Math.max(a.y, b.y),
+  ];
+  const box = drag ?? prompt?.box;
+  return (
+    <svg
+      className={`prompt-layer ${editing ? "editing" : ""}`}
+      style={style}
+      viewBox="0 0 1 1"
+      preserveAspectRatio="none"
+      onClick={(e) => editing && e.stopPropagation()}
+      onContextMenu={(e) => editing && e.preventDefault()}
+      onPointerDown={(e) => {
+        if (!editing) return;
+        e.stopPropagation();
+        e.currentTarget.setPointerCapture(e.pointerId);
+        start.current = at(e);
+      }}
+      onPointerMove={(e) => {
+        const s = start.current;
+        if (!s) return;
+        const p = at(e);
+        if (drag || Math.hypot(p.x - s.x, p.y - s.y) > 0.02) setDrag(rect(s, p));
+      }}
+      onPointerUp={(e) => {
+        const s = start.current;
+        start.current = null;
+        if (!s) return;
+        const p = at(e);
+        if (drag) {
+          setDrag(null);
+          const b = rect(s, p);
+          if (b[2] - b[0] > 0.01 && b[3] - b[1] > 0.01) onAdd({ box: b });
+        } else {
+          onAdd({ point: { ...p, label: e.altKey || e.button === 2 ? 0 : 1 } });
+        }
+      }}
+    >
+      {box && (
+        <rect
+          className="prompt-box"
+          x={box[0]}
+          y={box[1]}
+          width={box[2] - box[0]}
+          height={box[3] - box[1]}
+          vectorEffect="non-scaling-stroke"
+        />
+      )}
+      {prompt?.points.map((p, i) => (
+        <ellipse
+          key={i}
+          className={`prompt-point ${p.label ? "pos" : "neg"}`}
+          cx={p.x}
+          cy={p.y}
+          rx={0.025}
+          ry={0.025 * aspect}
+          vectorEffect="non-scaling-stroke"
+        />
+      ))}
+    </svg>
+  );
+}
+
+export function VideoPlayer({ src, duration: probed, fps, trim, onTrim, locked, videoRef, prompt, onPrompt }: Props) {
   const { t } = useI18n();
   const tp = t.player;
   const timeline = useRef<HTMLDivElement>(null);
@@ -63,6 +162,11 @@ export function VideoPlayer({ src, duration: probed, fps, trim, onTrim, locked, 
   const [time, setTime] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [loopTrim, setLoopTrim] = useState(true);
+  const [marking, setMarking] = useState(false);
+  const [aspect, setAspect] = useState(16 / 9);
+  const editing = marking && !!onPrompt;
+  // A marcação vale para um frame: aparece nele (e enquanto se marca).
+  const promptHere = !!prompt && Math.abs(time - (prompt.time ?? 0)) < 1.5 / (fps || 30);
 
   const end = trim.end ?? duration;
   const pct = (t: number) => `${(clamp(t / (duration || 1), 0, 1) * 100).toFixed(3)}%`;
@@ -94,7 +198,7 @@ export function VideoPlayer({ src, duration: probed, fps, trim, onTrim, locked, 
 
   function toggle() {
     const v = videoRef.current;
-    if (!v) return;
+    if (!v || editing) return;
     if (v.paused) {
       if (loopTrim && (v.currentTime < trim.start || v.currentTime >= end - 0.02)) seek(trim.start);
       v.play();
@@ -154,12 +258,29 @@ export function VideoPlayer({ src, duration: probed, fps, trim, onTrim, locked, 
           muted
           playsInline
           preload="auto"
-          onLoadedMetadata={(e) => Number.isFinite(e.currentTarget.duration) && setDuration(e.currentTarget.duration)}
+          onLoadedMetadata={(e) => {
+            const v = e.currentTarget;
+            if (Number.isFinite(v.duration)) setDuration(v.duration);
+            if (v.videoWidth && v.videoHeight) setAspect(v.videoWidth / v.videoHeight);
+          }}
           onPlay={() => setPlaying(true)}
           onPause={() => setPlaying(false)}
           onSeeked={(e) => setTime(e.currentTarget.currentTime)}
         />
-        {!playing && (
+        {(editing || (promptHere && !playing)) && (
+          <PromptLayer
+            prompt={editing && !promptHere ? null : (prompt ?? null)}
+            aspect={aspect}
+            editing={editing}
+            onAdd={(a) => {
+              const t = videoRef.current?.currentTime ?? time;
+              // Marcação em outro frame recomeça do zero.
+              const base: SubjectPrompt = promptHere && prompt ? prompt : { time: t, box: null, points: [] };
+              onPrompt!("box" in a ? { ...base, box: a.box } : { ...base, points: [...base.points, a.point] });
+            }}
+          />
+        )}
+        {!playing && !editing && (
           <span className="player-overlay" aria-hidden>
             <Svg>{Icon.play}</Svg>
           </span>
@@ -194,6 +315,18 @@ export function VideoPlayer({ src, duration: probed, fps, trim, onTrim, locked, 
         <span className="player-time mono">
           {fmt(time)} <span className="muted">/ {fmt(duration)}</span>
         </span>
+        {onPrompt && (
+          <button
+            className={`pbtn ${editing ? "on" : ""}`}
+            onClick={() => {
+              videoRef.current?.pause();
+              setMarking((m) => !m);
+            }}
+            title={editing ? tp.markDone : `${tp.mark} · ${tp.markHint}`}
+          >
+            <Svg>{Icon.target}</Svg>
+          </button>
+        )}
         <button
           className={`pbtn ${loopTrim ? "on" : ""}`}
           onClick={() => setLoopTrim((v) => !v)}

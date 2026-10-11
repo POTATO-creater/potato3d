@@ -3,6 +3,8 @@ import type { Os } from "../lib/platform";
 import { Segmented, Slider, Toggle } from "./fields";
 import { useI18n, type Messages } from "../i18n";
 
+const fmtTime = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, "0")}`;
+
 const toHex = (c: [number, number, number]) => `#${c.map((v) => v.toString(16).padStart(2, "0")).join("")}`;
 const fromHex = (h: string): [number, number, number] => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)) as never;
 
@@ -12,7 +14,7 @@ function methods(t: Messages, os: Os | undefined): { value: MaskMethod; label: s
     os === "windows"
       ? ["people", "general", "rmbg", "chroma"]
       : os === "web"
-        ? ["rmbg", "chroma"]
+        ? ["rmbg", "sam2", "chroma"]
         : os === "macos"
           ? ["auto", "rmbg", "chroma"]
           : ["auto", "chroma"];
@@ -59,6 +61,27 @@ export function MasksPanel({
             options={options.map((o) => ({ value: o.value, label: o.label, title: o.hint }))}
           />
           <p className="help">{options.find((o) => o.value === method)?.hint}</p>
+
+          {method === "sam2" && (
+            <div className="sam2-prompt">
+              {masks.prompt ? (
+                <p className="help">
+                  {tm.prompt.marked(
+                    fmtTime(masks.prompt.time ?? 0),
+                    [masks.prompt.box && tm.prompt.box, masks.prompt.points.length && tm.prompt.points(masks.prompt.points.length)]
+                      .filter(Boolean)
+                      .join(" + "),
+                  )}{" "}
+                  <button className="link" disabled={locked} onClick={() => onMasks({ ...masks, method, prompt: null })}>
+                    {tm.prompt.clear}
+                  </button>
+                </p>
+              ) : (
+                <p className="help">{tm.prompt.none}</p>
+              )}
+              <p className="help muted">{tm.prompt.howTo}</p>
+            </div>
+          )}
 
           {method === "chroma" && (
             <fieldset className="chroma" disabled={locked}>

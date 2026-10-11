@@ -50,7 +50,7 @@ const api: Api = {
       masker: null,
       birefnetModel: null,
       modnetModel: null,
-      rmbgModel: (await cachedModel("rmbg")) ? MODELS.rmbg.file : null,
+      rmbgModel: (await cachedModel(MODELS.rmbg)) ? MODELS.rmbg.file : null,
       os: "web",
     };
   },
@@ -124,7 +124,7 @@ const api: Api = {
   },
 
   async installPlan(rmbg) {
-    const need = rmbg && !(await cachedModel("rmbg"));
+    const need = rmbg && !(await cachedModel(MODELS.rmbg));
     const spec = MODELS.rmbg;
     return {
       packages: need ? [{ id: "rmbg", label: `Recorte ${spec.label}`, file: spec.file, size: spec.bytes }] : [],
@@ -141,7 +141,7 @@ const api: Api = {
     const total = MODELS.rmbg.bytes;
     onEvent({ type: "started", id: "rmbg", label: `Recorte ${MODELS.rmbg.label}`, total });
     try {
-      await downloadModel("rmbg", (done) => onEvent({ type: "progress", id: "rmbg", done, total }), ctl.signal);
+      await downloadModel(MODELS.rmbg, (done) => onEvent({ type: "progress", id: "rmbg", done, total }), ctl.signal);
       onEvent({ type: "done", id: "rmbg" });
       onEvent({ type: "finished" });
     } catch (e) {

@@ -87,6 +87,9 @@ export function Sidebar(p: Props) {
                 trim={p.trim}
                 onTrim={p.onTrim}
                 locked={locked}
+                {...(p.os === "web" && p.masks.enabled && p.masks.method === "sam2"
+                  ? { prompt: p.masks.prompt ?? null, onPrompt: locked ? undefined : (prompt) => p.onMasks({ ...p.masks, prompt }) }
+                  : {})}
               />
               <div className="file-name" title={p.videoPath}>
                 {basename(p.videoPath)}
