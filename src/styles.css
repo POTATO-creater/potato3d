@@ -94,9 +94,46 @@ button:disabled {
 /* ---------- layout ---------- */
 
 .app {
+  --sidebar-col: clamp(280px, var(--sidebar-w, 340px), calc(100vw - 420px));
+  position: relative;
   display: grid;
-  grid-template-columns: 340px 1fr;
+  grid-template-columns: var(--sidebar-col) 1fr;
   height: 100vh;
+}
+
+/* Alça na borda da barra lateral: arrasta a largura (SidebarResizer.tsx) */
+.sidebar-resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--sidebar-col);
+  width: 8px;
+  margin-left: -4px;
+  z-index: 5;
+  cursor: col-resize;
+  touch-action: none;
+}
+.sidebar-resize::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+  background: transparent;
+  transition: background 0.15s;
+}
+.sidebar-resize:hover::after,
+body.resizing .sidebar-resize::after {
+  background: var(--accent);
+}
+body.resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+body.resizing iframe,
+body.resizing canvas {
+  pointer-events: none;
 }
 
 .sidebar {
@@ -1535,4 +1572,47 @@ button:disabled {
 }
 .sam2-prompt .help {
   margin-top: 4px;
+}
+
+/* Prévia do recorte (MaskPreview.tsx): fundo removido em xadrez */
+.mask-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+.mask-preview-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+}
+.mask-preview-head .link {
+  margin-left: auto;
+}
+.mask-preview-title {
+  font-weight: 600;
+  color: var(--text);
+}
+.mask-preview-stage {
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: repeating-conic-gradient(#2a2e34 0% 25%, #1c1f23 0% 50%) 50% / 16px 16px;
+}
+.mask-preview-stage canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 420px;
+  object-fit: contain;
+}
+.mask-preview-stage.empty {
+  aspect-ratio: 16 / 9;
+}
+.mask-preview-stage.empty canvas {
+  display: none;
+}
+.help.error {
+  color: var(--bad);
 }

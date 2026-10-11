@@ -262,7 +262,12 @@ Diferenças em relação ao desktop:
   baixado no primeiro recorte. Com ele, o player ganha o botão ⌖ para marcar o
   sujeito: arrastar faz uma caixa, clicar marca um ponto do sujeito e
   Alt+clique (ou botão direito) marca um ponto de fundo. Sem marcação, vale o
-  objeto no centro do primeiro frame.
+  objeto no centro do primeiro frame. O painel de recorte mostra uma **prévia** no quadro
+  marcado (ou no início do trecho), com o fundo removido em xadrez. Ela vale
+  para RMBG, SAM 2.1 e cor sólida e acompanha a marcação: o encoder roda uma
+  vez por quadro e cada ponto novo roda só o decoder. A prévia pode ser
+  ocultada e solta a GPU antes de um job. A barra lateral pode ser alargada
+  arrastando a borda; a largura fica salva.
 - **Poses:** SfM próprio (abaixo); as opções do COLMAP (features, modelo de
   câmera, órbita plana) não aparecem.
 - **Exportação:** a mesma do desktop (PLY ou SOG, poda, corte de bandas SH e

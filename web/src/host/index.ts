@@ -22,6 +22,7 @@ import {
 } from "./files";
 import { applyUpdate, onUpdate } from "./update";
 import { runJob } from "./job";
+import { maskPreview, previewIdle } from "./preview";
 import { importFolder, importUrl, layout, openProject, projectFor, readState, saveState } from "./project";
 
 const params = new URLSearchParams(location.search);
@@ -100,10 +101,14 @@ const api: Api = {
     if (job && !job.signal.aborted) throw new Error("já existe um processamento em andamento");
     const ctl = new AbortController();
     job = ctl;
+    // A prévia do recorte solta a GPU antes: o job abre as próprias sessões.
+    maskPreview.release();
     // Como no desktop: volta logo e o andamento chega pelos eventos.
-    void runJob(config, (e: JobEvent) => onEvent(e), ctl.signal).finally(() => {
-      if (job === ctl) job = null;
-    });
+    void previewIdle()
+      .then(() => runJob(config, (e: JobEvent) => onEvent(e), ctl.signal))
+      .finally(() => {
+        if (job === ctl) job = null;
+      });
   },
 
   async cancelJob() {
@@ -288,4 +293,5 @@ export const webHost: Host = {
   },
   onUpdate,
   applyUpdate,
+  maskPreview,
 };

@@ -16,6 +16,7 @@ export const es: Messages = {
   },
 
   app: {
+    resizeSidebar: "Arrastra para cambiar el tamaño · doble clic vuelve al tamaño estándar",
     tabs: { viewer: "3D", frames: "Frames", log: "Registro" },
     readyIn: (d) => `Listo en ${d}`,
     videoError: (e) => `No se pudo leer el video: ${e}`,
@@ -185,6 +186,18 @@ export const es: Messages = {
       points: (n: number) => (n === 1 ? "1 punto" : `${n} puntos`),
       clear: "Borrar",
       howTo: "En el video, toca el objetivo ⌖ y arrastra una caja alrededor del sujeto o haz clic en él. Alt+clic marca el fondo.",
+    },
+    preview: {
+      title: "Vista previa",
+      at: (time: string) => `cuadro en ${time}`,
+      show: "Mostrar",
+      hide: "Ocultar",
+      load: "Generar vista previa (descarga el modelo la primera vez)",
+      downloading: (done: number, total: number) => `Descargando el modelo: ${done}/${total} MB`,
+      working: "Calculando…",
+      paused: "Vista previa en pausa durante el procesamiento.",
+      failed: (e: string) => `Vista previa no disponible: ${e}`,
+      legend: "El tablero es el fondo que se quita. Cambia la marca y la vista previa la sigue.",
     },
   },
 

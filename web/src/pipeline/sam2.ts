@@ -29,7 +29,7 @@ import {
   type Params,
   type Sam2Prompt,
 } from "./sam2-math";
-import { loadModel, loadOrt, type ModelFile, type Ort } from "./segment";
+import { cachedModel, loadModel, loadOrt, type ModelFile, type Ort } from "./segment";
 
 async function loadParams(): Promise<Params> {
   const res = await fetch(new URL("./sam2-params.bin", import.meta.url));
@@ -69,6 +69,167 @@ export interface Sam2Frame {
 }
 
 type Session = InferenceSession;
+type Outputs = Record<string, "gpu-buffer">;
+
+const FILES = [SAM2_FILES.vision, SAM2_FILES.decoder, SAM2_FILES.attention, SAM2_FILES.memory];
+const gpu = (names: string[]): Outputs => Object.fromEntries(names.map((n) => [n, "gpu-buffer" as const]));
+// Saídas que só passam de um grafo para outro ficam na GPU: o encoder
+// devolve ~90 MB de codificação posicional por frame que nunca é lida.
+const OUTPUTS = [
+  gpu(["feats0", "feats1", "feats2", "pos0", "pos1", "pos2"]),
+  gpu(["high_res_masks"]),
+  {},
+  gpu(["memory_pos_enc"]),
+];
+
+/** Os quatro grafos já estão no cache? */
+export async function sam2Cached(): Promise<boolean> {
+  return (await Promise.all(FILES.map((f) => cachedModel(f)))).every(Boolean);
+}
+
+/** Os quatro grafos (do cache ou baixados), com o encoder já corrigido. */
+async function loadSam2(onProgress: (done: number, total: number) => void): Promise<ArrayBuffer[]> {
+  const done = FILES.map(() => 0);
+  const models = await Promise.all(
+    FILES.map((f, i) =>
+      loadModel(f, (d) => {
+        done[i] = d;
+        onProgress(done.reduce((a, b) => a + b, 0), SAM2_BYTES);
+      }),
+    ),
+  );
+  fixVisionShape(models[0]);
+  return models;
+}
+
+/** Sessões dos grafos pedidos (índices de FILES): WebGPU, ou WASM se não der. */
+async function openSessions(ort: Ort, models: ArrayBuffer[], which: number[]): Promise<{ s: Session[]; backend: string }> {
+  // Uma de cada vez: o ONNX Runtime Web recusa duas sessões WebGPU sendo criadas juntas.
+  const open = async (ep: "webgpu" | "wasm") => {
+    const s: Session[] = [];
+    for (const i of which)
+      s.push(
+        await ort.InferenceSession.create(models[i], {
+          executionProviders: [ep],
+          preferredOutputLocation: ep === "webgpu" ? OUTPUTS[i] : undefined,
+        }),
+      );
+    return s;
+  };
+  try {
+    return { s: await open("webgpu"), backend: "SAM 2.1 · WebGPU" };
+  } catch (e) {
+    console.warn("WebGPU indisponível para o SAM 2.1, usando WASM", e);
+    return { s: await open("wasm"), backend: "SAM 2.1 · WASM" };
+  }
+}
+
+function frameTensor(ort: Ort, frame: ImageBitmap | OffscreenCanvas): Tensor {
+  const c = new OffscreenCanvas(SIZE, SIZE);
+  const ctx = c.getContext("2d", { willReadFrequently: true })!;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(frame, 0, 0, SIZE, SIZE);
+  const rgba = ctx.getImageData(0, 0, SIZE, SIZE).data;
+  const plane = SIZE * SIZE;
+  const out = new Float32Array(3 * plane);
+  for (let i = 0; i < plane; i++)
+    for (let ch = 0; ch < 3; ch++) out[ch * plane + i] = (rgba[4 * i + ch] / 255 - MEAN[ch]) / STD[ch];
+  return new ort.Tensor("float32", out, [1, 3, SIZE, SIZE]);
+}
+
+/** feats2 + no_memory_embedding: o frame condicionante não usa memória. */
+function withoutMemory(ort: Ort, feats2: Float32Array, p: Params): Tensor {
+  const f = new Float32Array(feats2.length);
+  for (let ch = 0; ch < HIDDEN; ch++)
+    for (let t = 0; t < TOKENS; t++) f[ch * TOKENS + t] = feats2[ch * TOKENS + t] + p.noMemory[ch];
+  return new ort.Tensor("float32", f, [1, HIDDEN, 64, 64]);
+}
+
+/** Caixa (labels 2 e 3) e pontos em coordenadas da entrada de 1024². */
+function promptTensors(ort: Ort, prompt: Sam2Prompt, w: number, h: number): [Tensor, Tensor] {
+  const pts: number[] = [], lab: number[] = [];
+  const sx = SIZE / w, sy = SIZE / h;
+  if (prompt.box) {
+    const [x0, y0, x1, y1] = prompt.box;
+    pts.push(x0 * sx, y0 * sy, x1 * sx, y1 * sy);
+    lab.push(2, 3);
+  }
+  for (const p of prompt.points ?? []) {
+    pts.push(p.x * sx, p.y * sy);
+    lab.push(p.label);
+  }
+  if (!lab.length) throw new Error("SAM 2.1: prompt vazio");
+  return [
+    new ort.Tensor("float32", new Float32Array(pts), [1, 1, lab.length, 2]),
+    new ort.Tensor("int32", new Int32Array(lab), [1, 1, lab.length]),
+  ];
+}
+
+/**
+ * Prévia de um frame só (o recorte que o prompt daria no frame marcado). O
+ * encoder roda uma vez por frame; cada mudança no prompt roda só o decoder.
+ */
+export class Sam2Preview {
+  private ort: Ort;
+  private vision: Session;
+  private decoder: Session;
+  private params: Params;
+  private key: string | null = null;
+  private feats: { f0: Tensor; f1: Tensor; f2: Tensor } | null = null;
+
+  private constructor(ort: Ort, s: Session[], params: Params) {
+    this.ort = ort;
+    [this.vision, this.decoder] = s;
+    this.params = params;
+  }
+
+  /** Baixa os quatro grafos se preciso (o recorte vai usá-los), abre dois. */
+  static async create(onProgress: (done: number, total: number) => void): Promise<Sam2Preview> {
+    const models = await loadSam2(onProgress);
+    const [ort, params] = await Promise.all([loadOrt(), loadParams()]);
+    return new Sam2Preview(ort, (await openSessions(ort, models, [0, 1])).s, params);
+  }
+
+  /** Logits 256² do prompt no frame; `key` identifica o frame (cache do encoder). */
+  async mask(key: string, image: ImageBitmap, w: number, h: number, prompt: Sam2Prompt): Promise<Float32Array> {
+    if (this.key !== key || !this.feats) {
+      this.dropFeats();
+      const px = frameTensor(this.ort, image);
+      const vis = await this.vision.run({ pixel_values: px });
+      px.dispose();
+      for (const k of ["pos0", "pos1", "pos2"]) vis[k].dispose();
+      const f2 = withoutMemory(this.ort, (await vis.feats2.getData()) as Float32Array, this.params);
+      vis.feats2.dispose();
+      this.feats = { f0: vis.feats0, f1: vis.feats1, f2 };
+      this.key = key;
+    }
+    const [points, labels] = promptTensors(this.ort, prompt, w, h);
+    const dec = await this.decoder.run({
+      feats0: this.feats.f0,
+      feats1: this.feats.f1,
+      feats2: this.feats.f2,
+      input_points: points,
+      input_labels: labels,
+    });
+    points.dispose();
+    labels.dispose();
+    const logits = new Float32Array((await dec.pred_masks.getData()) as Float32Array);
+    for (const k in dec) dec[k].dispose();
+    return logits;
+  }
+
+  private dropFeats() {
+    if (this.feats) for (const t of Object.values(this.feats)) t.dispose();
+    this.feats = null;
+    this.key = null;
+  }
+
+  release() {
+    this.dropFeats();
+    void this.vision.release();
+    void this.decoder.release();
+  }
+}
 
 export class Sam2Tracker {
   private ort: Ort;
@@ -95,62 +256,14 @@ export class Sam2Tracker {
   }
 
   static async create(numFrames: number, onProgress: (done: number, total: number) => void): Promise<Sam2Tracker> {
-    const files = [SAM2_FILES.vision, SAM2_FILES.decoder, SAM2_FILES.attention, SAM2_FILES.memory];
-    const done = files.map(() => 0);
-    const models = await Promise.all(
-      files.map((f, i) =>
-        loadModel(f, (d) => {
-          done[i] = d;
-          onProgress(done.reduce((a, b) => a + b, 0), SAM2_BYTES);
-        }),
-      ),
-    );
-    fixVisionShape(models[0]);
+    const models = await loadSam2(onProgress);
     const [ort, params] = await Promise.all([loadOrt(), loadParams()]);
-    // Saídas que só passam de um grafo para outro ficam na GPU: o encoder
-    // devolve ~90 MB de codificação posicional por frame que nunca é lida.
-    const gpu = (names: string[]) => Object.fromEntries(names.map((n) => [n, "gpu-buffer" as const]));
-    const outputs = [
-      gpu(["feats0", "feats1", "feats2", "pos0", "pos1", "pos2"]),
-      gpu(["high_res_masks"]),
-      {},
-      gpu(["memory_pos_enc"]),
-    ];
-    // Uma de cada vez: o ONNX Runtime Web recusa duas sessões WebGPU sendo criadas juntas.
-    const open = async (ep: "webgpu" | "wasm") => {
-      const s: Session[] = [];
-      for (const [i, m] of models.entries())
-        s.push(
-          await ort.InferenceSession.create(m, {
-            executionProviders: [ep],
-            preferredOutputLocation: ep === "webgpu" ? outputs[i] : undefined,
-          }),
-        );
-      return s;
-    };
-    try {
-      return new Sam2Tracker(ort, await open("webgpu"), params, "SAM 2.1 · WebGPU", numFrames);
-    } catch (e) {
-      console.warn("WebGPU indisponível para o SAM 2.1, usando WASM", e);
-      return new Sam2Tracker(ort, await open("wasm"), params, "SAM 2.1 · WASM", numFrames);
-    }
+    const { s, backend } = await openSessions(ort, models, [0, 1, 2, 3]);
+    return new Sam2Tracker(ort, s, params, backend, numFrames);
   }
 
   private tensor(data: Float32Array | Int32Array, dims: number[]): Tensor {
     return new this.ort.Tensor(data instanceof Int32Array ? "int32" : "float32", data, dims);
-  }
-
-  private static pixels(frame: ImageBitmap | OffscreenCanvas): Float32Array {
-    const c = new OffscreenCanvas(SIZE, SIZE);
-    const ctx = c.getContext("2d", { willReadFrequently: true })!;
-    ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(frame, 0, 0, SIZE, SIZE);
-    const rgba = ctx.getImageData(0, 0, SIZE, SIZE).data;
-    const plane = SIZE * SIZE;
-    const out = new Float32Array(3 * plane);
-    for (let i = 0; i < plane; i++)
-      for (let ch = 0; ch < 3; ch++) out[ch * plane + i] = (rgba[4 * i + ch] / 255 - MEAN[ch]) / STD[ch];
-    return out;
   }
 
   /**
@@ -167,7 +280,7 @@ export class Sam2Tracker {
     reverse = false,
   ): Promise<Sam2Frame> {
     if (!prompt && !this.cond.size) throw new Error("SAM 2.1: o primeiro frame precisa de um prompt");
-    const px = this.tensor(Sam2Tracker.pixels(image), [1, 3, SIZE, SIZE]);
+    const px = frameTensor(this.ort, image);
     const vis = await this.vision.run({ pixel_values: px });
     px.dispose();
     vis.pos0.dispose();
@@ -178,25 +291,8 @@ export class Sam2Tracker {
 
     let pix: Tensor, points: Tensor, labels: Tensor;
     if (prompt) {
-      const nm = this.params.noMemory;
-      const f = new Float32Array(feats2.length);
-      for (let ch = 0; ch < HIDDEN; ch++)
-        for (let t = 0; t < TOKENS; t++) f[ch * TOKENS + t] = feats2[ch * TOKENS + t] + nm[ch];
-      pix = this.tensor(f, [1, HIDDEN, 64, 64]);
-      const pts: number[] = [], lab: number[] = [];
-      const sx = SIZE / w, sy = SIZE / h;
-      if (prompt.box) {
-        const [x0, y0, x1, y1] = prompt.box;
-        pts.push(x0 * sx, y0 * sy, x1 * sx, y1 * sy);
-        lab.push(2, 3);
-      }
-      for (const p of prompt.points ?? []) {
-        pts.push(p.x * sx, p.y * sy);
-        lab.push(p.label);
-      }
-      if (!lab.length) throw new Error("SAM 2.1: prompt vazio");
-      points = this.tensor(new Float32Array(pts), [1, 1, lab.length, 2]);
-      labels = this.tensor(new Int32Array(lab), [1, 1, lab.length]);
+      pix = withoutMemory(this.ort, feats2, this.params);
+      [points, labels] = promptTensors(this.ort, prompt, w, h);
     } else {
       pix = this.tensor(toNchw(await this.conditioned(idx, feats2, reverse), HIDDEN), [1, HIDDEN, 64, 64]);
       points = this.tensor(new Float32Array(2), [1, 1, 1, 2]);

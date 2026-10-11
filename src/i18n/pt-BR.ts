@@ -22,6 +22,7 @@ export const ptBR = {
   },
 
   app: {
+    resizeSidebar: "Arraste para redimensionar · duplo clique volta ao tamanho padrão",
     tabs: { viewer: "3D", frames: "Frames", log: "Log" },
     readyIn: (d: string) => `Pronto em ${d}`,
     videoError: (e: string) => `Não foi possível ler o vídeo: ${e}`,
@@ -191,6 +192,18 @@ export const ptBR = {
       points: (n: number) => (n === 1 ? "1 ponto" : `${n} pontos`),
       clear: "Limpar",
       howTo: "No vídeo, toque no alvo ⌖ e arraste uma caixa em volta do sujeito ou clique nele. Alt+clique marca o fundo.",
+    },
+    preview: {
+      title: "Prévia",
+      at: (time: string) => `quadro em ${time}`,
+      show: "Mostrar",
+      hide: "Ocultar",
+      load: "Gerar prévia (baixa o modelo na primeira vez)",
+      downloading: (done: number, total: number) => `Baixando o modelo: ${done}/${total} MB`,
+      working: "Calculando…",
+      paused: "Prévia pausada durante o processamento.",
+      failed: (e: string) => `Prévia indisponível: ${e}`,
+      legend: "O xadrez é o fundo que sai. Mude a marcação e a prévia acompanha.",
     },
   },
 

@@ -16,6 +16,7 @@ export const enUS: Messages = {
   },
 
   app: {
+    resizeSidebar: "Drag to resize · double-click restores the default size",
     tabs: { viewer: "3D", frames: "Frames", log: "Log" },
     readyIn: (d) => `Done in ${d}`,
     videoError: (e) => `Couldn't read the video: ${e}`,
@@ -185,6 +186,18 @@ export const enUS: Messages = {
       points: (n: number) => (n === 1 ? "1 point" : `${n} points`),
       clear: "Clear",
       howTo: "On the video, tap the target ⌖ and drag a box around the subject or click it. Alt+click marks background.",
+    },
+    preview: {
+      title: "Preview",
+      at: (time: string) => `frame at ${time}`,
+      show: "Show",
+      hide: "Hide",
+      load: "Generate preview (downloads the model the first time)",
+      downloading: (done: number, total: number) => `Downloading the model: ${done}/${total} MB`,
+      working: "Computing…",
+      paused: "Preview paused while processing.",
+      failed: (e: string) => `Preview unavailable: ${e}`,
+      legend: "The checkerboard is the background that goes away. Change the mark and the preview follows.",
     },
   },
 

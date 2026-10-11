@@ -1,6 +1,7 @@
 import type { ChromaOptions, MaskMethod, MaskOptions } from "../lib/api";
 import type { Os } from "../lib/platform";
 import { Segmented, Slider, Toggle } from "./fields";
+import { MaskPreview, type PreviewSource } from "./MaskPreview";
 import { useI18n, type Messages } from "../i18n";
 
 const fmtTime = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, "0")}`;
@@ -26,11 +27,14 @@ export function MasksPanel({
   masks,
   onMasks,
   locked,
+  preview,
 }: {
   os: Os | undefined;
   masks: MaskOptions;
   onMasks: (m: MaskOptions) => void;
   locked: boolean;
+  /** Quadro para a prévia do recorte (onde o host oferece prévia). */
+  preview: PreviewSource | null;
 }) {
   const { t } = useI18n();
   const tm = t.masks;
@@ -82,6 +86,8 @@ export function MasksPanel({
               <p className="help muted">{tm.prompt.howTo}</p>
             </div>
           )}
+
+          <MaskPreview source={preview} masks={{ ...masks, method }} locked={locked} />
 
           {method === "chroma" && (
             <fieldset className="chroma" disabled={locked}>

@@ -5,6 +5,7 @@ import { Field, NumField, Segmented, Select, Toggle } from "./fields";
 import { VideoPlayer } from "./VideoPlayer";
 import { ImageSequence } from "./ImageSequence";
 import { MasksPanel } from "./MasksPanel";
+import type { PreviewSource } from "./MaskPreview";
 import { basename, fileManager, type Os } from "../lib/platform";
 import { useI18n } from "../i18n";
 
@@ -53,6 +54,13 @@ export function Sidebar(p: Props) {
   const set = <K extends keyof Settings>(k: K, patch: Partial<Settings[K]>) =>
     p.onSettings({ ...s, [k]: { ...s[k], ...patch } });
   const locked = p.running;
+  // Prévia do recorte: o quadro marcado para o SAM 2.1, senão o início do trecho.
+  const markedAt = p.masks.method === "sam2" ? p.masks.prompt?.time : null;
+  const previewSource: PreviewSource | null = p.videoPath
+    ? { kind: "video", src: fileUrl(p.videoPath), time: markedAt ?? p.trim.start }
+    : p.imageSet
+      ? { kind: "image", src: fileUrl(p.imageSet.paths[0]) }
+      : null;
   const end = p.trim.end ?? p.video?.duration ?? 0;
   const span = Math.max(0, end - p.trim.start);
 
@@ -190,7 +198,7 @@ export function Sidebar(p: Props) {
           </div>
         </section>
 
-        <MasksPanel os={p.os} masks={p.masks} onMasks={p.onMasks} locked={locked} />
+        <MasksPanel os={p.os} masks={p.masks} onMasks={p.onMasks} locked={locked} preview={previewSource} />
 
         <section className="panel">
           <header className="panel-head">

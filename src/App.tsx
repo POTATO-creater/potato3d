@@ -26,6 +26,7 @@ import { FrameLightbox, FramesGrid, LogView } from "./components/FramesGrid";
 import { ExportPanel } from "./components/ExportPanel";
 import { LanguageSelect } from "./components/LanguageSelect";
 import { UpdateBanner } from "./components/UpdateBanner";
+import { useSidebarWidth } from "./components/SidebarResizer";
 import { basename } from "./lib/platform";
 import { I18nProvider, useI18n } from "./i18n";
 import "./styles.css";
@@ -108,6 +109,7 @@ function AppView() {
   const [preset, setPreset] = useState<PresetId | "custom">(stored.preset);
   const [settings, setSettings] = useState<Settings>(stored.settings);
   const [maskOpts, setMaskOpts] = useState<MaskOptions>(loadMasks);
+  const sidebar = useSidebarWidth();
   const [fromStage, setFromStage] = useState<Stage>("frames");
   const [frame, setFrame] = useState<SceneFrame | null>(null);
   const [tab, setTab] = useState<Tab>("viewer");
@@ -358,7 +360,8 @@ function AppView() {
   const blurbs = stageBlurbs(t, tools?.os);
 
   return (
-    <div className="app">
+    <div className="app" style={{ "--sidebar-w": `${sidebar.width}px` } as React.CSSProperties}>
+      {sidebar.handle}
       <Sidebar
         os={tools?.os}
         videoPath={videoPath}

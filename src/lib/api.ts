@@ -285,6 +285,22 @@ export interface Api {
   startJob(config: JobConfig, onEvent: (e: JobEvent) => void): Promise<void>;
 }
 
+/** Prévia do recorte num quadro, com os mesmos modelos do pipeline. */
+export interface MaskPreviewer {
+  /** Os modelos do método já estão baixados (a prévia não baixa sem pedir)? */
+  ready(method: MaskMethod): Promise<boolean>;
+  /** Máscara (255 = sujeito) no tamanho do quadro; baixa os modelos se preciso.
+   *  `key` identifica o quadro, para reaproveitar o que não depende do prompt. */
+  mask(
+    key: string,
+    frame: ImageBitmap,
+    masks: MaskOptions,
+    onProgress?: (done: number, total: number) => void,
+  ): Promise<Uint8Array>;
+  /** Libera a GPU (o recorte de verdade vai usá-la). */
+  release(): void;
+}
+
 /** O que muda entre o app desktop e a versão web, além dos comandos. Os
  *  caminhos são opacos para a interface: no web apontam para o OPFS. */
 export interface Host {
@@ -311,6 +327,8 @@ export interface Host {
   onUpdate?(handler: () => void): () => void;
   /** Põe a versão nova no ar e recarrega a página. */
   applyUpdate?(): void;
+  /** Só no web, por enquanto: prévia do recorte no painel. */
+  maskPreview?: MaskPreviewer;
 }
 
 // Definidos uma vez pelo ponto de entrada (src/main.tsx ou web/src/main.tsx),
