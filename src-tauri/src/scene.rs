@@ -20,6 +20,36 @@ pub struct SceneFrame {
     pub cameras: Vec<[f64; 3]>,
     /// Índice do frame de cada câmera (lacunas = frames que o COLMAP descartou).
     pub frame_indices: Vec<u32>,
+    /// Lente do vídeo, para o visualizador enquadrar como a filmagem.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lens: Option<Lens>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Lens {
+    /// Campo de visão vertical, em radianos.
+    pub fov_y: f64,
+    /// Largura / altura.
+    pub aspect: f64,
+}
+
+/// Lente da primeira câmera do cameras.bin.
+fn read_lens(path: &Path) -> Result<Option<Lens>> {
+    let mut r = open(path)?;
+    if r.u64()? == 0 {
+        return Ok(None);
+    }
+    let _id = r.u32()?;
+    let model = r.u32()?;
+    let (w, h) = (r.u64()? as f64, r.u64()? as f64);
+    let (f0, f1) = (r.f64()?, r.f64()?);
+    // Modelos com uma focal só (f, cx, cy, …); os demais começam com fx, fy.
+    let fy = if matches!(model, 0 | 2 | 3 | 8 | 9) { f0 } else { f1 };
+    if !(w > 0.0 && h > 0.0 && fy > 0.0) {
+        return Ok(None);
+    }
+    Ok(Some(Lens { fov_y: 2.0 * (h / 2.0 / fy).atan(), aspect: w / h }))
 }
 
 struct Bin<R: Read>(R);
@@ -147,7 +177,9 @@ pub fn read(model: &Path) -> Result<SceneFrame> {
             .collect(),
     );
 
-    Ok(SceneFrame { center, up, radius, cameras, frame_indices })
+    let lens = read_lens(&model.join("cameras.bin")).ok().flatten();
+
+    Ok(SceneFrame { center, up, radius, cameras, frame_indices, lens })
 }
 
 /// Copia `images.bin` trocando o nome de cada imagem (o resto é preservado

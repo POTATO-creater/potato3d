@@ -5,7 +5,7 @@ import type { Api, Host, InstallEvent, JobEvent, Tools } from "../../../src/lib/
 import { brushRuntime } from "../brush";
 import { probeVideo } from "../pipeline/frames";
 import { cachedModel, downloadModel, MODELS } from "../pipeline/segment";
-import { readFrame } from "../scene";
+import { readFrame, readLens } from "../scene";
 import { exportSplat, splatInfo } from "./export";
 import { addVideo, basename, readFile, readPublished, publish, urlOf, video, writeFile } from "./files";
 import { applyUpdate, onUpdate } from "./update";
@@ -66,7 +66,9 @@ const api: Api = {
     const points = await readFile(`${model}/points3D.bin`).then((f) => f.arrayBuffer(), () => null);
     const frame = readFrame(images, points);
     if (!frame) throw new Error("sem poses");
-    return frame;
+    const cameras = await readFile(`${model}/cameras.bin`).then((f) => f.arrayBuffer(), () => null);
+    const lens = cameras ? readLens(cameras) : undefined;
+    return lens ? { ...frame, lens } : frame;
   },
 
   async startJob(config, onEvent) {

@@ -51,6 +51,23 @@ function median(v: number[]) {
   return v[v.length >> 1];
 }
 
+/** Modelos de câmera do COLMAP com uma focal só (f, cx, cy, …); os demais
+ *  começam com fx, fy. */
+const SINGLE_FOCAL = new Set([0, 2, 3, 8, 9]);
+
+/** Lente da primeira câmera do cameras.bin. */
+export function readLens(camerasBin: ArrayBuffer): SceneFrame["lens"] {
+  const r = new Bin(camerasBin);
+  if (!r.u64()) return undefined;
+  r.u32(); // id
+  const model = r.u32();
+  const w = r.u64(), h = r.u64();
+  const f0 = r.f64(), f1 = r.f64();
+  const fy = SINGLE_FOCAL.has(model) ? f0 : f1;
+  if (!(w > 0 && h > 0 && fy > 0)) return undefined;
+  return { fovY: 2 * Math.atan(h / 2 / fy), aspect: w / h };
+}
+
 export function readFrame(imagesBin: ArrayBuffer, pointsBin: ArrayBuffer | null): SceneFrame | null {
   // images.bin: centro = -Rᵀt; "para cima" da câmera COLMAP = -Y → Rᵀ(0,-1,0).
   const r = new Bin(imagesBin);
