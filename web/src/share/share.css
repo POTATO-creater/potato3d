@@ -1,0 +1,220 @@
+/* Página do link compartilhado: mesmas cores do app (src/styles.css). */
+
+:root {
+  --bg: #0d0e10;
+  --panel: rgba(20, 22, 25, 0.82);
+  --border: #343941;
+  --text: #e6e8eb;
+  --text-2: #b4bac2;
+  --muted: #7f8792;
+  --accent: #ff9a4d;
+  --accent-ink: #1a0f06;
+  --accent-soft: rgba(255, 154, 77, 0.14);
+  --bad: #ff6b6b;
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", "Inter", system-ui,
+    sans-serif;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#viewer {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.45 var(--font);
+  -webkit-tap-highlight-color: transparent;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+#viewer {
+  position: relative;
+}
+
+#canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  outline: none;
+  /* Os gestos de toque são da câmera, não da página. */
+  touch-action: none;
+}
+
+.hud {
+  position: absolute;
+  top: max(12px, env(safe-area-inset-top));
+  left: max(12px, env(safe-area-inset-left));
+  right: max(12px, env(safe-area-inset-right));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  pointer-events: none;
+}
+.hud > * {
+  pointer-events: auto;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px 6px 8px;
+  border-radius: 999px;
+  background: var(--panel);
+  backdrop-filter: blur(8px);
+  color: var(--text);
+  font-weight: 600;
+  text-decoration: none;
+}
+.dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #ffd2ad, var(--accent) 55%, #b2511a);
+}
+
+.chip {
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: var(--panel);
+  backdrop-filter: blur(8px);
+  color: var(--text-2);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.chips {
+  display: flex;
+  gap: 6px;
+}
+.chip.expired {
+  color: var(--bad);
+}
+
+.status {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(320px, calc(100% - 32px));
+  text-align: center;
+  color: var(--text-2);
+}
+.status.error {
+  color: var(--bad);
+}
+.bar {
+  height: 4px;
+  margin-bottom: 10px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.bar-fill {
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+  transition: width 0.15s;
+}
+
+.gone {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(420px, calc(100% - 32px));
+  text-align: center;
+}
+.gone h1 {
+  margin: 0 0 8px;
+  font-size: 20px;
+}
+.gone p {
+  margin: 0 0 20px;
+  color: var(--text-2);
+}
+
+.tools {
+  position: absolute;
+  left: 50%;
+  bottom: max(16px, env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  display: flex;
+  gap: 6px;
+  max-width: calc(100% - 24px);
+  padding: 6px;
+  border-radius: 12px;
+  background: var(--panel);
+  backdrop-filter: blur(8px);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.btn:hover {
+  border-color: #4a505a;
+}
+.btn.on {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.btn.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+.hint {
+  position: absolute;
+  left: 50%;
+  bottom: calc(max(16px, env(safe-area-inset-bottom)) + 60px);
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: calc(100% - 24px);
+  margin: 0;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--text-2);
+  font-size: 12px;
+  text-align: center;
+  transition: opacity 0.6s;
+  pointer-events: none;
+}
+.hint.faded {
+  opacity: 0;
+}
+
+@media (max-width: 480px) {
+  .btn {
+    padding: 0 10px;
+  }
+}

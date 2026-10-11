@@ -197,6 +197,51 @@ export const ptBR = {
     view3d: "Ver no 3D",
   },
 
+  share: {
+    button: "Compartilhar",
+    intro: (size: string) =>
+      `Envia este arquivo (${size}) para a nuvem e gera um link privado que abre o splat no navegador, no celular ou em óculos de VR. Só quem tiver o link vê, e ele expira sozinho.`,
+    create: "Gerar link",
+    uploading: (pct: number) => `Enviando… ${pct}%`,
+    copy: "Copiar",
+    copied: "Copiado",
+    open: "Abrir",
+    expires: (when: string) => `Expira às ${when}`,
+    revoke: "Revogar",
+    revokeTitle: "Apaga o arquivo da nuvem agora; o link para de funcionar",
+    qrHint: "Aponte a câmera do celular para abrir. Nos óculos de VR, abra o link no navegador deles e toque em VR.",
+    errors: {
+      too_large: (max: string) => `O arquivo passa do limite de ${max}. Exporte em SOG ou reduza os splats.`,
+      bad_format: "O servidor recusou o arquivo: só .sog e .ply.",
+      rate_limited: "Muitos envios seguidos; tente de novo em um minuto.",
+      network: "Sem conexão com o servidor de compartilhamento.",
+      server: "O servidor não conseguiu criar o link.",
+    },
+  },
+
+  /** Página do link compartilhado (web/share.html). */
+  shareViewer: {
+    title: "Splat compartilhado",
+    opening: "Abrindo…",
+    loading: (pct: number, size: string) => `Baixando ${pct}% de ${size}`,
+    preparing: "Preparando os splats",
+    expiresIn: (left: string) => `expira em ${left}`,
+    expired: "link expirado",
+    goneTitle: "Este link expirou ou não existe",
+    goneBody: "Os links de compartilhamento valem só por algumas horas. Peça um novo a quem enviou.",
+    makeYours: "Criar o seu no Gausify Orbit",
+    loadError: (e: string) => `Não foi possível abrir o splat: ${e}`,
+    spin: "Girar",
+    recenter: "Recentrar",
+    fullscreen: "Tela cheia",
+    vr: "VR",
+    vrTitle: "Ver em realidade virtual",
+    ar: "AR",
+    arTitle: "Ver em realidade aumentada",
+    hintMouse: "Arraste para girar · roda para zoom · botão direito para mover · WASD para andar",
+    hintTouch: "Arraste para girar · pinça para zoom · dois dedos para mover",
+  },
+
   frames: {
     empty: "Os frames selecionados aparecem aqui depois da primeira etapa.",
     count: (n: number) => `${n} frames`,

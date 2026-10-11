@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
-import { api, host, type ExportOptions, type ExportStats, type Msg, type SplatInfo } from "../lib/api";
+import { api, host, type ExportOptions, type ExportStats, type Msg, type SceneFrame, type SplatInfo } from "../lib/api";
 import { fmtBytes, fmtCount, fmtDuration } from "../lib/format";
 import { basename, revealLabel, type Os } from "../lib/platform";
 import { Field, NumField, Segmented, Select } from "./fields";
+import { SharePanel } from "./SharePanel";
+import { savedShare, shareKey } from "../lib/share";
 import { useI18n } from "../i18n";
 
 const STORE_KEY = "splatforge.export.v1";
@@ -27,6 +29,8 @@ interface Props {
   /** O visualizador está mostrando a exportação (e não o splat do treino). */
   previewing: boolean;
   onPreview: (on: boolean) => void;
+  /** Enquadramento do vídeo, levado junto no link de compartilhamento. */
+  frame: SceneFrame | null;
 }
 
 export function ExportPanel(p: Props) {
@@ -37,6 +41,11 @@ export function ExportPanel(p: Props) {
   const [progress, setProgress] = useState<{ fraction: number; message: Msg } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const set = (patch: Partial<ExportOptions>) => setOpts((o) => ({ ...o, ...patch }));
+  const last = p.lastExport;
+  // Já aberto se esta exportação tem um link válido criado neste aparelho.
+  const lastKey = last ? shareKey(last.path, last.outputBytes) : null;
+  const [sharing, setSharing] = useState(false);
+  useEffect(() => setSharing(!!lastKey && !!savedShare(lastKey)), [lastKey]);
 
   useEffect(() => {
     try {
@@ -69,7 +78,6 @@ export function ExportPanel(p: Props) {
     }
   }
 
-  const last = p.lastExport;
   const busy = progress != null;
 
   return (
@@ -178,6 +186,12 @@ export function ExportPanel(p: Props) {
               {revealLabel(t, p.os)}
             </button>
           </div>
+          <button className={`btn-sm export-share ${sharing ? "on" : ""}`} onClick={() => setSharing((v) => !v)}>
+            {t.share.button}
+          </button>
+          {sharing && (
+            <SharePanel path={last.path} bytes={last.outputBytes} frame={p.frame} onClose={() => setSharing(false)} />
+          )}
         </div>
       )}
     </section>

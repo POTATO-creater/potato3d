@@ -262,6 +262,11 @@ export interface Host {
   reveal(path: string): Promise<void>;
   /** Arquivos soltos na janela; devolve a função que para de ouvir. */
   onDrop(handler: (paths: string[]) => void): () => void;
+  /** Conteúdo de um arquivo (no desktop, pelo protocolo `asset:`). */
+  readBlob(path: string): Promise<Blob>;
+  /** Servidor dos links de compartilhamento (worker/index.ts): a própria
+   *  origem no web, o endereço publicado no desktop. */
+  shareOrigin: string;
   /** Só no web: avisa quando uma versão nova do app foi baixada (service
    *  worker); devolve a função que para de ouvir. */
   onUpdate?(handler: () => void): () => void;

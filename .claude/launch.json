@@ -4,21 +4,62 @@
     {
       "name": "ui-mock",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["dev:mock"],
+      "runtimeArgs": [
+        "dev:mock"
+      ],
       "port": 1430
     },
     {
       "name": "web",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["web:dev"],
-      "env": { "WEB_FS_ANY": "1" },
+      "runtimeArgs": [
+        "web:dev"
+      ],
+      "env": {
+        "WEB_FS_ANY": "1"
+      },
       "port": 1440
     },
     {
       "name": "web-preview",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["exec", "vite", "preview", "--config", "web/vite.config.ts", "--port", "1450", "--strictPort"],
+      "runtimeArgs": [
+        "exec",
+        "vite",
+        "preview",
+        "--config",
+        "web/vite.config.ts",
+        "--port",
+        "1450",
+        "--strictPort"
+      ],
       "port": 1450
+    },
+    {
+      "name": "web-worker",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "exec",
+        "wrangler",
+        "dev",
+        "--port",
+        "8787",
+        "--test-scheduled",
+        "--var",
+        "SHARE_ORIGINS:http://localhost:1430,http://localhost:1440"
+      ],
+      "port": 8787
+    },
+    {
+      "name": "ui-mock-share",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "dev:mock"
+      ],
+      "env": {
+        "VITE_SHARE_ORIGIN": "http://localhost:8787"
+      },
+      "port": 1430
     }
   ]
 }

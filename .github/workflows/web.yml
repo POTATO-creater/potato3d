@@ -57,6 +57,9 @@ jobs:
 
       - run: pnpm exec tsc --noEmit -p web
 
+      # Worker dos links de compartilhamento (worker/index.ts).
+      - run: pnpm exec tsc --noEmit -p worker
+
       - run: pnpm test:web
 
       # Compilar aqui é o que impede um build quebrado de só aparecer na hora

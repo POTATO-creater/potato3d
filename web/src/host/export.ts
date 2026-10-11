@@ -25,7 +25,9 @@ export function exportSplat(
       else reject(new Error(m.message));
     };
     w.onerror = (e) => {
-      reject(new Error(`worker de exportação: ${e.message}`));
+      // Sem mensagem é o script do worker que não carregou: em geral uma aba
+      // aberta antes de um deploy, pedindo um arquivo que não existe mais.
+      reject(new Error(e.message ? `worker de exportação: ${e.message}` : "não foi possível carregar o worker de exportação; recarregue a página"));
     };
     w.postMessage({ input, options } satisfies ExportRequest);
   }).finally(() => w.terminate());

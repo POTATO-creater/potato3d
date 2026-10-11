@@ -44,6 +44,9 @@ export const tauriHost: Host = {
     return typeof p === "string" ? p : null;
   },
   reveal: (path) => revealItemInDir(path),
+  readBlob: (path) => fetch(convertFileSrc(path)).then((r) => r.blob()),
+  // O desktop compartilha pela versão web publicada (CORS liberado no Worker).
+  shareOrigin: import.meta.env.VITE_SHARE_ORIGIN ?? "https://gausify-orbit.obraiadev.workers.dev",
   onDrop(handler) {
     const un = getCurrentWebview().onDragDropEvent((e) => {
       if (e.payload.type === "drop") handler(e.payload.paths);

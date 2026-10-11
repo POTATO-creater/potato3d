@@ -203,6 +203,9 @@ export const webHost: Host = {
   async reveal(path) {
     download(await readPublished(path), basename(path));
   },
+  readBlob: readPublished,
+  // `VITE_SHARE_ORIGIN` aponta o `pnpm web:dev` para um `wrangler dev`.
+  shareOrigin: import.meta.env.VITE_SHARE_ORIGIN ?? location.origin,
   onDrop(handler) {
     dropHandlers.add(handler);
     openUrlVideo();

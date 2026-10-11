@@ -4,34 +4,9 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { Msg } from "../lib/api";
-import { ptBR, type Args, type Messages } from "./pt-BR";
-import { enUS } from "./en-US";
-import { es } from "./es";
+import { CATALOGS, initialLocale, LOCALE_KEY as STORE_KEY, type Args, type Locale, type Messages } from "./catalogs";
 
-export type { Messages };
-export type Locale = "pt-BR" | "en-US" | "es";
-
-export const CATALOGS: Record<Locale, Messages> = { "pt-BR": ptBR, "en-US": enUS, es };
-export const LOCALES = Object.keys(CATALOGS) as Locale[];
-
-const STORE_KEY = "splatforge.locale.v1";
-
-/** Idioma salvo ou, na primeira vez, o do sistema (inglês se não houver). */
-function initialLocale(): Locale {
-  try {
-    const saved = localStorage.getItem(STORE_KEY);
-    if (saved && saved in CATALOGS) return saved as Locale;
-  } catch {
-    /* armazenamento indisponível */
-  }
-  for (const lang of navigator.languages ?? [navigator.language]) {
-    const l = lang.toLowerCase();
-    if (l.startsWith("pt")) return "pt-BR";
-    if (l.startsWith("es")) return "es";
-    if (l.startsWith("en")) return "en-US";
-  }
-  return "en-US";
-}
+export { CATALOGS, LOCALES, type Locale, type Messages } from "./catalogs";
 
 /** Texto de uma `Msg` no catálogo; texto puro passa direto (eventos gravados
  *  antes das mensagens traduzíveis, usados pelo `dev:mock`). */

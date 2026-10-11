@@ -83,11 +83,22 @@ async function unredirect(res) {
   return new Response(await res.blob(), { status: res.status, statusText: res.statusText, headers: res.headers });
 }
 
+/** Um arquivo de outra versão que já saiu do ar: o Cloudflare responde com o
+ *  index.html (fallback de SPA), e um worker carregado assim falha sem
+ *  mensagem. Um 404 deixa o erro claro. */
+function notIndex(res) {
+  const html = res.headers.get("Content-Type")?.startsWith("text/html");
+  return html ? new Response("not found", { status: 404 }) : res;
+}
+
 self.addEventListener("fetch", (event) => {
   const { request } = event;
   if (request.method !== "GET") return;
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
+  // Links compartilhados e a API deles são do Worker (worker/index.ts):
+  // nunca do cache, e uma navegação para /s/<id> não pode abrir o app.
+  if (url.pathname.startsWith("/s/") || url.pathname.startsWith("/api/")) return;
 
   // Navegações (inclusive com ?query, como ?dataset=…) abrem o app do cache.
   if (request.mode === "navigate" && url.href.startsWith(self.registration.scope)) {
@@ -98,6 +109,7 @@ self.addEventListener("fetch", (event) => {
   const clean = path === scoped("index.html") ? INDEX : path;
   // Arquivos com hash de outra versão: uma aba antiga pedindo os dela.
   const old = clean.startsWith(scoped("assets/"));
-  if (PRECACHE.has(clean) || old) event.respondWith(fromCache(clean, request));
+  if (PRECACHE.has(clean)) event.respondWith(fromCache(clean, request));
+  else if (old) event.respondWith(fromCache(clean, request).then(notIndex));
   // O resto (vídeo e dataset de teste via ?video=/?dataset=) vai direto à rede.
 });
