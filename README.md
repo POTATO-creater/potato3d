@@ -455,6 +455,11 @@ visualizador só passa `xrCompatible` ao WebGPU quando o binding existe.
   trata o vencido como inexistente na hora, um cron a cada 30 min apaga do
   R2, e quem criou pode **Revogar** antes (o app guarda o token de remoção no
   aparelho).
+- **Validade escolhida:** com o segredo `SHARE_ADMIN_TOKEN` configurado, quem
+  digita essa chave em **Compartilhar → Tenho uma chave de acesso** escolhe a
+  validade (6 h a 1 ano, ou sem expiração). A chave fica só naquele aparelho.
+  Esses links vão para `p/`, fora da regra de ciclo de vida, e o cron apaga os
+  que vencerem; os sem expiração ficam até alguém **Revogar**.
 - **Limites:** `SHARE_MAX_MB` (95 MiB; o Cloudflare recusa corpos acima de
   100 MB), só arquivos que começam como `.sog` (ZIP) ou `.ply`, e 10 envios
   por minuto por IP (`ratelimits`).
@@ -467,6 +472,13 @@ Configuração, uma vez só (o deploy falha sem o bucket):
 ```bash
 pnpm exec wrangler r2 bucket create gausify-orbit-shares
 pnpm exec wrangler r2 bucket lifecycle add gausify-orbit-shares expira-links s/ --expire-days 1
+```
+
+Para liberar a validade escolhida (opcional; sem o segredo, todo link vale
+`SHARE_TTL_HOURS`):
+
+```bash
+pnpm exec wrangler secret put SHARE_ADMIN_TOKEN
 ```
 
 A regra de ciclo de vida é só a rede de segurança caso o cron pare (o R2 não

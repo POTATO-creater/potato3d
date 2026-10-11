@@ -209,12 +209,29 @@ export const ptBR = {
     expires: (when: string) => `Expira às ${when}`,
     revoke: "Revogar",
     revokeTitle: "Apaga o arquivo da nuvem agora; o link para de funcionar",
+    never: "Não expira. Revogue quando não precisar mais.",
+    ttlLabel: "Validade",
+    ttl: (v: number | "never") =>
+      v === "never"
+        ? "Sem expiração"
+        : v < 24
+          ? `${v} horas`
+          : v % 8760 === 0
+            ? v === 8760 ? "1 ano" : `${v / 8760} anos`
+            : v === 24 ? "1 dia" : `${v / 24} dias`,
+    haveKey: "Tenho uma chave de acesso",
+    keyPlaceholder: "Chave de acesso",
+    keySave: "Salvar",
+    forgetKey: "Esquecer chave",
+    forgetKeyTitle: "Tira a chave deste aparelho; os links voltam à validade padrão",
     qrHint: "Aponte a câmera do celular para abrir. Nos óculos de VR, abra o link no navegador deles e toque em VR.",
     errors: {
       too_large: (max: string) => `O arquivo passa do limite de ${max}. Exporte em SOG ou reduza os splats.`,
       bad_format: "O servidor recusou o arquivo: só .sog e .ply.",
       rate_limited: "Muitos envios seguidos; tente de novo em um minuto.",
       network: "Sem conexão com o servidor de compartilhamento.",
+      forbidden: "Chave de acesso inválida; digite de novo.",
+      bad_ttl: "O servidor recusou essa validade.",
       server: "O servidor não conseguiu criar o link.",
     },
   },
@@ -228,7 +245,7 @@ export const ptBR = {
     expiresIn: (left: string) => `expira em ${left}`,
     expired: "link expirado",
     goneTitle: "Este link expirou ou não existe",
-    goneBody: "Os links de compartilhamento valem só por algumas horas. Peça um novo a quem enviou.",
+    goneBody: "O link pode ter vencido ou sido revogado. Peça um novo a quem enviou.",
     makeYours: "Criar o seu no Gausify Orbit",
     loadError: (e: string) => `Não foi possível abrir o splat: ${e}`,
     spin: "Girar",

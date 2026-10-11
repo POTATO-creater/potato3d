@@ -6,13 +6,18 @@ import {
   revokeShare,
   saveShare,
   savedShare,
+  setShareAccessKey,
+  SHARE_TTLS,
+  shareAccessKey,
   ShareError,
   shareKey,
   shareView,
   uploadShare,
   type ShareLink,
+  type ShareTtl,
 } from "../lib/share";
 import { useI18n } from "../i18n";
+import { Select } from "./fields";
 
 interface Props {
   /** Arquivo exportado que vai para o link. */
@@ -24,7 +29,8 @@ interface Props {
 }
 
 /** Link privado e temporário para a exportação (src/lib/share.ts). Aparece
- *  abaixo do resultado da exportação, aberto pelo botão "Compartilhar". */
+ *  abaixo do resultado da exportação, aberto pelo botão "Compartilhar". Com a
+ *  chave de acesso salva no aparelho, dá para escolher a validade. */
 export function SharePanel({ path, bytes, frame, onClose }: Props) {
   const { t, locale } = useI18n();
   const ts = t.share;
@@ -33,6 +39,9 @@ export function SharePanel({ path, bytes, frame, onClose }: Props) {
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [accessKey, setAccessKey] = useState(shareAccessKey);
+  const [keyDraft, setKeyDraft] = useState<string | null>(null);
+  const [ttl, setTtl] = useState<ShareTtl>(SHARE_TTLS[0]);
   const upload = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -43,7 +52,7 @@ export function SharePanel({ path, bytes, frame, onClose }: Props) {
 
   // O link some daqui quando expira.
   useEffect(() => {
-    if (!link) return;
+    if (!link || link.expiresAt === null) return;
     const timer = setTimeout(() => setLink(null), Math.min(link.expiresAt - Date.now(), 2 ** 31 - 1));
     return () => clearTimeout(timer);
   }, [link]);
@@ -62,15 +71,25 @@ export function SharePanel({ path, bytes, frame, onClose }: Props) {
     setProgress(0);
     try {
       const file = await host.readBlob(path);
-      const made = await uploadShare(host.shareOrigin, file, basename(path), shareView(frame), setProgress, ctl.signal);
+      const access = accessKey ? { key: accessKey, ttl } : null;
+      const made = await uploadShare(host.shareOrigin, file, basename(path), shareView(frame), access, setProgress, ctl.signal);
       saveShare(key, made);
       setLink(made);
     } catch (e) {
+      // Chave errada: some do aparelho para o campo voltar.
+      if (e instanceof ShareError && e.code === "forbidden") rememberKey(null);
       if (!ctl.signal.aborted) setError(describe(e));
     } finally {
       if (upload.current === ctl) upload.current = null;
       setProgress(null);
     }
+  }
+
+  function rememberKey(value: string | null) {
+    setShareAccessKey(value);
+    setAccessKey(value);
+    setKeyDraft(null);
+    setError(null);
   }
 
   async function revoke() {
@@ -97,10 +116,12 @@ export function SharePanel({ path, bytes, frame, onClose }: Props) {
     }
   }
 
-  const expires = link ? new Date(link.expiresAt) : null;
-  const sameDay = expires?.toDateString() === new Date().toDateString();
+  const expires = link?.expiresAt != null ? new Date(link.expiresAt) : null;
+  const now = new Date();
+  const sameDay = expires?.toDateString() === now.toDateString();
   const when = expires?.toLocaleString(locale, {
     ...(sameDay ? {} : { day: "2-digit", month: "2-digit" }),
+    ...(expires && expires.getFullYear() !== now.getFullYear() ? { year: "numeric" } : {}),
     hour: "2-digit",
     minute: "2-digit",
   });
@@ -124,7 +145,7 @@ export function SharePanel({ path, bytes, frame, onClose }: Props) {
           <div className="share-body">
             <QrCode text={link.url} />
             <div className="share-info">
-              <p className="help">{ts.expires(when ?? "")}</p>
+              <p className="help">{expires ? ts.expires(when ?? "") : ts.never}</p>
               <p className="help">{ts.qrHint}</p>
               <div className="trim-actions">
                 <a className="btn-sm ghost share-btn-link" href={link.url} target="_blank" rel="noreferrer">
@@ -152,6 +173,44 @@ export function SharePanel({ path, bytes, frame, onClose }: Props) {
       ) : (
         <>
           <p className="help">{ts.intro(fmtBytes(bytes))}</p>
+          {accessKey ? (
+            <div className="share-row">
+              <span className="help">{ts.ttlLabel}</span>
+              <div className="share-ttl">
+                <Select<ShareTtl>
+                  value={ttl}
+                  options={SHARE_TTLS.map((v) => ({ value: v, label: ts.ttl(v) }))}
+                  onChange={setTtl}
+                  aria-label={ts.ttlLabel}
+                />
+              </div>
+            </div>
+          ) : keyDraft !== null ? (
+            <form
+              className="share-row"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (keyDraft.trim()) rememberKey(keyDraft.trim());
+              }}
+            >
+              <input
+                className="share-url"
+                type="password"
+                autoComplete="off"
+                autoFocus
+                placeholder={ts.keyPlaceholder}
+                aria-label={ts.keyPlaceholder}
+                value={keyDraft}
+                onChange={(e) => setKeyDraft(e.currentTarget.value)}
+              />
+              <button className="btn-sm" type="submit" disabled={!keyDraft.trim()}>
+                {ts.keySave}
+              </button>
+              <button className="btn-sm ghost" type="button" onClick={() => setKeyDraft(null)}>
+                {t.common.cancel}
+              </button>
+            </form>
+          ) : null}
           <div className="trim-actions">
             <button className="btn-sm" onClick={create}>
               {ts.create}
@@ -160,6 +219,17 @@ export function SharePanel({ path, bytes, frame, onClose }: Props) {
               {t.common.cancel}
             </button>
           </div>
+          {accessKey ? (
+            <button className="link share-key-toggle" onClick={() => rememberKey(null)} title={ts.forgetKeyTitle}>
+              {ts.forgetKey}
+            </button>
+          ) : (
+            keyDraft === null && (
+              <button className="link share-key-toggle" onClick={() => setKeyDraft("")}>
+                {ts.haveKey}
+              </button>
+            )
+          )}
         </>
       )}
       {error && <p className="help export-error">{error}</p>}

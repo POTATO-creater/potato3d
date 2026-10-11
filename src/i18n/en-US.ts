@@ -201,12 +201,29 @@ export const enUS: Messages = {
     expires: (when: string) => `Expires at ${when}`,
     revoke: "Revoke",
     revokeTitle: "Deletes the file from the cloud now; the link stops working",
+    never: "Never expires. Revoke it when you no longer need it.",
+    ttlLabel: "Expires after",
+    ttl: (v) =>
+      v === "never"
+        ? "Never"
+        : v < 24
+          ? `${v} hours`
+          : v % 8760 === 0
+            ? v === 8760 ? "1 year" : `${v / 8760} years`
+            : v === 24 ? "1 day" : `${v / 24} days`,
+    haveKey: "I have an access key",
+    keyPlaceholder: "Access key",
+    keySave: "Save",
+    forgetKey: "Forget key",
+    forgetKeyTitle: "Removes the key from this device; links go back to the default lifetime",
     qrHint: "Point your phone camera here to open it. On a VR headset, open the link in its browser and tap VR.",
     errors: {
       too_large: (max: string) => `The file is over the ${max} limit. Export as SOG or reduce the splats.`,
       bad_format: "The server rejected the file: only .sog and .ply.",
       rate_limited: "Too many uploads in a row; try again in a minute.",
       network: "Can't reach the sharing server.",
+      forbidden: "Invalid access key; please enter it again.",
+      bad_ttl: "The server rejected that expiration.",
       server: "The server couldn't create the link.",
     },
   },
@@ -219,7 +236,7 @@ export const enUS: Messages = {
     expiresIn: (left: string) => `expires in ${left}`,
     expired: "link expired",
     goneTitle: "This link has expired or doesn't exist",
-    goneBody: "Share links only last a few hours. Ask the sender for a new one.",
+    goneBody: "The link may have expired or been revoked. Ask the sender for a new one.",
     makeYours: "Make your own with Gausify Orbit",
     loadError: (e: string) => `Couldn't open the splat: ${e}`,
     spin: "Spin",
