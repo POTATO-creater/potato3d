@@ -29,7 +29,7 @@
 // macOS em /Applications).
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_CHROMA } from "../../src/lib/api.ts";
@@ -66,7 +66,14 @@ const chrome = spawn(
   ],
   { stdio: "ignore" },
 );
-process.on("exit", () => chrome.kill());
+// Cada execução cria um perfil (com cópias dos modelos no OPFS): apaga ao sair,
+// senão eles acumulam gigabytes no disco.
+process.on("exit", () => {
+  chrome.kill("SIGKILL");
+  try {
+    rmSync(profileDir, { recursive: true, force: true });
+  } catch {}
+});
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let target;

@@ -4,7 +4,9 @@
 // RMBG, frame a frame, não garante).
 //
 // Os quatro grafos vêm de jax-image-tools/sam21-tiny-video-onnx (export do
-// Sam2VideoModel do Transformers). O banco de memória não é grafo: fica aqui,
+// Sam2VideoModel do Transformers) ou, em GPUs com shader-f16, da versão fp16
+// dele que publicamos (scripts/sam2-export/export_fp16.py: metade do tamanho,
+// ~1,5× mais rápida, mesmas máscaras). O banco de memória não é grafo: fica aqui,
 // espelhando _prepare_memory_conditioned_features e companhia do Transformers
 // 4.57, com os três parâmetros que ele usa fora dos grafos em sam2-params.bin
 // (no_memory_embedding, memory_temporal_positional_encoding e a projeção da
@@ -37,22 +39,49 @@ async function loadParams(): Promise<Params> {
   return parseParams(await res.arrayBuffer());
 }
 
-const REPO = "https://huggingface.co/jax-image-tools/sam21-tiny-video-onnx/resolve/3cb090d9d0b4c897281fdcac7765c0f3a888c49f";
-const file = (name: string, sha256: string, bytes: number): ModelFile => ({
+const FP32_REPO = "https://huggingface.co/jax-image-tools/sam21-tiny-video-onnx/resolve/3cb090d9d0b4c897281fdcac7765c0f3a888c49f";
+const FP16_REPO = "https://huggingface.co/obraia/sam2.1-tiny-video-onnx-fp16/resolve/c6f0b87d6562f8926ff6619bbd70e1e7400e1569";
+const file = (repo: string, prefix: string, name: string, sha256: string, bytes: number): ModelFile => ({
   label: `SAM 2.1 (${name})`,
-  file: `sam21-tiny-${name}.onnx`,
-  url: `${REPO}/${name}.onnx`,
+  file: `${prefix}-${name}.onnx`,
+  url: `${repo}/${name}.onnx`,
   sha256,
   bytes,
 });
 
-export const SAM2_FILES = {
-  vision: file("vision_encoder", "98311f41182f40c57cac2522180fff34b53931ce981412ddd8643ec27fb830e3", 109_497_134),
-  decoder: file("mask_decoder", "6e75023b52586314ab1dcf5a49fb9731a983ffe2b7b2a419bd42cd2b2e77effa", 17_800_545),
-  attention: file("memory_attention", "afd5045a8fe48628d4da49a82b77351a43f7554f1f101a5052ab74aae69e3737", 32_364_264),
-  memory: file("memory_encoder", "3a97e8ba25180b39e938ab52a0c4d085007b25f3e919f5672d4ecbcdd2ab9ee3", 5_586_836),
+export type Sam2Variant = "fp16" | "fp32";
+
+/** Os quatro grafos de cada variante, na ordem: encoder, decoder, atenção e encoder de memória. */
+export const SAM2_VARIANTS: Record<Sam2Variant, ModelFile[]> = {
+  fp32: [
+    file(FP32_REPO, "sam21-tiny", "vision_encoder", "98311f41182f40c57cac2522180fff34b53931ce981412ddd8643ec27fb830e3", 109_497_134),
+    file(FP32_REPO, "sam21-tiny", "mask_decoder", "6e75023b52586314ab1dcf5a49fb9731a983ffe2b7b2a419bd42cd2b2e77effa", 17_800_545),
+    file(FP32_REPO, "sam21-tiny", "memory_attention", "afd5045a8fe48628d4da49a82b77351a43f7554f1f101a5052ab74aae69e3737", 32_364_264),
+    file(FP32_REPO, "sam21-tiny", "memory_encoder", "3a97e8ba25180b39e938ab52a0c4d085007b25f3e919f5672d4ecbcdd2ab9ee3", 5_586_836),
+  ],
+  fp16: [
+    file(FP16_REPO, "sam21-tiny-fp16", "vision_encoder", "3d900ac4aa30cba77383e4ec0e61e9dfb3e3bf0598cdb838ffa15d5dd237e82d", 55_234_395),
+    file(FP16_REPO, "sam21-tiny-fp16", "mask_decoder", "1c443d3ab5ff98dda8d453d830baa7773f209bf563f544c7c3b7a0b7b982c839", 9_091_532),
+    file(FP16_REPO, "sam21-tiny-fp16", "memory_attention", "38bbdd70bda2bffe4666e60ee0c7ed7ce9b63fdc2da0f14d996e4255bf09b995", 16_440_396),
+    file(FP16_REPO, "sam21-tiny-fp16", "memory_encoder", "d5c21573d2de61d2c35702c4e50f18215314b0de82bb3f9145e1a075a169345c", 2_837_008),
+  ],
 };
-export const SAM2_BYTES = Object.values(SAM2_FILES).reduce((n, f) => n + f.bytes, 0);
+const bytesOf = (v: Sam2Variant) => SAM2_VARIANTS[v].reduce((n, f) => n + f.bytes, 0);
+
+let variant: Promise<Sam2Variant> | null = null;
+/** fp16 onde a GPU tem shader-f16 (o ORT Web usa sozinho); senão os grafos fp32. */
+export function sam2Variant(): Promise<Sam2Variant> {
+  variant ??= (async () => {
+    try {
+      const adapter = await navigator.gpu?.requestAdapter();
+      return adapter?.features.has("shader-f16") ? "fp16" : "fp32";
+    } catch {
+      return "fp32";
+    }
+  })();
+  return variant;
+}
+
 export const SAM2_LICENSE = "SAM 2.1 (Meta), Apache-2.0";
 
 /** O que um frame deixa no banco de memória. */
@@ -71,7 +100,6 @@ export interface Sam2Frame {
 type Session = InferenceSession;
 type Outputs = Record<string, "gpu-buffer">;
 
-const FILES = [SAM2_FILES.vision, SAM2_FILES.decoder, SAM2_FILES.attention, SAM2_FILES.memory];
 const gpu = (names: string[]): Outputs => Object.fromEntries(names.map((n) => [n, "gpu-buffer" as const]));
 // Saídas que só passam de um grafo para outro ficam na GPU: o encoder
 // devolve ~90 MB de codificação posicional por frame que nunca é lida.
@@ -82,28 +110,36 @@ const OUTPUTS = [
   gpu(["memory_pos_enc"]),
 ];
 
-/** Os quatro grafos já estão no cache? */
+/** Os quatro grafos da variante desta GPU já estão no cache? */
 export async function sam2Cached(): Promise<boolean> {
-  return (await Promise.all(FILES.map((f) => cachedModel(f)))).every(Boolean);
+  const files = SAM2_VARIANTS[await sam2Variant()];
+  return (await Promise.all(files.map((f) => cachedModel(f)))).every(Boolean);
 }
 
-/** Os quatro grafos (do cache ou baixados), com o encoder já corrigido. */
-async function loadSam2(onProgress: (done: number, total: number) => void): Promise<ArrayBuffer[]> {
-  const done = FILES.map(() => 0);
+/** Os quatro grafos (do cache ou baixados); o encoder fp32 sai já corrigido
+ *  (o fp16 foi gerado sem o If que pede a correção). */
+async function loadSam2(v: Sam2Variant, onProgress: (done: number, total: number) => void): Promise<ArrayBuffer[]> {
+  const files = SAM2_VARIANTS[v];
+  const done = files.map(() => 0);
   const models = await Promise.all(
-    FILES.map((f, i) =>
+    files.map((f, i) =>
       loadModel(f, (d) => {
         done[i] = d;
-        onProgress(done.reduce((a, b) => a + b, 0), SAM2_BYTES);
+        onProgress(done.reduce((a, b) => a + b, 0), bytesOf(v));
       }),
     ),
   );
-  fixVisionShape(models[0]);
+  if (v === "fp32") fixVisionShape(models[0]);
   return models;
 }
 
-/** Sessões dos grafos pedidos (índices de FILES): WebGPU, ou WASM se não der. */
-async function openSessions(ort: Ort, models: ArrayBuffer[], which: number[]): Promise<{ s: Session[]; backend: string }> {
+/** Sessões dos grafos pedidos (índices dos quatro): WebGPU, ou WASM se não der. */
+async function openSessions(
+  ort: Ort,
+  models: ArrayBuffer[],
+  which: number[],
+  v: Sam2Variant,
+): Promise<{ s: Session[]; backend: string }> {
   // Uma de cada vez: o ONNX Runtime Web recusa duas sessões WebGPU sendo criadas juntas.
   const open = async (ep: "webgpu" | "wasm") => {
     const s: Session[] = [];
@@ -117,7 +153,7 @@ async function openSessions(ort: Ort, models: ArrayBuffer[], which: number[]): P
     return s;
   };
   try {
-    return { s: await open("webgpu"), backend: "SAM 2.1 · WebGPU" };
+    return { s: await open("webgpu"), backend: `SAM 2.1 · WebGPU${v === "fp16" ? " fp16" : ""}` };
   } catch (e) {
     console.warn("WebGPU indisponível para o SAM 2.1, usando WASM", e);
     return { s: await open("wasm"), backend: "SAM 2.1 · WASM" };
@@ -185,9 +221,10 @@ export class Sam2Preview {
 
   /** Baixa os quatro grafos se preciso (o recorte vai usá-los), abre dois. */
   static async create(onProgress: (done: number, total: number) => void): Promise<Sam2Preview> {
-    const models = await loadSam2(onProgress);
+    const v = await sam2Variant();
+    const models = await loadSam2(v, onProgress);
     const [ort, params] = await Promise.all([loadOrt(), loadParams()]);
-    return new Sam2Preview(ort, (await openSessions(ort, models, [0, 1])).s, params);
+    return new Sam2Preview(ort, (await openSessions(ort, models, [0, 1], v)).s, params);
   }
 
   /** Logits 256² do prompt no frame; `key` identifica o frame (cache do encoder). */
@@ -255,10 +292,16 @@ export class Sam2Tracker {
     this.numFrames = numFrames;
   }
 
-  static async create(numFrames: number, onProgress: (done: number, total: number) => void): Promise<Sam2Tracker> {
-    const models = await loadSam2(onProgress);
+  /** `v`: variante dos grafos (padrão: a da GPU). */
+  static async create(
+    numFrames: number,
+    onProgress: (done: number, total: number) => void,
+    v?: Sam2Variant,
+  ): Promise<Sam2Tracker> {
+    v ??= await sam2Variant();
+    const models = await loadSam2(v, onProgress);
     const [ort, params] = await Promise.all([loadOrt(), loadParams()]);
-    const { s, backend } = await openSessions(ort, models, [0, 1, 2, 3]);
+    const { s, backend } = await openSessions(ort, models, [0, 1, 2, 3], v);
     return new Sam2Tracker(ort, s, params, backend, numFrames);
   }
 

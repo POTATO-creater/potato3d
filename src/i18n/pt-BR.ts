@@ -167,7 +167,7 @@ export const ptBR = {
         label: "SAM 2.1",
         hint:
           "SAM 2.1 da Meta na GPU: segue o mesmo objeto por todos os frames, sem variar entre um e outro. " +
-          "Marque o sujeito no vídeo; sem marcação, usa o que está no centro. Baixa 165 MB na primeira vez. Licença Apache-2.0.",
+          "Marque o sujeito no vídeo; sem marcação, usa o que está no centro. Baixa 84 MB na primeira vez (165 MB em GPUs sem fp16). Licença Apache-2.0.",
       },
       people: { label: "Pessoas", hint: "MODNet na GPU: rápido, mas só reconhece pessoas." },
       general: { label: "Objetos", hint: "BiRefNet: qualquer sujeito, bem mais lento." },

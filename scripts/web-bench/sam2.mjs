@@ -10,12 +10,14 @@
 // como o recorte do app. --rmbg: grava as máscaras do RMBG-1.4 (frame a frame)
 // em vez do SAM, para comparar.
 // --models: pasta com os quatro .onnx (copiados para o OPFS antes, para não
-// baixar 165 MB a cada perfil novo do Chrome). --masks: também grava as
+// baixar os modelos a cada perfil novo do Chrome). --variant fp16|fp32: que
+// grafos usar (padrão: os da GPU, fp16 com shader-f16); --models precisa ser
+// da mesma variante. --masks: também grava as
 // máscaras PNG do tamanho do frame. --url: dev server (padrão
 // http://localhost:1440).
 
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -54,7 +56,14 @@ const chrome = spawn(
   ],
   { stdio: "ignore" },
 );
-process.on("exit", () => chrome.kill());
+// Cada execução cria um perfil (com cópias dos modelos no OPFS): apaga ao sair,
+// senão eles acumulam gigabytes no disco.
+process.on("exit", () => {
+  chrome.kill("SIGKILL");
+  try {
+    rmSync(profileDir, { recursive: true, force: true });
+  } catch {}
+});
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let target;
@@ -97,14 +106,15 @@ await send("Page.navigate", { url: `${base}/share.html` });
 await sleep(1500);
 
 const fs = (p) => `/@fs${resolve(p)}`;
+const variant = await evaluate(`(async () => ${JSON.stringify(opt("variant") ?? null)} ?? (await import('/src/pipeline/sam2.ts')).sam2Variant())()`);
 if (models) {
-  const names = { vision_encoder: "vision", mask_decoder: "decoder", memory_attention: "attention", memory_encoder: "memory" };
+  const names = ["vision_encoder", "mask_decoder", "memory_attention", "memory_encoder"];
   await evaluate(`(async () => {
-    const { SAM2_FILES } = await import('/src/pipeline/sam2.ts');
+    const { SAM2_VARIANTS } = await import('/src/pipeline/sam2.ts');
     const dir = await (await navigator.storage.getDirectory()).getDirectoryHandle('models', { create: true });
-    for (const [src, key] of Object.entries(${JSON.stringify(names)})) {
+    for (const [i, src] of ${JSON.stringify(names)}.entries()) {
       const buf = await (await fetch(${JSON.stringify(fs(models))} + '/' + src + '.onnx')).arrayBuffer();
-      const w = await (await dir.getFileHandle(SAM2_FILES[key].file, { create: true })).createWritable();
+      const w = await (await dir.getFileHandle(SAM2_VARIANTS[${JSON.stringify(variant)}][i].file, { create: true })).createWritable();
       await w.write(buf); await w.close();
     }
   })()`);
@@ -135,7 +145,7 @@ if (rmbg) {
 }
 await evaluate(`(async () => {
   const { Sam2Tracker } = await import('/src/pipeline/sam2.ts');
-  window.tracker = await Sam2Tracker.create(${frames.length}, () => {});
+  window.tracker = await Sam2Tracker.create(${frames.length}, () => {}, ${JSON.stringify(variant)});
   window.sam2 = await import('/src/pipeline/sam2-math.ts');
   window.png = await import('/src/pipeline/png.ts');
 })()`);
