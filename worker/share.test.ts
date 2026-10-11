@@ -110,6 +110,48 @@ test("validade e tamanho máximo vêm das variáveis", async () => {
   assert.ok(Math.abs(expiresAt - (Date.now() + 1800_000)) < 5000);
 });
 
+test("validade escolhida com a chave de acesso", async () => {
+  const { call, bucket, env } = setup({ SHARE_ADMIN_TOKEN: "segredo" });
+  const admin = (ttl: string, token = "segredo") =>
+    upload(call, SOG, "splat.sog", { "X-Share-TTL": ttl, Authorization: `Bearer ${token}` });
+
+  const month = (await (await admin("720")).json()) as { id: string; expiresAt: number; deleteToken: string };
+  assert.ok(Math.abs(month.expiresAt - (Date.now() + 720 * 3600_000)) < 5000);
+  // Fora de `s/`: a regra de ciclo de vida do bucket apagaria em um dia.
+  assert.ok(bucket.objects.has(`p/${month.id}`));
+  assert.equal((await call(`/api/share/${month.id}/file`)).status, 200);
+
+  const never = (await (await admin("never")).json()) as { id: string; expiresAt: number | null };
+  assert.equal(never.expiresAt, null);
+  const meta = (await (await call(`/api/share/${never.id}`)).json()) as { expiresAt: number | null };
+  assert.equal(meta.expiresAt, null);
+  const file = await call(`/api/share/${never.id}/file`);
+  assert.equal(file.headers.get("Cache-Control"), "private, max-age=86400");
+
+  // O cron não apaga o que não expira, mas apaga o vencido em `p/`.
+  bucket.objects.get(`p/${month.id}`)!.customMetadata.expiresAt = String(Date.now() - 1);
+  assert.equal(await sweep(env), 1);
+  assert.ok(bucket.objects.has(`p/${never.id}`));
+
+  // Revogar acha o link em `p/`.
+  const { id, deleteToken } = (await (await admin("24")).json()) as { id: string; deleteToken: string };
+  const del = await call(`/api/share/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${deleteToken}` } });
+  assert.equal(del.status, 204);
+  assert.equal(bucket.objects.has(`p/${id}`), false);
+
+  assert.equal((await admin("720", "errado")).status, 403);
+  assert.equal((await upload(call, SOG, "splat.sog", { "X-Share-TTL": "720" })).status, 403);
+  assert.equal((await admin("0")).status, 400);
+  assert.equal((await admin("abc")).status, 400);
+});
+
+test("sem a chave configurada, ninguém escolhe a validade", async () => {
+  const { call, bucket } = setup();
+  const res = await upload(call, SOG, "splat.sog", { "X-Share-TTL": "never", Authorization: "Bearer " });
+  assert.equal(res.status, 403);
+  assert.equal(bucket.objects.size, 0);
+});
+
 test("recusa o que não é .sog/.ply de verdade", async () => {
   const { call, bucket } = setup();
   assert.equal((await upload(call, SOG, "x.zip")).status, 400);

@@ -12,12 +12,20 @@
 // adivinhar. Expirado é tratado como inexistente na hora; a limpeza de fato
 // é o cron (`scheduled`), com a regra de ciclo de vida do bucket como rede
 // de segurança (ver README).
+//
+// Com a chave de acesso (`SHARE_ADMIN_TOKEN`), o envio escolhe a validade em
+// `X-Share-TTL` (horas, ou `never`). Esses ficam em `p/`, fora da regra de
+// ciclo de vida de `s/`, que apagaria tudo em um dia; o cron continua
+// cuidando deles.
 
 export interface Env {
   ASSETS: { fetch(input: Request | string): Promise<Response> };
   SHARES: R2Bucket;
   /** Validade de cada link, em horas (padrão 6). */
   SHARE_TTL_HOURS?: string;
+  /** Segredo (`wrangler secret put`) que libera validade escolhida no envio,
+   *  inclusive sem expiração. Ausente, todo link vale `SHARE_TTL_HOURS`. */
+  SHARE_ADMIN_TOKEN?: string;
   /** Tamanho máximo do arquivo, em MiB (padrão 95; o Cloudflare recusa
    *  corpos acima de 100 MB nos planos Free e Pro). */
   SHARE_MAX_MB?: string;
@@ -47,7 +55,25 @@ type Format = keyof typeof FORMATS;
 // Webview do app desktop no macOS/Linux e no Windows.
 const DESKTOP_ORIGINS = ["tauri://localhost", "http://tauri.localhost", "https://tauri.localhost"];
 
-const objectKey = (id: string) => `s/${id}`;
+/** `s/`: validade padrão, coberta pela regra de ciclo de vida do bucket.
+ *  `p/`: validade escolhida com a chave de acesso. */
+const PREFIXES = ["s/", "p/"] as const;
+/** Nos metadados, no lugar do epoch, para o link que não expira. */
+const NEVER = "never";
+/** Teto do cache privado do arquivo: um link longo ainda pode ser revogado. */
+const MAX_CACHE_S = 86_400;
+/** Maior validade com a chave, fora `never` (10 anos). */
+const MAX_TTL_HOURS = 24 * 3653;
+
+/** Acha o compartilhamento em qualquer prefixo (`s/` primeiro: é o comum). */
+async function findObject(env: Env, id: string, body: boolean) {
+  for (const prefix of PREFIXES) {
+    const key = prefix + id;
+    const obj = body ? await env.SHARES.get(key) : await env.SHARES.head(key);
+    if (obj) return obj;
+  }
+  return null;
+}
 
 export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -75,13 +101,14 @@ async function api(req: Request, env: Env, ctx: ExecutionContext, url: URL): Pro
   if (req.method === "DELETE" && sub === undefined) return revoke(req, env, id);
   if (req.method !== "GET" && req.method !== "HEAD") return error(405, "method");
 
-  const obj = sub === "file" ? await env.SHARES.get(objectKey(id)) : await env.SHARES.head(objectKey(id));
+  const obj = await findObject(env, id, sub === "file");
   const meta = obj && readMeta(obj);
-  if (!obj || !meta || meta.expiresAt <= Date.now()) {
-    if (obj) ctx.waitUntil(env.SHARES.delete(objectKey(id)));
+  if (!obj || !meta || (meta.expiresAt !== null && meta.expiresAt <= Date.now())) {
+    if (obj) ctx.waitUntil(env.SHARES.delete(obj.key));
     return error(404, "not_found");
   }
-  const maxAge = Math.max(0, Math.floor((meta.expiresAt - Date.now()) / 1000));
+  const left = meta.expiresAt === null ? MAX_CACHE_S : Math.floor((meta.expiresAt - Date.now()) / 1000);
+  const maxAge = Math.max(0, Math.min(left, MAX_CACHE_S));
   if (sub === undefined) {
     return json(200, {
       name: meta.name,
@@ -125,16 +152,28 @@ async function create(req: Request, env: Env, url: URL): Promise<Response> {
     if (!view) return error(400, "bad_view");
   }
 
+  // Validade escolhida: só com a chave de acesso.
+  let ttl: number | typeof NEVER = number(env.SHARE_TTL_HOURS, 6);
+  const rawTtl = req.headers.get("X-Share-TTL");
+  if (rawTtl !== null) {
+    if (!(await isAdmin(req, env))) return error(403, "forbidden");
+    const hours = rawTtl === NEVER ? NEVER : Number(rawTtl);
+    if (hours !== NEVER && !(Number.isFinite(hours) && hours > 0 && hours <= MAX_TTL_HOURS)) {
+      return error(400, "bad_ttl");
+    }
+    ttl = hours;
+  }
+
   const id = randomId(ID_LEN);
   const deleteToken = randomId(32);
-  const expiresAt = Date.now() + number(env.SHARE_TTL_HOURS, 6) * 3600_000;
-  const key = objectKey(id);
+  const expiresAt = ttl === NEVER ? null : Date.now() + ttl * 3600_000;
+  const key = (rawTtl === null ? "s/" : "p/") + id;
   await env.SHARES.put(key, req.body, {
     httpMetadata: { contentType: "application/octet-stream" },
     customMetadata: {
       name,
       format,
-      expiresAt: String(expiresAt),
+      expiresAt: expiresAt === null ? NEVER : String(expiresAt),
       del: await sha256(deleteToken),
       ...(view ? { view } : {}),
     },
@@ -153,11 +192,11 @@ async function create(req: Request, env: Env, url: URL): Promise<Response> {
 
 async function revoke(req: Request, env: Env, id: string): Promise<Response> {
   const token = req.headers.get("Authorization")?.replace(/^Bearer\s+/i, "") ?? "";
-  const obj = await env.SHARES.head(objectKey(id));
+  const obj = await findObject(env, id, false);
   // Já expirado ou removido: para quem revoga, dá no mesmo.
   if (!obj) return new Response(null, { status: 204 });
   if (!token || (await sha256(token)) !== obj.customMetadata?.del) return error(403, "forbidden");
-  await env.SHARES.delete(objectKey(id));
+  await env.SHARES.delete(obj.key);
   return new Response(null, { status: 204 });
 }
 
@@ -176,24 +215,26 @@ async function viewerPage(env: Env, url: URL): Promise<Response> {
 
 /** Apaga os vencidos. Roda pelo cron do wrangler.jsonc. */
 export async function sweep(env: Env, now = Date.now()) {
-  let cursor: string | undefined;
   let removed = 0;
-  do {
-    const page = await env.SHARES.list({ prefix: "s/", cursor, include: ["customMetadata"] });
-    const expired = page.objects
-      .filter((o) => !(Number(o.customMetadata?.expiresAt) > now))
-      .map((o) => o.key);
-    if (expired.length) await env.SHARES.delete(expired);
-    removed += expired.length;
-    cursor = page.truncated ? page.cursor : undefined;
-  } while (cursor);
+  for (const prefix of PREFIXES) {
+    let cursor: string | undefined;
+    do {
+      const page = await env.SHARES.list({ prefix, cursor, include: ["customMetadata"] });
+      const expired = page.objects
+        .filter((o) => o.customMetadata?.expiresAt !== NEVER && !(Number(o.customMetadata?.expiresAt) > now))
+        .map((o) => o.key);
+      if (expired.length) await env.SHARES.delete(expired);
+      removed += expired.length;
+      cursor = page.truncated ? page.cursor : undefined;
+    } while (cursor);
+  }
   return removed;
 }
 
 function readMeta(obj: R2Object) {
   const m = obj.customMetadata ?? {};
-  const expiresAt = Number(m.expiresAt);
-  if (!Number.isFinite(expiresAt) || !(m.format in FORMATS)) return null;
+  const expiresAt = m.expiresAt === NEVER ? null : Number(m.expiresAt);
+  if ((expiresAt !== null && !Number.isFinite(expiresAt)) || !(m.format in FORMATS)) return null;
   return {
     name: m.name || `splat.${m.format}`,
     format: m.format as Format,
@@ -237,7 +278,7 @@ function cors(req: Request, env: Env, res: Response): Response {
   const out = new Response(res.body, res);
   out.headers.set("Access-Control-Allow-Origin", origin);
   out.headers.set("Access-Control-Allow-Methods", "GET, POST, DELETE");
-  out.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Share-View");
+  out.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Share-View, X-Share-TTL");
   out.headers.set("Access-Control-Max-Age", "86400");
   out.headers.append("Vary", "Origin");
   return out;
@@ -274,6 +315,12 @@ export function randomId(len: number) {
     }
   }
   return out;
+}
+
+/** Compara os hashes, não a chave: o tempo não diz quantos caracteres batem. */
+async function isAdmin(req: Request, env: Env) {
+  const token = req.headers.get("Authorization")?.replace(/^Bearer\s+/i, "") ?? "";
+  return !!env.SHARE_ADMIN_TOKEN && !!token && (await sha256(token)) === (await sha256(env.SHARE_ADMIN_TOKEN));
 }
 
 async function sha256(text: string) {

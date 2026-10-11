@@ -482,6 +482,24 @@ button:disabled {
   color: inherit;
   text-decoration: none;
 }
+.share-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0;
+}
+.share-row > .help {
+  margin: 0;
+  flex: none;
+}
+.share-ttl {
+  flex: 1;
+  min-width: 0;
+}
+.share-key-toggle {
+  display: block;
+  margin-top: 8px;
+}
 .share-uploading {
   display: flex;
   align-items: baseline;

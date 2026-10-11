@@ -26,10 +26,23 @@ export interface ShareView {
 export interface ShareLink {
   id: string;
   url: string;
-  /** Epoch em ms. */
-  expiresAt: number;
+  /** Epoch em ms; `null` quando não expira. */
+  expiresAt: number | null;
   /** Só quem criou o link tem: permite revogar antes de expirar. */
   deleteToken: string;
+}
+
+/** Validade em horas, ou sem expiração. */
+export type ShareTtl = number | "never";
+
+/** Opções do diálogo para quem tem a chave de acesso (o Worker aceita
+ *  qualquer valor até 10 anos). Sem a chave, vale o padrão do servidor. */
+export const SHARE_TTLS: ShareTtl[] = [6, 24, 24 * 7, 24 * 30, 24 * 365, "never"];
+
+/** Chave de acesso (`SHARE_ADMIN_TOKEN` do Worker) e a validade pedida. */
+export interface ShareAccess {
+  key: string;
+  ttl: ShareTtl;
 }
 
 /** Códigos de erro do Worker (traduzidos em `share.errors`), mais os do cliente. */
@@ -37,6 +50,7 @@ export type ShareErrorCode =
   | "too_large"
   | "bad_format"
   | "rate_limited"
+  | "forbidden"
   | "network"
   | "server"
   | (string & {});
@@ -101,6 +115,7 @@ export function uploadShare(
   file: Blob,
   name: string,
   view: ShareView | null,
+  access: ShareAccess | null,
   onProgress: (fraction: number) => void,
   signal?: AbortSignal,
 ): Promise<ShareLink> {
@@ -109,6 +124,10 @@ export function uploadShare(
     xhr.open("POST", `${origin}/api/share?name=${encodeURIComponent(name)}`);
     xhr.setRequestHeader("Content-Type", "application/octet-stream");
     if (view) xhr.setRequestHeader("X-Share-View", JSON.stringify(view));
+    if (access) {
+      xhr.setRequestHeader("Authorization", `Bearer ${access.key}`);
+      xhr.setRequestHeader("X-Share-TTL", String(access.ttl));
+    }
     xhr.responseType = "json";
     xhr.upload.onprogress = (e) => e.lengthComputable && onProgress(e.loaded / e.total);
     xhr.onload = () => {
@@ -143,7 +162,7 @@ function loadAll(): Record<string, ShareLink> {
   try {
     const all = JSON.parse(localStorage.getItem(STORE_KEY) ?? "{}") as Record<string, ShareLink>;
     const now = Date.now();
-    return Object.fromEntries(Object.entries(all).filter(([, l]) => l.expiresAt > now));
+    return Object.fromEntries(Object.entries(all).filter(([, l]) => l.expiresAt === null || l.expiresAt > now));
   } catch {
     return {};
   }
@@ -161,5 +180,35 @@ export function saveShare(key: string, link: ShareLink | null) {
     localStorage.setItem(STORE_KEY, JSON.stringify(all));
   } catch {
     /* armazenamento indisponível: o link só vale nesta sessão */
+  }
+}
+
+// Chave de acesso que libera escolher a validade; fica só neste aparelho.
+const ACCESS_KEY = "splatforge.shareAccess.v1";
+
+/** `?admin=true` na URL mostra o campo da chave e o seletor de validade.
+ *  Sem ele, o painel é o de todo mundo, mesmo com a chave salva. */
+export const shareAdmin = (() => {
+  try {
+    return new URLSearchParams(location.search).get("admin") === "true";
+  } catch {
+    return false;
+  }
+})();
+
+export function shareAccessKey(): string | null {
+  try {
+    return localStorage.getItem(ACCESS_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function setShareAccessKey(key: string | null) {
+  try {
+    if (key) localStorage.setItem(ACCESS_KEY, key);
+    else localStorage.removeItem(ACCESS_KEY);
+  } catch {
+    /* armazenamento indisponível */
   }
 }

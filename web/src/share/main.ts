@@ -97,7 +97,8 @@ interface Meta {
   name: string;
   format: "sog" | "ply";
   size: number;
-  expiresAt: number;
+  /** `null`: não expira. */
+  expiresAt: number | null;
   view: ShareView | null;
 }
 
@@ -126,6 +127,8 @@ function showGone() {
 function fmtLeft(ms: number) {
   const min = Math.max(1, Math.ceil(ms / 60_000));
   const h = Math.floor(min / 60);
+  const d = Math.floor(h / 24);
+  if (d) return `${d} d ${h % 24} h`;
   return h ? `${h} h ${min % 60} min` : `${min} min`;
 }
 
@@ -345,7 +348,7 @@ async function main() {
   if (res.status === 404) return showGone();
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const meta = (await res.json()) as Meta;
-  showExpiry(meta.expiresAt);
+  if (meta.expiresAt !== null) showExpiry(meta.expiresAt);
 
   const viewer = await createViewer(meta.view);
   const size = fmtBytes(meta.size);

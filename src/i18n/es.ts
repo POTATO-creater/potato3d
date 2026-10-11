@@ -201,12 +201,29 @@ export const es: Messages = {
     expires: (when: string) => `Caduca a las ${when}`,
     revoke: "Revocar",
     revokeTitle: "Borra el archivo de la nube ahora; el enlace deja de funcionar",
+    never: "No caduca. Revócalo cuando ya no lo necesites.",
+    ttlLabel: "Validez",
+    ttl: (v) =>
+      v === "never"
+        ? "Sin caducidad"
+        : v < 24
+          ? `${v} horas`
+          : v % 8760 === 0
+            ? v === 8760 ? "1 año" : `${v / 8760} años`
+            : v === 24 ? "1 día" : `${v / 24} días`,
+    haveKey: "Tengo una clave de acceso",
+    keyPlaceholder: "Clave de acceso",
+    keySave: "Guardar",
+    forgetKey: "Olvidar clave",
+    forgetKeyTitle: "Quita la clave de este dispositivo; los enlaces vuelven a la validez por defecto",
     qrHint: "Apunta la cámara del móvil para abrirlo. En unas gafas de RV, abre el enlace en su navegador y toca RV.",
     errors: {
       too_large: (max: string) => `El archivo supera el límite de ${max}. Exporta en SOG o reduce los splats.`,
       bad_format: "El servidor rechazó el archivo: solo .sog y .ply.",
       rate_limited: "Demasiadas subidas seguidas; inténtalo de nuevo en un minuto.",
       network: "Sin conexión con el servidor de compartir.",
+      forbidden: "Clave de acceso no válida; escríbela de nuevo.",
+      bad_ttl: "El servidor rechazó esa validez.",
       server: "El servidor no pudo crear el enlace.",
     },
   },
@@ -219,7 +236,7 @@ export const es: Messages = {
     expiresIn: (left: string) => `caduca en ${left}`,
     expired: "enlace caducado",
     goneTitle: "Este enlace caducó o no existe",
-    goneBody: "Los enlaces para compartir solo duran unas horas. Pide uno nuevo a quien te lo envió.",
+    goneBody: "El enlace puede haber caducado o haber sido revocado. Pide uno nuevo a quien te lo envió.",
     makeYours: "Crea el tuyo con Gausify Orbit",
     loadError: (e: string) => `No se pudo abrir el splat: ${e}`,
     spin: "Girar",
