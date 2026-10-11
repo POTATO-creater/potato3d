@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { fileUrl } from "../lib/api";
+import { fileUrl, type SubjectPrompt } from "../lib/api";
 import { basename } from "../lib/platform";
+import { withMarks } from "../lib/prompt";
 import { useI18n } from "../i18n";
+import { PromptLayer } from "./PromptLayer";
 
 /** Velocidade da prévia animada da órbita. */
 const PLAY_FPS = 12;
@@ -17,20 +19,35 @@ function Svg({ children }: { children: React.ReactNode }) {
 }
 
 /** Prévia das imagens usadas como frames, na ordem em que entram (a da
- *  órbita), com a mesma cara do player de vídeo. */
-export function ImageSequence({ paths }: { paths: string[] }) {
+ *  órbita), com a mesma cara do player de vídeo. Com `onPrompt`, marca o
+ *  sujeito para o SAM 2.1 numa das imagens, como no vídeo. */
+export function ImageSequence({
+  paths,
+  prompt,
+  onPrompt,
+}: {
+  paths: string[];
+  prompt?: SubjectPrompt | null;
+  onPrompt?: (p: SubjectPrompt | null) => void;
+}) {
   const { t } = useI18n();
   const tp = t.player;
   const timeline = useRef<HTMLDivElement>(null);
   const dragging = useRef(false);
   const [i, setI] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [marking, setMarking] = useState(false);
+  const [aspect, setAspect] = useState(16 / 9);
   const n = paths.length;
   const at = clamp(i, 0, n - 1);
+  const name = basename(paths[at]);
+  const editing = marking && !!onPrompt;
+  const promptHere = !!prompt?.image && prompt.image === name;
 
   useEffect(() => {
     setI(0);
     setPlaying(false);
+    setMarking(false);
   }, [paths]);
 
   useEffect(() => {
@@ -61,9 +78,26 @@ export function ImageSequence({ paths }: { paths: string[] }) {
 
   return (
     <div className="player" tabIndex={0} onKeyDown={onKeyDown}>
-      <div className="player-stage" onClick={() => setPlaying((v) => !v)}>
-        <img src={fileUrl(paths[at])} alt={basename(paths[at])} decoding="async" />
-        {!playing && (
+      <div className="player-stage" onClick={() => !editing && setPlaying((v) => !v)}>
+        <img
+          src={fileUrl(paths[at])}
+          alt={name}
+          decoding="async"
+          onLoad={(e) => e.currentTarget.naturalHeight && setAspect(e.currentTarget.naturalWidth / e.currentTarget.naturalHeight)}
+        />
+        {(editing || (promptHere && !playing)) && (
+          <PromptLayer
+            marks={promptHere ? (prompt ?? null) : null}
+            aspect={aspect}
+            editing={editing}
+            onChange={(m) => {
+              // Marcação em outra imagem recomeça do zero.
+              const base: SubjectPrompt = promptHere && prompt ? prompt : { time: null, image: name, box: null, points: [] };
+              onPrompt!(withMarks(base, m));
+            }}
+          />
+        )}
+        {!playing && !editing && (
           <span className="player-overlay" aria-hidden>
             <Svg>
               <path d="M5 3.5v9l7.5-4.5z" fill="currentColor" />
@@ -116,8 +150,25 @@ export function ImageSequence({ paths }: { paths: string[] }) {
           {at + 1} <span className="muted">/ {n}</span>
         </span>
         <span className="player-name muted" title={paths[at]}>
-          {basename(paths[at])}
+          {name}
         </span>
+        {onPrompt && (
+          <button
+            className={`pbtn ${marking ? "on" : ""}`}
+            onClick={() => {
+              setPlaying(false);
+              setMarking((m) => !m);
+            }}
+            title={marking ? tp.markDone : `${tp.mark} · ${tp.markHint}`}
+          >
+            <Svg>
+              <g fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round">
+                <circle cx="8" cy="8" r="4.5" />
+                <path d="M8 1.5v3M8 11.5v3M1.5 8h3M11.5 8h3" />
+              </g>
+            </Svg>
+          </button>
+        )}
       </div>
     </div>
   );

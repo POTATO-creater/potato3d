@@ -10,7 +10,7 @@ export function stageToolLabels(t: Messages, tools: Tools | null, masks?: MaskOp
   if (os === "web")
     return {
       frames: images ? p.yourImages : p.browserDecoder,
-      masks: masks?.method === "chroma" ? p.solidColor : "RMBG-1.4 · WebGPU",
+      masks: masks?.method === "chroma" ? p.solidColor : masks?.method === "sam2" ? "SAM 2.1 · WebGPU" : "RMBG-1.4 · WebGPU",
       poses: p.webPoses,
       train: "Brush · WebGPU",
     };

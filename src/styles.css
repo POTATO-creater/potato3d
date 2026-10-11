@@ -94,9 +94,46 @@ button:disabled {
 /* ---------- layout ---------- */
 
 .app {
+  --sidebar-col: clamp(280px, var(--sidebar-w, 340px), calc(100vw - 420px));
+  position: relative;
   display: grid;
-  grid-template-columns: 340px 1fr;
+  grid-template-columns: var(--sidebar-col) 1fr;
   height: 100vh;
+}
+
+/* Alça na borda da barra lateral: arrasta a largura (SidebarResizer.tsx) */
+.sidebar-resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--sidebar-col);
+  width: 8px;
+  margin-left: -4px;
+  z-index: 5;
+  cursor: col-resize;
+  touch-action: none;
+}
+.sidebar-resize::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+  background: transparent;
+  transition: background 0.15s;
+}
+.sidebar-resize:hover::after,
+body.resizing .sidebar-resize::after {
+  background: var(--accent);
+}
+body.resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+body.resizing iframe,
+body.resizing canvas {
+  pointer-events: none;
 }
 
 .sidebar {
@@ -1504,4 +1541,102 @@ button:disabled {
   height: 10px;
   border-radius: 3px;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
+}
+
+/* Marcação do sujeito para o SAM 2.1, sobre o vídeo */
+.prompt-layer {
+  position: absolute;
+  overflow: visible;
+  pointer-events: none;
+}
+/* Marcando: mira com um sinal de mais (adiciona ponto ou caixa) */
+.prompt-layer.editing {
+  pointer-events: auto;
+  cursor:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28'%3E%3Cg stroke-linecap='round'%3E%3Cpath d='M10 3v14M3 10h14' stroke='%23000' stroke-width='3.5'/%3E%3Cpath d='M10 3v14M3 10h14' stroke='%23fff' stroke-width='1.5'/%3E%3C/g%3E%3Ccircle cx='21' cy='21' r='6' fill='%234cc38a' stroke='%23000' stroke-width='1'/%3E%3Cpath d='M18 21h6M21 18v6' stroke='%23fff' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E")
+      10 10,
+    crosshair;
+  outline: 1px dashed var(--accent);
+  outline-offset: -1px;
+}
+.prompt-box {
+  fill: var(--accent-soft);
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+.prompt-point {
+  stroke: #fff;
+  stroke-width: 1.5;
+}
+.prompt-point.pos {
+  fill: var(--good);
+}
+.prompt-point.neg {
+  fill: var(--bad);
+}
+.sam2-prompt .help {
+  margin-top: 4px;
+}
+
+/* Prévia do recorte (MaskPreview.tsx): fundo removido em xadrez */
+.mask-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+.mask-preview-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+}
+.mask-preview-head .link {
+  margin-left: auto;
+}
+.mask-preview-title {
+  font-weight: 600;
+  color: var(--text);
+}
+.mask-preview-stage {
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: repeating-conic-gradient(#2a2e34 0% 25%, #1c1f23 0% 50%) 50% / 16px 16px;
+}
+.mask-preview-stage canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 420px;
+  object-fit: contain;
+}
+.mask-preview-stage.empty {
+  aspect-ratio: 16 / 9;
+}
+.mask-preview-stage.empty canvas {
+  display: none;
+}
+.help.error {
+  color: var(--bad);
+}
+/* Shift: mira com um sinal de menos (apaga um ponto ou a caixa) */
+.prompt-layer.erasing {
+  cursor:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28'%3E%3Cg stroke-linecap='round'%3E%3Cpath d='M10 3v14M3 10h14' stroke='%23000' stroke-width='3.5'/%3E%3Cpath d='M10 3v14M3 10h14' stroke='%23fff' stroke-width='1.5'/%3E%3C/g%3E%3Ccircle cx='21' cy='21' r='6' fill='%23ff6b6b' stroke='%23000' stroke-width='1'/%3E%3Cpath d='M18 21h6' stroke='%23fff' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E")
+      10 10,
+    crosshair;
+}
+.prompt-notice {
+  position: absolute;
+  left: 50%;
+  bottom: 8px;
+  transform: translateX(-50%);
+  padding: 3px 8px;
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.72);
+  color: var(--warn);
+  font-size: 11px;
+  white-space: nowrap;
+  pointer-events: none;
 }

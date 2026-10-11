@@ -1,4 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
+import type { SubjectPrompt } from "../lib/api";
+import { withMarks } from "../lib/prompt";
+import { PromptLayer } from "./PromptLayer";
 import { useI18n } from "../i18n";
 
 interface Trim {
@@ -16,6 +19,9 @@ interface Props {
   /** Bloqueia a edição do trecho (o vídeo continua navegável). */
   locked?: boolean;
   videoRef: RefObject<HTMLVideoElement | null>;
+  /** Marcação do sujeito (SAM 2.1); com `onPrompt`, o player ganha o modo de marcar. */
+  prompt?: SubjectPrompt | null;
+  onPrompt?: (p: SubjectPrompt | null) => void;
 }
 
 const MIN_SPAN = 0.2;
@@ -33,6 +39,12 @@ const Icon = {
   ),
   prev: <path d="M4 3.5v9M12 3.5v9L6 8z" stroke="currentColor" strokeWidth="1.4" fill="currentColor" strokeLinejoin="round" />,
   next: <path d="M12 3.5v9M4 3.5v9L10 8z" stroke="currentColor" strokeWidth="1.4" fill="currentColor" strokeLinejoin="round" />,
+  target: (
+    <g fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round">
+      <circle cx="8" cy="8" r="4.5" />
+      <path d="M8 1.5v3M8 11.5v3M1.5 8h3M11.5 8h3" />
+    </g>
+  ),
   loop: (
     <path
       d="M3 7.5V7a3 3 0 0 1 3-3h6.5M10.5 2 12.5 4l-2 2M13 8.5V9a3 3 0 0 1-3 3H3.5M5.5 14l-2-2 2-2"
@@ -54,7 +66,7 @@ function Svg({ children }: { children: React.ReactNode }) {
 }
 
 /** Player compacto com linha do tempo que mostra e edita o trecho usado. */
-export function VideoPlayer({ src, duration: probed, fps, trim, onTrim, locked, videoRef }: Props) {
+export function VideoPlayer({ src, duration: probed, fps, trim, onTrim, locked, videoRef, prompt, onPrompt }: Props) {
   const { t } = useI18n();
   const tp = t.player;
   const timeline = useRef<HTMLDivElement>(null);
@@ -63,8 +75,14 @@ export function VideoPlayer({ src, duration: probed, fps, trim, onTrim, locked, 
   const [time, setTime] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [loopTrim, setLoopTrim] = useState(true);
-
+  const [marking, setMarking] = useState(false);
+  const [aspect, setAspect] = useState(16 / 9);
   const end = trim.end ?? duration;
+  // Só se marca dentro do trecho: fora dele não há frame para a marcação.
+  const inTrim = time >= trim.start - 0.02 && time <= end + 0.02;
+  const editing = marking && !!onPrompt && inTrim;
+  // A marcação vale para um frame: aparece nele (e enquanto se marca).
+  const promptHere = !!prompt && Math.abs(time - (prompt.time ?? 0)) < 1.5 / (fps || 30);
   const pct = (t: number) => `${(clamp(t / (duration || 1), 0, 1) * 100).toFixed(3)}%`;
 
   useEffect(() => setDuration(probed), [probed, src]);
@@ -94,7 +112,7 @@ export function VideoPlayer({ src, duration: probed, fps, trim, onTrim, locked, 
 
   function toggle() {
     const v = videoRef.current;
-    if (!v) return;
+    if (!v || editing) return;
     if (v.paused) {
       if (loopTrim && (v.currentTime < trim.start || v.currentTime >= end - 0.02)) seek(trim.start);
       v.play();
@@ -154,12 +172,30 @@ export function VideoPlayer({ src, duration: probed, fps, trim, onTrim, locked, 
           muted
           playsInline
           preload="auto"
-          onLoadedMetadata={(e) => Number.isFinite(e.currentTarget.duration) && setDuration(e.currentTarget.duration)}
+          onLoadedMetadata={(e) => {
+            const v = e.currentTarget;
+            if (Number.isFinite(v.duration)) setDuration(v.duration);
+            if (v.videoWidth && v.videoHeight) setAspect(v.videoWidth / v.videoHeight);
+          }}
           onPlay={() => setPlaying(true)}
           onPause={() => setPlaying(false)}
           onSeeked={(e) => setTime(e.currentTarget.currentTime)}
         />
-        {!playing && (
+        {(editing || (promptHere && !playing)) && (
+          <PromptLayer
+            marks={editing && !promptHere ? null : (prompt ?? null)}
+            aspect={aspect}
+            editing={editing}
+            onChange={(m) => {
+              const t = videoRef.current?.currentTime ?? time;
+              // Marcação em outro frame recomeça do zero.
+              const base: SubjectPrompt = promptHere && prompt ? prompt : { time: t, box: null, points: [] };
+              onPrompt!(withMarks(base, m));
+            }}
+          />
+        )}
+        {marking && onPrompt && !inTrim && <span className="prompt-notice">{tp.markOutside}</span>}
+        {!playing && !editing && (
           <span className="player-overlay" aria-hidden>
             <Svg>{Icon.play}</Svg>
           </span>
@@ -194,6 +230,22 @@ export function VideoPlayer({ src, duration: probed, fps, trim, onTrim, locked, 
         <span className="player-time mono">
           {fmt(time)} <span className="muted">/ {fmt(duration)}</span>
         </span>
+        {onPrompt && (
+          <button
+            className={`pbtn ${marking ? "on" : ""}`}
+            onClick={() => {
+              videoRef.current?.pause();
+              // Fora do trecho, leva ao início dele para marcar.
+              if (!inTrim) {
+                seek(trim.start);
+                setMarking(true);
+              } else setMarking((m) => !m);
+            }}
+            title={marking ? tp.markDone : `${tp.mark} · ${tp.markHint}`}
+          >
+            <Svg>{Icon.target}</Svg>
+          </button>
+        )}
         <button
           className={`pbtn ${loopTrim ? "on" : ""}`}
           onClick={() => setLoopTrim((v) => !v)}

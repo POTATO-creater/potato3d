@@ -1,10 +1,12 @@
 import { useRef, type ReactNode } from "react";
-import { fileUrl, type ImageSet, type MaskOptions, type Settings, type Stage, type VideoInfo } from "../lib/api";
+import { fileUrl, type ImageSet, type MaskOptions, type Settings, type Stage, type SubjectPrompt, type VideoInfo } from "../lib/api";
+import { promptInTrim } from "../lib/prompt";
 import { PRESETS, type PresetId } from "../lib/presets";
 import { Field, NumField, Segmented, Select, Toggle } from "./fields";
 import { VideoPlayer } from "./VideoPlayer";
 import { ImageSequence } from "./ImageSequence";
 import { MasksPanel } from "./MasksPanel";
+import type { PreviewSource } from "./MaskPreview";
 import { basename, fileManager, type Os } from "../lib/platform";
 import { useI18n } from "../i18n";
 
@@ -53,6 +55,20 @@ export function Sidebar(p: Props) {
   const set = <K extends keyof Settings>(k: K, patch: Partial<Settings[K]>) =>
     p.onSettings({ ...s, [k]: { ...s[k], ...patch } });
   const locked = p.running;
+  // Marcação do SAM 2.1 (no vídeo ou nas imagens); fora do trecho ela não vale.
+  const sam2 = p.os === "web" && p.masks.enabled && p.masks.method === "sam2";
+  const prompt = sam2 ? (p.masks.prompt ?? null) : null;
+  const promptOutside = !!prompt && !promptInTrim(prompt, p.trim);
+  const marking = sam2
+    ? { prompt, onPrompt: locked ? undefined : (pr: SubjectPrompt | null) => p.onMasks({ ...p.masks, prompt: pr }) }
+    : {};
+  // Prévia do recorte: o quadro marcado, senão o início do trecho (ou a 1ª imagem).
+  const markedImage = prompt?.image ? p.imageSet?.paths.find((x) => basename(x) === prompt.image) : undefined;
+  const previewSource: PreviewSource | null = p.videoPath
+    ? { kind: "video", src: fileUrl(p.videoPath), time: !promptOutside && prompt?.time != null ? prompt.time : p.trim.start }
+    : p.imageSet
+      ? { kind: "image", src: fileUrl(markedImage ?? p.imageSet.paths[0]) }
+      : null;
   const end = p.trim.end ?? p.video?.duration ?? 0;
   const span = Math.max(0, end - p.trim.start);
 
@@ -87,6 +103,7 @@ export function Sidebar(p: Props) {
                 trim={p.trim}
                 onTrim={p.onTrim}
                 locked={locked}
+                {...marking}
               />
               <div className="file-name" title={p.videoPath}>
                 {basename(p.videoPath)}
@@ -143,7 +160,7 @@ export function Sidebar(p: Props) {
             </>
           ) : p.imageSet ? (
             <>
-              <ImageSequence paths={p.imageSet.paths} />
+              <ImageSequence paths={p.imageSet.paths} {...marking} />
               <div className="file-name" title={p.imageSet.dir}>
                 {basename(p.imageSet.dir)}
               </div>
@@ -187,7 +204,7 @@ export function Sidebar(p: Props) {
           </div>
         </section>
 
-        <MasksPanel os={p.os} masks={p.masks} onMasks={p.onMasks} locked={locked} />
+        <MasksPanel os={p.os} masks={p.masks} onMasks={p.onMasks} locked={locked} preview={previewSource} promptOutside={promptOutside} />
 
         <section className="panel">
           <header className="panel-head">

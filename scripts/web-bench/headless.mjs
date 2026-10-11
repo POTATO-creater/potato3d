@@ -3,7 +3,7 @@
 // visível (abas ocultas sofrem throttling). Precisa do `pnpm web:dev`
 // rodando com `WEB_FS_ANY=1`, para abrir arquivos locais por /@fs.
 //
-//   node scripts/web-bench/headless.mjs video <url> [--mask chroma|rmbg] [--for-poses] [--no-train] [--runs N] [--out <pasta>]
+//   node scripts/web-bench/headless.mjs video <url> [--mask chroma|rmbg|sam2] [--for-poses] [--no-train] [--runs N] [--out <pasta>]
 //   node scripts/web-bench/headless.mjs train <url> [--out splat.ply]
 //   node scripts/web-bench/headless.mjs poses <url> [--out <pasta>]
 //   node scripts/web-bench/headless.mjs profile <url> [--seconds 10]
@@ -11,7 +11,7 @@
 // <url>: http://localhost:1440/?video=/@fs/<vídeo>, mais &dataset=/@fs/<dataset
 // COLMAP> para train/poses/profile (o projeto do vídeo começa com esse
 // dataset: imagens e poses).
-// - video:   "Gerar splat" desde os frames, com o recorte de --mask (rmbg
+// - video:   "Gerar splat" desde os frames, com o recorte de --mask (rmbg e sam2
 //            baixa o modelo se preciso); --no-train cancela ao fim das poses;
 //            --runs N repete na mesma página; --out copia o projeto do OPFS
 //            para <pasta>, mais um frames.json com o instante de cada frame;

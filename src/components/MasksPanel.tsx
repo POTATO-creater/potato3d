@@ -1,7 +1,10 @@
 import type { ChromaOptions, MaskMethod, MaskOptions } from "../lib/api";
 import type { Os } from "../lib/platform";
 import { Segmented, Slider, Toggle } from "./fields";
+import { MaskPreview, type PreviewSource } from "./MaskPreview";
 import { useI18n, type Messages } from "../i18n";
+
+const fmtTime = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, "0")}`;
 
 const toHex = (c: [number, number, number]) => `#${c.map((v) => v.toString(16).padStart(2, "0")).join("")}`;
 const fromHex = (h: string): [number, number, number] => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)) as never;
@@ -12,7 +15,7 @@ function methods(t: Messages, os: Os | undefined): { value: MaskMethod; label: s
     os === "windows"
       ? ["people", "general", "rmbg", "chroma"]
       : os === "web"
-        ? ["rmbg", "chroma"]
+        ? ["rmbg", "sam2", "chroma"]
         : os === "macos"
           ? ["auto", "rmbg", "chroma"]
           : ["auto", "chroma"];
@@ -24,11 +27,17 @@ export function MasksPanel({
   masks,
   onMasks,
   locked,
+  preview,
+  promptOutside,
 }: {
   os: Os | undefined;
   masks: MaskOptions;
   onMasks: (m: MaskOptions) => void;
   locked: boolean;
+  /** Quadro para a prévia do recorte (onde o host oferece prévia). */
+  preview: PreviewSource | null;
+  /** A marcação ficou fora do trecho (vai ser ignorada). */
+  promptOutside: boolean;
 }) {
   const { t } = useI18n();
   const tm = t.masks;
@@ -59,6 +68,31 @@ export function MasksPanel({
             options={options.map((o) => ({ value: o.value, label: o.label, title: o.hint }))}
           />
           <p className="help">{options.find((o) => o.value === method)?.hint}</p>
+
+          {method === "sam2" && (
+            <div className="sam2-prompt">
+              {masks.prompt ? (
+                <p className="help">
+                  {tm.prompt.marked(
+                    masks.prompt.image ?? fmtTime(masks.prompt.time ?? 0),
+                    [masks.prompt.box && tm.prompt.box, masks.prompt.points.length && tm.prompt.points(masks.prompt.points.length)]
+                      .filter(Boolean)
+                      .join(" + "),
+                  )}{" "}
+                  <button className="link" disabled={locked} onClick={() => onMasks({ ...masks, method, prompt: null })}>
+                    {tm.prompt.clear}
+                  </button>
+                </p>
+              ) : (
+                <p className="help">{tm.prompt.none}</p>
+              )}
+              {promptOutside && <p className="help error">{tm.prompt.outside}</p>}
+              <p className="help muted">{tm.prompt.howTo}</p>
+            </div>
+          )}
+
+          {/* Como no job: marcação fora do trecho não vale. */}
+          <MaskPreview source={preview} masks={{ ...masks, method, prompt: promptOutside ? null : masks.prompt }} locked={locked} />
 
           {method === "chroma" && (
             <fieldset className="chroma" disabled={locked}>

@@ -26,6 +26,8 @@ import { FrameLightbox, FramesGrid, LogView } from "./components/FramesGrid";
 import { ExportPanel } from "./components/ExportPanel";
 import { LanguageSelect } from "./components/LanguageSelect";
 import { UpdateBanner } from "./components/UpdateBanner";
+import { useSidebarWidth } from "./components/SidebarResizer";
+import { promptInTrim } from "./lib/prompt";
 import { basename } from "./lib/platform";
 import { I18nProvider, useI18n } from "./i18n";
 import "./styles.css";
@@ -50,7 +52,8 @@ function loadMasks(): MaskOptions {
     // despill ficava dentro do chroma.
     if (raw) {
       const { chroma: { despill, ...chroma } = {} as never, ...saved } = JSON.parse(raw);
-      return { ...base, despill: despill ?? base.despill, ...saved, chroma: { ...DEFAULT_CHROMA, ...chroma } };
+      // A marcação do SAM 2.1 é do vídeo da sessão anterior: não serve mais.
+      return { ...base, despill: despill ?? base.despill, ...saved, chroma: { ...DEFAULT_CHROMA, ...chroma }, prompt: null };
     }
   } catch {
     /* armazenamento indisponível */
@@ -77,7 +80,9 @@ function matchPreset(s: Settings): PresetId | "custom" {
 
 /** O recorte por IA tem o que precisa neste sistema? */
 function maskToolReady(tools: Tools, m: MaskOptions) {
-  // No web o único recorte por IA é o RMBG.
+  // O SAM 2.1 (só no web) baixa os modelos durante o recorte.
+  if (m.method === "sam2") return tools.os === "web";
+  // No web o outro recorte por IA é o RMBG.
   if (m.method === "rmbg" || tools.os === "web") return !!tools.rmbgModel;
   if (tools.os !== "windows") return !!tools.masker;
   return m.method === "general" ? !!tools.birefnetModel : !!tools.modnetModel;
@@ -105,6 +110,7 @@ function AppView() {
   const [preset, setPreset] = useState<PresetId | "custom">(stored.preset);
   const [settings, setSettings] = useState<Settings>(stored.settings);
   const [maskOpts, setMaskOpts] = useState<MaskOptions>(loadMasks);
+  const sidebar = useSidebarWidth();
   const [fromStage, setFromStage] = useState<Stage>("frames");
   const [frame, setFrame] = useState<SceneFrame | null>(null);
   const [tab, setTab] = useState<Tab>("viewer");
@@ -185,6 +191,7 @@ function AppView() {
       setImageSet(null);
       setSourceError(null);
       setTrim({ start: 0, end: null });
+      setMaskOpts((m) => (m.prompt ? { ...m, prompt: null } : m));
       logs.current = [];
       setLogLines([]);
       try {
@@ -212,6 +219,7 @@ function AppView() {
       setVideo(null);
       setImageSet(set);
       setTrim({ start: 0, end: null });
+      setMaskOpts((m) => (m.prompt ? { ...m, prompt: null } : m));
       logs.current = [];
       setLogLines([]);
       await openProject(await api.defaultProjectDir(set.dir));
@@ -296,7 +304,8 @@ function AppView() {
           projectDir,
           fromStage,
           frames: { ...settings.frames, trimStart: trim.start, trimEnd: trim.end },
-          masks: maskOpts,
+          // Marcação fora do trecho (o trecho mudou depois) não vale mais.
+          masks: promptInTrim(maskOpts.prompt, trim) ? maskOpts : { ...maskOpts, prompt: null },
           poses: settings.poses,
           train: settings.train,
         },
@@ -353,7 +362,8 @@ function AppView() {
   const blurbs = stageBlurbs(t, tools?.os);
 
   return (
-    <div className="app">
+    <div className="app" style={{ "--sidebar-w": `${sidebar.width}px` } as React.CSSProperties}>
+      {sidebar.handle}
       <Sidebar
         os={tools?.os}
         videoPath={videoPath}

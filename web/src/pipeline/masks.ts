@@ -1,9 +1,11 @@
 // Recorte (máscaras 255 = sujeito) e dataset com fundo transparente, como
-// src-tauri/src/masks.rs. Só o RMBG-1.4 e a cor sólida existem no web.
+// src-tauri/src/masks.rs. No web: RMBG-1.4, SAM 2.1 (só aqui) e cor sólida.
 
-import type { MaskOptions, MaskStats, Msg } from "../../../src/lib/api";
+import type { MaskOptions, MaskStats, Msg, SubjectPrompt } from "../../../src/lib/api";
 import { applyDespill, backgroundColor, borderKey, chromaMask, despillFor, type RGB } from "./chroma";
 import { encodePng } from "./png";
+import { SAM2_LICENSE, Sam2Tracker } from "./sam2";
+import { logitsToMask, promptFrame, promptPixels, type FrameOrigin } from "./sam2-math";
 import { MODELS, Segmenter } from "./segment";
 
 type Progress = (frac: number, msg: Msg) => void;
@@ -44,9 +46,12 @@ export async function makeMasks(
   s: MaskOptions,
   log: (s: string) => void,
   progress: Progress,
+  /** Instante ou imagem de origem de cada frame (por nome), para achar o frame marcado. */
+  origin?: FrameOrigin,
 ): Promise<MaskStats> {
   const names = await listImages(images);
   if (!names.length) throw new Error("não há frames para recortar");
+  if (s.method === "sam2") return sam2Masks(images, out, names, s.prompt ?? null, log, progress, origin);
   let seg: Segmenter | null = null;
   if (s.method !== "chroma") {
     const spec = MODELS.rmbg;
@@ -90,6 +95,55 @@ export async function makeMasks(
     backend: seg?.backend ?? "Cor sólida",
     keyColor,
   };
+}
+
+/** SAM 2.1: segmenta o frame marcado e propaga para a frente e depois para trás. */
+async function sam2Masks(
+  images: FileSystemDirectoryHandle,
+  out: FileSystemDirectoryHandle,
+  names: string[],
+  prompt: SubjectPrompt | null,
+  log: (s: string) => void,
+  progress: Progress,
+  origin?: FrameOrigin,
+): Promise<MaskStats> {
+  const tracker = await Sam2Tracker.create(names.length, (d, n) =>
+    progress(0, { key: "masks.downloading", args: { model: "SAM 2.1", done: Math.round(d / 1e6), total: Math.round(n / 1e6) } }),
+  );
+  let start = promptFrame(names, prompt, origin);
+  if (start < 0) {
+    log(`SAM 2.1: a imagem marcada (${prompt?.image}) não entrou nos frames; vale o objeto do centro`);
+    prompt = null;
+    start = 0;
+  }
+  log(`${tracker.backend} (${SAM2_LICENSE})`);
+  log(
+    prompt && (prompt.box || prompt.points.length)
+      ? `SAM 2.1: sujeito marcado, propagando a partir de ${names[start]}`
+      : `SAM 2.1: sem marcação, segue o objeto no centro de ${names[start]}`,
+  );
+  const order = [...names.keys()].slice(start).concat([...names.keys()].slice(0, start).reverse());
+  let coverage = 0, noSubject = 0;
+  const t0 = performance.now();
+  try {
+    for (const [k, i] of order.entries()) {
+      const bmp = await createImageBitmap(await (await images.getFileHandle(names[i])).getFile());
+      const { width: w, height: h } = bmp;
+      const f = await tracker.frame(i, bmp, w, h, i === start ? promptPixels(prompt, w, h) : undefined, i < start);
+      bmp.close();
+      const mask = logitsToMask(f.logits, w, h);
+      if (f.objectScore <= 0) noSubject++;
+      let sum = 0;
+      for (const v of mask) sum += v;
+      coverage += sum / (255 * mask.length);
+      await write(out, `${stem(names[i])}.png`, await encodePng(mask, w, h, 1));
+      progress((k + 1) / names.length, { key: "masks.cutting", args: { i: k + 1, n: names.length } });
+    }
+  } finally {
+    tracker.release();
+  }
+  log(`SAM 2.1: ${((performance.now() - t0) / names.length / 1000).toFixed(2)} s/frame`);
+  return { count: names.length, noSubject, meanCoverage: coverage / names.length, backend: tracker.backend, keyColor: null };
 }
 
 /** PNG RGBA com A = máscara (alfa direto) e despill no sujeito. */

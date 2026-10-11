@@ -57,8 +57,21 @@ export interface FrameOptions {
   trimEnd: number | null;
 }
 
-/** auto: Vision (macOS) / MODNet (Windows) · people: MODNet · general: BiRefNet · rmbg: RMBG-1.4 · chroma: cor sólida */
-export type MaskMethod = "auto" | "people" | "general" | "rmbg" | "chroma";
+/** auto: Vision (macOS) / MODNet (Windows) · people: MODNet · general: BiRefNet · rmbg: RMBG-1.4 ·
+ *  sam2: SAM 2.1 com propagação entre frames (só no web) · chroma: cor sólida */
+export type MaskMethod = "auto" | "people" | "general" | "rmbg" | "sam2" | "chroma";
+
+/** Onde está o sujeito, para o SAM 2.1, em coordenadas normalizadas (0–1) do quadro. */
+export interface SubjectPrompt {
+  /** Instante do vídeo em que foi marcado (s); null = primeiro frame. */
+  time: number | null;
+  /** Com imagens no lugar do vídeo: o nome da imagem marcada. */
+  image?: string | null;
+  /** Caixa [x0, y0, x1, y1]. */
+  box: [number, number, number, number] | null;
+  /** label 1 = sujeito, 0 = fundo. */
+  points: { x: number; y: number; label: 0 | 1 }[];
+}
 
 export interface ChromaOptions {
   autoColor: boolean;
@@ -88,6 +101,8 @@ export interface MaskOptions {
   despill: boolean;
   /** 0–100 */
   despillStrength: number;
+  /** SAM 2.1: sujeito marcado no vídeo; null = o que estiver no centro do primeiro frame. */
+  prompt?: SubjectPrompt | null;
 }
 
 export interface MaskStats {
@@ -272,6 +287,22 @@ export interface Api {
   startJob(config: JobConfig, onEvent: (e: JobEvent) => void): Promise<void>;
 }
 
+/** Prévia do recorte num quadro, com os mesmos modelos do pipeline. */
+export interface MaskPreviewer {
+  /** Os modelos do método já estão baixados (a prévia não baixa sem pedir)? */
+  ready(method: MaskMethod): Promise<boolean>;
+  /** Máscara (255 = sujeito) no tamanho do quadro; baixa os modelos se preciso.
+   *  `key` identifica o quadro, para reaproveitar o que não depende do prompt. */
+  mask(
+    key: string,
+    frame: ImageBitmap,
+    masks: MaskOptions,
+    onProgress?: (done: number, total: number) => void,
+  ): Promise<Uint8Array>;
+  /** Libera a GPU (o recorte de verdade vai usá-la). */
+  release(): void;
+}
+
 /** O que muda entre o app desktop e a versão web, além dos comandos. Os
  *  caminhos são opacos para a interface: no web apontam para o OPFS. */
 export interface Host {
@@ -298,6 +329,8 @@ export interface Host {
   onUpdate?(handler: () => void): () => void;
   /** Põe a versão nova no ar e recarrega a página. */
   applyUpdate?(): void;
+  /** Só no web, por enquanto: prévia do recorte no painel. */
+  maskPreview?: MaskPreviewer;
 }
 
 // Definidos uma vez pelo ponto de entrada (src/main.tsx ou web/src/main.tsx),

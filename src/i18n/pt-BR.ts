@@ -22,6 +22,7 @@ export const ptBR = {
   },
 
   app: {
+    resizeSidebar: "Arraste para redimensionar · duplo clique volta ao tamanho padrão",
     tabs: { viewer: "3D", frames: "Frames", log: "Log" },
     readyIn: (d: string) => `Pronto em ${d}`,
     videoError: (e: string) => `Não foi possível ler o vídeo: ${e}`,
@@ -162,6 +163,12 @@ export const ptBR = {
           "RMBG-1.4 na GPU: bordas mais limpas, qualquer sujeito. Baixa 176 MB na primeira vez. " +
           "Licença da BRIA AI só para uso não comercial.",
       },
+      sam2: {
+        label: "SAM 2.1",
+        hint:
+          "SAM 2.1 da Meta na GPU: segue o mesmo objeto por todos os frames, sem variar entre um e outro. " +
+          "Marque o sujeito no vídeo; sem marcação, usa o que está no centro. Baixa 165 MB na primeira vez. Licença Apache-2.0.",
+      },
       people: { label: "Pessoas", hint: "MODNet na GPU: rápido, mas só reconhece pessoas." },
       general: { label: "Objetos", hint: "BiRefNet: qualquer sujeito, bem mais lento." },
       auto: { label: "Vision", hint: "Recorte nativo do macOS, na GPU: qualquer sujeito." },
@@ -178,6 +185,27 @@ export const ptBR = {
     despillStrength: "Intensidade do despill",
     forPoses: "Usar o recorte também nas poses",
     forPosesHint: "ajuda se o fundo muda entre frames; atrapalha em sujeitos com pouca textura",
+    prompt: {
+      none: "Sem marcação: segue o objeto no centro do primeiro frame.",
+      marked: (time: string, what: string) => `Sujeito marcado em ${time} (${what}).`,
+      box: "caixa",
+      points: (n: number) => (n === 1 ? "1 ponto" : `${n} pontos`),
+      clear: "Limpar",
+      howTo: "No vídeo (ou nas imagens), toque no alvo ⌖ e arraste uma caixa em volta do sujeito ou clique nele. Alt+clique marca o fundo; Shift+clique apaga um ponto ou a caixa.",
+      outside: "A marcação ficou fora do trecho e será ignorada (vale o objeto do centro). Marque de novo dentro dele.",
+    },
+    preview: {
+      title: "Prévia",
+      at: (time: string) => `quadro em ${time}`,
+      show: "Mostrar",
+      hide: "Ocultar",
+      load: "Gerar prévia (baixa o modelo na primeira vez)",
+      downloading: (done: number, total: number) => `Baixando o modelo: ${done}/${total} MB`,
+      working: "Calculando…",
+      paused: "Prévia pausada durante o processamento.",
+      failed: (e: string) => `Prévia indisponível: ${e}`,
+      legend: "O xadrez é o fundo que sai. Mude a marcação e a prévia acompanha.",
+    },
   },
 
   export: {
@@ -334,6 +362,10 @@ export const ptBR = {
     prevImage: "Imagem anterior (←)",
     nextImage: "Próxima imagem (→)",
     loop: "Repetir só o trecho selecionado",
+    mark: "Marcar o sujeito para o SAM 2.1",
+    markDone: "Concluir a marcação",
+    markHint: "Arraste uma caixa ou clique no sujeito · Alt+clique: fundo · Shift+clique: apaga",
+    markOutside: "Fora do trecho: volte para dentro dele para marcar",
   },
 
   viewer: {
