@@ -267,6 +267,9 @@ export const enUS: Messages = {
     showingCut: "Showing cutout",
     showCut: "Show cutout",
     sharpness: "sharpness",
+    prev: "Previous",
+    next: "Next",
+    close: "Close",
     noLog: "No log yet.",
   },
 
@@ -328,6 +331,7 @@ export const enUS: Messages = {
     loading: "Loading splat…",
     loadError: (e) => `Failed to load: ${e}`,
     cameras: "Cameras",
+    camerasTitle: "Click a point to see that camera's frame",
     lockAngle: "Lock angle",
     lockAngleTitle: "Limits the camera height to the regions the video filmed",
     spin: "Spin",

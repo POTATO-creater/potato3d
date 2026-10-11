@@ -22,7 +22,7 @@ import { PRESETS, presetById, type PresetId } from "./lib/presets";
 import { Sidebar } from "./components/Sidebar";
 import { Viewer } from "./components/Viewer";
 import { StageStrip } from "./components/StageStrip";
-import { FramesGrid, LogView } from "./components/FramesGrid";
+import { FrameLightbox, FramesGrid, LogView } from "./components/FramesGrid";
 import { ExportPanel } from "./components/ExportPanel";
 import { LanguageSelect } from "./components/LanguageSelect";
 import { UpdateBanner } from "./components/UpdateBanner";
@@ -110,6 +110,8 @@ function AppView() {
   const [tab, setTab] = useState<Tab>("viewer");
   const [job, dispatch] = useReducer(jobReducer, initialJob);
   const [framesVersion, setFramesVersion] = useState(0);
+  /** Frame aberto ao clicar numa câmera do 3D (índice em `job.frames`). */
+  const [camFrame, setCamFrame] = useState<number | null>(null);
   const [lastExport, setLastExport] = useState<ExportStats | null>(null);
   /** Mostra a exportação no 3D em vez do splat do treino. */
   const [previewExport, setPreviewExport] = useState<{ version: number } | null>(null);
@@ -311,6 +313,14 @@ function AppView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [job.stages.train.status]);
 
+  /** Câmera do COLMAP → frame: o nome da imagem (00012.jpg) é o índice. */
+  function pickCamera(camera: number) {
+    const n = frame?.frameIndices[camera];
+    if (n == null) return;
+    const i = job.frames.findIndex((f) => Number(basename(f.path).replace(/\.[^.]+$/, "")) === n);
+    setCamFrame(i >= 0 ? i : job.frames[n] ? n : null);
+  }
+
   const viewerSplat =
     previewExport && lastExport
       ? { path: lastExport.path, iter: null, version: previewExport.version, label: t.app.exported(basename(lastExport.path)) }
@@ -456,6 +466,7 @@ function AppView() {
             <Viewer
               splat={viewerSplat}
               frame={frame}
+              onPickCamera={job.frames.length ? pickCamera : undefined}
               placeholder={
                 <div className="placeholder">
                   <h1>{t.app.hero}</h1>
@@ -478,6 +489,16 @@ function AppView() {
               }
             />
           </div>
+          {camFrame != null && tab === "viewer" && job.frames[camFrame] && (
+            <FrameLightbox
+              frames={job.frames}
+              index={camFrame}
+              onIndex={setCamFrame}
+              onClose={() => setCamFrame(null)}
+              version={framesVersion}
+              masksDir={job.masksDir}
+            />
+          )}
           {tab === "frames" && (
             <div className="pane scroll">
               <FramesGrid frames={job.frames} version={framesVersion} masksDir={job.masksDir} />
