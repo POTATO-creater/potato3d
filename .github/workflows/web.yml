@@ -30,11 +30,11 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # Brush em WASM (web/pkg, fora do git). Compilar do zero leva vários
-      # minutos, então só acontece quando o commit fixo do Brush ou os patches
-      # mudam; o script instala sozinho o toolchain Rust que ele exige.
+      # Brush em WASM (web/pkg, fora do git). Compilar do zero leva ~25 min,
+      # então só acontece quando o commit fixo do Brush ou os patches mudam; o
+      # script instala sozinho o toolchain Rust que ele exige.
       - id: brush
-        uses: actions/cache@v6
+        uses: actions/cache/restore@v6
         with:
           path: web/pkg
           key: brush-pkg-${{ hashFiles('scripts/build-brush-web.mjs', 'web/brush/*.patch') }}
@@ -46,6 +46,14 @@ jobs:
 
       - if: steps.brush.outputs.cache-hit != 'true'
         run: pnpm web:wasm
+
+      # Salva já, não no fim do job: o `actions/cache` só salvava se tudo
+      # passasse, e uma falha depois (ex.: o deploy) jogava fora a compilação.
+      - if: steps.brush.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: web/pkg
+          key: ${{ steps.brush.outputs.cache-primary-key }}
 
       - run: pnpm exec tsc --noEmit -p web
 
