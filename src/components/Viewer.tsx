@@ -240,8 +240,8 @@ export function Viewer({ splat, frame, placeholder }: Props) {
     c.camera.position.copy(center).add(new THREE.Vector3(0, size * 0.25, size * 0.9));
   }
 
-  /** Volta para o ponto de vista do primeiro frame do vídeo, um pouco recuado
-   *  para mostrar o objeto inteiro. */
+  /** Volta para o ponto de vista do primeiro frame do vídeo, enquadrando o
+   *  centro como a filmagem (ou um pouco recuado, sem a lente do vídeo). */
   function resetView() {
     const c = ctx.current;
     if (!c) return;
@@ -249,7 +249,15 @@ export function Viewer({ splat, frame, placeholder }: Props) {
     if (frame && frame.cameras.length) {
       c.root.updateMatrixWorld(true);
       const first = new THREE.Vector3(...frame.cameras[0]).applyMatrix4(c.root.matrixWorld);
-      c.camera.position.copy(first.multiplyScalar(1.35));
+      // A lente daqui é fixa (50°); a do vídeo pode ser bem mais fechada
+      // (teleobjetiva). Aproxima até o quadro do vídeo caber justo na tela.
+      let k = 1.35;
+      if (frame.lens) {
+        const v = Math.tan(THREE.MathUtils.degToRad(c.camera.fov) / 2);
+        const tv = Math.tan(frame.lens.fovY / 2);
+        k = Math.max(tv / v, (tv * frame.lens.aspect) / (v * c.camera.aspect));
+      }
+      c.camera.position.copy(first.multiplyScalar(k));
       c.camera.near = Math.max(frame.radius / 500, 0.001);
       c.camera.far = frame.radius * 100;
       c.camera.updateProjectionMatrix();

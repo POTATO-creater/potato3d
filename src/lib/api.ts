@@ -180,6 +180,9 @@ export interface SceneFrame {
   cameras: [number, number, number][];
   /** Índice do frame de cada câmera; saltos indicam frames não registrados. */
   frameIndices: number[];
+  /** Lente do vídeo (cameras.bin): campo de visão vertical em radianos e
+   *  largura/altura. Ausente se o modelo não tiver câmera legível. */
+  lens?: { fovY: number; aspect: number };
 }
 
 export type TrainEvent =
