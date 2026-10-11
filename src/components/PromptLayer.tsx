@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { eraseAt, type PromptMarks } from "../lib/prompt";
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
@@ -23,6 +23,20 @@ export function PromptLayer({
   const start = useRef<{ x: number; y: number } | null>(null);
   const [drag, setDrag] = useState<[number, number, number, number] | null>(null);
   const [erasing, setErasing] = useState(false);
+  // O cursor de apagar acompanha o Shift mesmo sem mexer o mouse.
+  useEffect(() => {
+    if (!editing) return;
+    const onKey = (e: KeyboardEvent) => setErasing(e.shiftKey);
+    const onBlur = () => setErasing(false);
+    addEventListener("keydown", onKey);
+    addEventListener("keyup", onKey);
+    addEventListener("blur", onBlur);
+    return () => {
+      removeEventListener("keydown", onKey);
+      removeEventListener("keyup", onKey);
+      removeEventListener("blur", onBlur);
+    };
+  }, [editing]);
   const stage = 16 / 9;
   const style =
     aspect > stage
