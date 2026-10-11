@@ -350,7 +350,12 @@ export function reconstruct(
       const local = order.slice(-8).filter((i) => i !== order[0]);
       runBA(local, false, 6, MAX_ERR * 2);
       if (order.length >= lastGlobal * 1.25 && order.length >= 8) {
-        const g = runBA(order.slice(1), true, 15, MAX_ERR * 2);
+        // Com poucas câmeras o BA é barato: itera até a focal assentar. Em
+        // teleobjetiva (focal ~10× a largura) o vale focal × profundidade é
+        // quase plano e 15 iterações por rodada deixam a focal subindo aos
+        // poucos; as câmeras registradas com ela curta saem com passos de
+        // ângulo encolhidos e a órbita não fecha (abre um "buraco").
+        const g = runBA(order.slice(1), true, order.length < 20 ? 150 : 15, MAX_ERR * 2);
         filterPoints();
         lastGlobal = order.length;
         log(`BA global com ${order.length} câmeras: ${g.rmsBefore.toFixed(2)} → ${g.rmsAfter.toFixed(2)} px, f = ${f.toFixed(1)}`);
