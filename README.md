@@ -384,8 +384,9 @@ fazem diferença.
 ### Publicação na Cloudflare
 
 A versão web é publicada como **assets estáticos no Cloudflare Workers**
-(`wrangler.jsonc`): não há código de Worker, então os acessos não são
-cobrados. O endereço é `gausify-orbit.<subdomínio>.workers.dev`; para um
+(`wrangler.jsonc`), que não acordam o Worker e não são cobrados. O código de
+Worker (`worker/index.ts`) só roda nos links de compartilhamento (`/api/*` e
+`/s/*`). O endereço é `gausify-orbit.<subdomínio>.workers.dev`; para um
 domínio próprio, veja o comentário de `routes` no `wrangler.jsonc`.
 
 - **Automático:** o `.github/workflows/web.yml` verifica cada PR (tipos,
@@ -405,7 +406,77 @@ Detalhes que o Workers impõe:
   CORS quando o Referer é um `*.workers.dev`, e o download do RMBG falharia;
   o `segment.ts` também baixa o modelo sem Referer.
 - **Offline:** o service worker (`web/sw-plugin.ts`) guarda o build inteiro
-  na primeira visita e avisa quando há versão nova.
+  na primeira visita e avisa quando há versão nova. Ele não intercepta `/s/*`
+  nem `/api/*`.
+
+### Compartilhar por link
+
+Depois de exportar, **Compartilhar** (no bloco de exportação, desktop e web)
+sobe o `.sog`/`.ply` para o R2 da Cloudflare e gera um link privado
+`/s/<id>`, com QR code. Quem tem o link abre o splat num visualizador próprio
+(`web/share.html`, PlayCanvas): arrastar/pinça no desktop e no celular, e os
+botões **VR** (óculos com WebXR, como o Quest) e **AR** (celulares Android)
+quando o aparelho tem suporte. A câmera e a sessão XR são portadas do player
+do WebGaussian: no XR a cena vira uma maquete de ~1,4 m na frente do usuário,
+com analógico para andar e snap turn. O link leva o enquadramento do vídeo
+(centro, "up", primeiro frame, lente e faixa de altura filmada), então abre
+igual ao **Recentrar** do app.
+
+No XR, diferente do WebGaussian (um objeto isolado), a cena orbital tem fundo
+e splats grandes e soltos perto das câmeras. Na maquete eles envolviam a
+cabeça: no Quest 3 isso derrubava o fps e lavava as cores com uma névoa
+branca. Por isso, só durante a sessão, o visualizador:
+
+- descarta no shader (`setWorkBufferModifier`) os splats fora de uma esfera de
+  0,8 × o raio da órbita das câmeras. No projeto de teste isso tira 24% dos
+  splats, mas são os maiores (14× a escala média dos que ficam);
+- gira a maquete para o lado filmado (o primeiro frame) ficar de frente;
+- liga a ordenação radial do PlayCanvas (menos artefatos ao virar a cabeça) e
+  a foveação fixa (0,5).
+
+Para comparar no óculos, a URL do link aceita `?crop=` (0 desliga o recorte),
+`?foveation=`, `?xrScale=` (resolução do XR) e `?sort=linear`. `?xrPreview=1`
+monta a mesma maquete no navegador comum, com a câmera na altura da cabeça.
+
+O visualizador usa WebGL 2, como o WebGaussian. `?gpu=webgpu` troca para
+WebGPU, onde o PlayCanvas ordena os splats na GPU (`?gpuSort=0` volta a
+ordenar na CPU), e um chip mostra o backend em uso. No VR isso depende da API
+`XRGPUBinding` (WebXR/WebGPU Binding), ainda experimental: no Quest Browser
+146 ou mais novo, ligue "WebXR experimental features" em `chrome://flags`.
+Sem ela, num aparelho com VR/AR, o visualizador fica no WebGL 2 para os botões
+não sumirem, e o chip avisa. Cuidado: num Chrome sem o binding,
+`requestAdapter({ xrCompatible: true })` nunca responde e trava o WebGPU da
+aba, e o PlayCanvas pede isso sozinho quando existe `navigator.xr`. Por isso o
+visualizador só passa `xrCompatible` ao WebGPU quando o binding existe.
+
+- **Privado:** o id tem ~71 bits aleatórios e a página não é indexada nem
+  manda Referer. Quem tem o link pode ver (e baixar) o splat.
+- **Validade:** `SHARE_TTL_HOURS` no `wrangler.jsonc` (padrão 6 h). O Worker
+  trata o vencido como inexistente na hora, um cron a cada 30 min apaga do
+  R2, e quem criou pode **Revogar** antes (o app guarda o token de remoção no
+  aparelho).
+- **Limites:** `SHARE_MAX_MB` (95 MiB; o Cloudflare recusa corpos acima de
+  100 MB), só arquivos que começam como `.sog` (ZIP) ou `.ply`, e 10 envios
+  por minuto por IP (`ratelimits`).
+- **Desktop:** envia para a versão publicada; o Worker libera CORS para a
+  webview do Tauri. `VITE_SHARE_ORIGIN` troca o servidor (desktop e
+  `web:dev`).
+
+Configuração, uma vez só (o deploy falha sem o bucket):
+
+```bash
+pnpm exec wrangler r2 bucket create gausify-orbit-shares
+pnpm exec wrangler r2 bucket lifecycle add gausify-orbit-shares expira-links s/ --expire-days 1
+```
+
+A regra de ciclo de vida é só a rede de segurança caso o cron pare (o R2 não
+expira em menos de um dia). O token do CI (`CLOUDFLARE_API_TOKEN`, modelo
+"Edit Cloudflare Workers") já inclui a permissão de R2.
+
+Para testar localmente: `pnpm web:build`, `pnpm exec wrangler dev` (R2 e
+limite de taxa simulados em `.wrangler/`) e abrir `http://localhost:8787`.
+Para testar a interface do desktop contra ele: `VITE_SHARE_ORIGIN=http://localhost:8787 pnpm dev:mock`
+e `wrangler dev --var SHARE_ORIGINS:http://localhost:1430`.
 
 ## Testes
 

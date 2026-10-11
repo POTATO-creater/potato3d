@@ -3,17 +3,43 @@
   "name": "gausify-orbit",
   "compatibility_date": "2026-10-10",
 
-  // A versão web é 100% estática: não há código de Worker, só os assets do
-  // `pnpm web:build` (dist-web/). Frames, recorte, poses, treino e exportação
-  // rodam no navegador, com WebGPU.
-  //
-  // `single-page-application` responde qualquer caminho desconhecido com o
-  // `index.html`, sem acordar Worker nenhum (assets estáticos não são cobrados).
-  // Limite do Workers: 25 MiB por arquivo (ver web/ort-wasm-plugin.ts).
+  // A versão web roda no navegador: frames, recorte, poses, treino e
+  // exportação usam WebGPU. O Worker (worker/index.ts) só cuida dos links de
+  // compartilhamento (/api/share, /s/<id>), guardados no R2.
+  "main": "worker/index.ts",
+
+  // Os assets do `pnpm web:build` (dist-web/) são servidos sem acordar o
+  // Worker (assets estáticos não são cobrados), exceto nos caminhos de
+  // `run_worker_first`. `single-page-application` responde qualquer outro
+  // caminho desconhecido com o `index.html`, inclusive /assets/* que sumiram
+  // (ver web/src/sw.template.js). Limite do Workers: 25 MiB por arquivo (ver
+  // web/ort-wasm-plugin.ts).
   "assets": {
     "directory": "./dist-web",
-    "not_found_handling": "single-page-application"
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/s/*"]
   },
+
+  // Criado uma vez com `wrangler r2 bucket create gausify-orbit-shares` (ver
+  // README). Se o wrangler oferecer para adicionar o binding, recuse: ele já
+  // está aqui como SHARES.
+  "r2_buckets": [{ "binding": "SHARES", "bucket_name": "gausify-orbit-shares" }],
+
+  "vars": {
+    // Validade de cada link de compartilhamento.
+    "SHARE_TTL_HOURS": "6",
+    // Maior arquivo aceito; o Cloudflare recusa corpos acima de 100 MB.
+    "SHARE_MAX_MB": "95",
+    // Origens extras com CORS (o app desktop já está liberado no código).
+    "SHARE_ORIGINS": ""
+  },
+
+  // Uploads por IP: 10 por minuto. `namespace_id` só precisa ser único na conta.
+  "ratelimits": [{ "name": "SHARE_LIMITER", "namespace_id": "1001", "simple": { "limit": 10, "period": 60 } }],
+
+  // Apaga os links vencidos (o Worker já os trata como inexistentes na hora).
+  "triggers": { "crons": ["*/30 * * * *"] },
 
   // Sem `routes`, o endereço é `gausify-orbit.<subdomínio>.workers.dev`. Para um
   // domínio próprio: "routes": [{ "pattern": "exemplo.com", "custom_domain": true }]

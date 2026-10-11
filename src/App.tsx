@@ -343,6 +343,7 @@ function AppView() {
                 setPreviewExport({ version: Date.now() });
                 setTab("viewer");
               }}
+              frame={frame}
               previewing={!!previewExport}
               onPreview={(on) => {
                 setPreviewExport(on ? { version: Date.now() } : null);

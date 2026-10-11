@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <!-- Página dos links compartilhados (/s/<id>, servida pelo worker/index.ts). -->
+    <title>Gausify Orbit</title>
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="referrer" content="no-referrer" />
+    <meta name="theme-color" content="#0d0e10" />
+    <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48" />
+    <link rel="icon" href="/icon-192.png" type="image/png" sizes="192x192" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  </head>
+
+  <body>
+    <main id="viewer">
+      <canvas id="canvas" tabindex="0"></canvas>
+
+      <header class="hud">
+        <a class="brand" href="/" target="_blank" rel="noreferrer"><span class="dot"></span>Gausify Orbit</a>
+        <span class="chips">
+          <span class="chip" id="backend" hidden></span>
+          <span class="chip" id="expires" hidden></span>
+        </span>
+      </header>
+
+      <div class="status" id="status">
+        <div class="bar"><div class="bar-fill" id="progress"></div></div>
+        <span id="status-text"></span>
+      </div>
+
+      <section class="gone" id="gone" hidden>
+        <h1 id="gone-title"></h1>
+        <p id="gone-body"></p>
+        <a class="btn primary" href="/" id="make-yours"></a>
+      </section>
+
+      <footer class="tools" id="tools" hidden>
+        <button class="btn" id="spin"></button>
+        <button class="btn" id="recenter"></button>
+        <button class="btn" id="fullscreen" hidden></button>
+        <button class="btn primary" id="vr" hidden></button>
+        <button class="btn primary" id="ar" hidden></button>
+      </footer>
+      <p class="hint" id="hint" hidden></p>
+    </main>
+    <script type="module" src="/src/share/main.ts"></script>
+  </body>
+</html>

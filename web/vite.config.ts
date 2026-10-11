@@ -17,6 +17,14 @@ export default defineConfig({
     outDir: "../dist-web",
     emptyOutDir: true,
     target: "es2022",
+    // Duas páginas: o app e o visualizador dos links compartilhados, que o
+    // Worker serve em /s/<id> (worker/index.ts).
+    rolldownOptions: {
+      input: {
+        main: `${import.meta.dirname}/index.html`,
+        share: `${import.meta.dirname}/share.html`,
+      },
+    },
   },
   server: {
     port: 1440,

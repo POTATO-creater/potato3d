@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { SparkRenderer, SplatFileType, SplatMesh } from "@sparkjsdev/spark";
 import { fileUrl, type SceneFrame } from "../lib/api";
+import { polarRange } from "../lib/share";
 import { useI18n } from "../i18n";
 
 interface Props {
@@ -30,23 +31,6 @@ interface Ctx {
 const SETTLE_FRAMES = 45;
 
 const ACCENT = 0xff9a4d;
-const POLAR_MARGIN = THREE.MathUtils.degToRad(20);
-
-/** Faixa de ângulo polar (a partir de +Y, já com o "up" alinhado) coberta
- *  pelas câmeras do vídeo, com folga. */
-function polarRange(frame: SceneFrame): [number, number] {
-  const up = new THREE.Vector3(...frame.up).normalize();
-  const center = new THREE.Vector3(...frame.center);
-  let lo = Math.PI;
-  let hi = 0;
-  for (const c of frame.cameras) {
-    const dir = new THREE.Vector3(...c).sub(center).normalize();
-    const polar = Math.acos(THREE.MathUtils.clamp(dir.dot(up), -1, 1));
-    lo = Math.min(lo, polar);
-    hi = Math.max(hi, polar);
-  }
-  return [Math.max(0, lo - POLAR_MARGIN), Math.min(Math.PI, hi + POLAR_MARGIN)];
-}
 
 export function Viewer({ splat, frame, placeholder }: Props) {
   const { t, locale } = useI18n();
