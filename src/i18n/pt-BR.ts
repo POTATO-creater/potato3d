@@ -276,6 +276,9 @@ export const ptBR = {
     showingCut: "Mostrando recorte",
     showCut: "Mostrar recorte",
     sharpness: "nitidez",
+    prev: "Anterior",
+    next: "Próximo",
+    close: "Fechar",
     noLog: "Nenhum log ainda.",
   },
 
@@ -339,6 +342,7 @@ export const ptBR = {
     loading: "Carregando splat…",
     loadError: (e: string) => `Erro ao carregar: ${e}`,
     cameras: "Câmeras",
+    camerasTitle: "Clique num ponto para ver o frame daquela câmera",
     lockAngle: "Travar ângulo",
     lockAngleTitle: "Limita a altura da câmera às regiões que o vídeo filmou",
     spin: "Girar",

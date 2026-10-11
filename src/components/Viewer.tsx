@@ -12,6 +12,8 @@ interface Props {
   splat: { path: string; iter: number | null; version: number; label?: string; url?: string } | null;
   frame: SceneFrame | null;
   placeholder?: React.ReactNode;
+  /** Clique num ponto da trajetória: índice da câmera em `frame.cameras`. */
+  onPickCamera?: (camera: number) => void;
 }
 
 interface Ctx {
@@ -22,6 +24,8 @@ interface Ctx {
   root: THREE.Group;
   mesh: SplatMesh | null;
   path: THREE.Object3D | null;
+  /** Destaque do ponto sob o cursor (filho de `path`). */
+  hover: THREE.Points | null;
   /** Pede alguns quadros de renderização (a cena só redesenha quando muda). */
   invalidate: () => void;
 }
@@ -31,8 +35,10 @@ interface Ctx {
 const SETTLE_FRAMES = 45;
 
 const ACCENT = 0xff9a4d;
+/** Raio, em px, para acertar um ponto de câmera com o mouse. */
+const PICK_RADIUS = 10;
 
-export function Viewer({ splat, frame, placeholder }: Props) {
+export function Viewer({ splat, frame, placeholder, onPickCamera }: Props) {
   const { t, locale } = useI18n();
   const tv = t.viewer;
   const host = useRef<HTMLDivElement>(null);
@@ -43,6 +49,11 @@ export function Viewer({ splat, frame, placeholder }: Props) {
   const [spin, setSpin] = useState(false);
   const [clampView, setClampView] = useState(true);
   const [hasMesh, setHasMesh] = useState(false);
+  // Os ouvintes do canvas nascem uma vez; leem o estado atual por aqui.
+  const frameRef = useRef(frame);
+  frameRef.current = frame;
+  const pickRef = useRef(onPickCamera);
+  pickRef.current = onPickCamera;
 
   // Cena, renderer e loop: criados uma vez.
   useEffect(() => {
@@ -91,8 +102,69 @@ export function Viewer({ splat, frame, placeholder }: Props) {
       renderer.render(scene, camera);
     });
 
-    ctx.current = { renderer, camera, controls, root, mesh: null, path: null, invalidate };
+    ctx.current = { renderer, camera, controls, root, mesh: null, path: null, hover: null, invalidate };
+
+    // Ponto de câmera mais próximo do cursor, em pixels da tela.
+    const v = new THREE.Vector3();
+    const pick = (e: PointerEvent) => {
+      const c = ctx.current;
+      const f = frameRef.current;
+      if (!c?.path?.visible || !f || !pickRef.current) return -1;
+      const rect = renderer.domElement.getBoundingClientRect();
+      const px = e.clientX - rect.left;
+      const py = e.clientY - rect.top;
+      root.updateMatrixWorld(true);
+      let best = -1;
+      let bestD = PICK_RADIUS;
+      f.cameras.forEach((p, i) => {
+        v.set(...p).applyMatrix4(root.matrixWorld).project(camera);
+        if (v.z < -1 || v.z > 1) return;
+        const d = Math.hypot(((v.x + 1) / 2) * rect.width - px, ((1 - v.y) / 2) * rect.height - py);
+        if (d < bestD) {
+          bestD = d;
+          best = i;
+        }
+      });
+      return best;
+    };
+    let hovered = -1;
+    const setHover = (i: number) => {
+      const c = ctx.current;
+      // Ao trocar de trajetória o destaque novo nasce oculto: refaz mesmo
+      // que o índice seja o mesmo.
+      if (i === hovered && (i < 0 || c?.hover?.visible)) return;
+      hovered = i;
+      const f = frameRef.current;
+      renderer.domElement.style.cursor = i >= 0 ? "pointer" : "";
+      if (!c?.hover) return;
+      c.hover.visible = i >= 0 && !!f;
+      if (i >= 0 && f) c.hover.position.set(...f.cameras[i]);
+      invalidate();
+    };
+    // Clique = soltar quase no mesmo lugar; arrastar continua girando a órbita.
+    let down: { x: number; y: number } | null = null;
+    const onDown = (e: PointerEvent) => {
+      down = e.button === 0 ? { x: e.clientX, y: e.clientY } : null;
+    };
+    const onUp = (e: PointerEvent) => {
+      if (!down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 4) return;
+      down = null;
+      const i = pick(e);
+      if (i >= 0) pickRef.current?.(i);
+    };
+    const onMove = (e: PointerEvent) => setHover(e.buttons ? -1 : pick(e));
+    const onLeave = () => setHover(-1);
+    const canvas = renderer.domElement;
+    canvas.addEventListener("pointerdown", onDown);
+    canvas.addEventListener("pointerup", onUp);
+    canvas.addEventListener("pointermove", onMove);
+    canvas.addEventListener("pointerleave", onLeave);
+
     return () => {
+      canvas.removeEventListener("pointerdown", onDown);
+      canvas.removeEventListener("pointerup", onUp);
+      canvas.removeEventListener("pointermove", onMove);
+      canvas.removeEventListener("pointerleave", onLeave);
       ro.disconnect();
       renderer.setAnimationLoop(null);
       controls.dispose();
@@ -110,6 +182,7 @@ export function Viewer({ splat, frame, placeholder }: Props) {
     if (c.path) {
       c.root.remove(c.path);
       c.path = null;
+      c.hover = null;
     }
     if (!frame) {
       c.root.position.set(0, 0, 0);
@@ -139,7 +212,14 @@ export function Viewer({ splat, frame, placeholder }: Props) {
         new THREE.BufferGeometry().setFromPoints(pts),
         new THREE.PointsMaterial({ color: ACCENT, size: 4, sizeAttenuation: false }),
       );
-      group.add(line, dots);
+      const hover = new THREE.Points(
+        new THREE.BufferGeometry().setFromPoints([new THREE.Vector3()]),
+        new THREE.PointsMaterial({ color: 0xffffff, size: 9, sizeAttenuation: false, depthTest: false }),
+      );
+      hover.visible = false;
+      hover.renderOrder = 1;
+      group.add(line, dots, hover);
+      c.hover = hover;
     }
     group.visible = showCams;
     c.root.add(group);
@@ -266,7 +346,12 @@ export function Viewer({ splat, frame, placeholder }: Props) {
         {loadError && <span className="chip chip-error">{tv.loadError(loadError)}</span>}
       </div>
       <div className="viewer-tools">
-        <button className={`tool ${showCams ? "on" : ""}`} onClick={() => setShowCams((v) => !v)} disabled={!frame}>
+        <button
+          className={`tool ${showCams ? "on" : ""}`}
+          onClick={() => setShowCams((v) => !v)}
+          disabled={!frame}
+          title={onPickCamera ? tv.camerasTitle : undefined}
+        >
           {tv.cameras}
         </button>
         <button

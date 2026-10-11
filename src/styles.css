@@ -1351,9 +1351,54 @@ button:disabled {
   font-size: 12px;
 }
 .lightbox img {
-  max-width: 92%;
+  max-width: calc(100% - 140px);
   max-height: 85%;
   border-radius: 6px;
+}
+.lightbox-nav,
+.lightbox-close {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  background: rgba(20, 22, 25, 0.75);
+  color: var(--text);
+  cursor: pointer;
+}
+.lightbox-nav {
+  top: 50%;
+  width: 46px;
+  height: 46px;
+  margin-top: -23px;
+  font-size: 30px;
+  line-height: 1;
+  padding-bottom: 4px;
+}
+.lightbox-nav.prev {
+  left: 20px;
+}
+.lightbox-nav.next {
+  right: 20px;
+}
+.lightbox-close {
+  top: 16px;
+  right: 20px;
+  width: 36px;
+  height: 36px;
+  font-size: 22px;
+  line-height: 1;
+  padding-bottom: 2px;
+}
+.lightbox-nav:hover:not(:disabled),
+.lightbox-close:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.lightbox-nav:disabled {
+  opacity: 0.25;
+  cursor: default;
 }
 
 .log {

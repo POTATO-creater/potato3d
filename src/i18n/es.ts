@@ -267,6 +267,9 @@ export const es: Messages = {
     showingCut: "Mostrando recorte",
     showCut: "Mostrar recorte",
     sharpness: "nitidez",
+    prev: "Anterior",
+    next: "Siguiente",
+    close: "Cerrar",
     noLog: "Aún no hay registro.",
   },
 
@@ -328,6 +331,7 @@ export const es: Messages = {
     loading: "Cargando splat…",
     loadError: (e) => `Error al cargar: ${e}`,
     cameras: "Cámaras",
+    camerasTitle: "Haz clic en un punto para ver el frame de esa cámara",
     lockAngle: "Fijar ángulo",
     lockAngleTitle: "Limita la altura de la cámara a las regiones que filmó el video",
     spin: "Girar",
