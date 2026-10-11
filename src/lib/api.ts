@@ -65,6 +65,8 @@ export type MaskMethod = "auto" | "people" | "general" | "rmbg" | "sam2" | "chro
 export interface SubjectPrompt {
   /** Instante do vídeo em que foi marcado (s); null = primeiro frame. */
   time: number | null;
+  /** Com imagens no lugar do vídeo: o nome da imagem marcada. */
+  image?: string | null;
   /** Caixa [x0, y0, x1, y1]. */
   box: [number, number, number, number] | null;
   /** label 1 = sujeito, 0 = fundo. */

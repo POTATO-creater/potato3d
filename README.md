@@ -260,9 +260,11 @@ Diferenças em relação ao desktop:
   RMBG (176 MB, licença não comercial) é baixado pelo mesmo aviso de primeiro
   uso do desktop, com SHA-256 conferido. O SAM 2.1 (165 MB, Apache-2.0) é
   baixado no primeiro recorte. Com ele, o player ganha o botão ⌖ para marcar o
-  sujeito: arrastar faz uma caixa, clicar marca um ponto do sujeito e
-  Alt+clique (ou botão direito) marca um ponto de fundo. Sem marcação, vale o
-  objeto no centro do primeiro frame. O painel de recorte mostra uma **prévia** no quadro
+  sujeito (no vídeo ou nas imagens soltas): arrastar faz uma caixa, clicar
+  marca um ponto do sujeito, Alt+clique (ou botão direito) marca um ponto de
+  fundo e Shift+clique apaga um ponto ou a caixa. No vídeo só se marca dentro
+  do trecho; se o trecho mudar e a marcação ficar de fora, o painel avisa e
+  ela é ignorada. Sem marcação, vale o objeto no centro do primeiro frame. O painel de recorte mostra uma **prévia** no quadro
   marcado (ou no início do trecho), com o fundo removido em xadrez. Ela vale
   para RMBG, SAM 2.1 e cor sólida e acompanha a marcação: o encoder roda uma
   vez por quadro e cada ponto novo roda só o decoder. A prévia pode ser

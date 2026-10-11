@@ -1616,3 +1616,19 @@ body.resizing canvas {
 .help.error {
   color: var(--bad);
 }
+.prompt-layer.erasing {
+  cursor: not-allowed;
+}
+.prompt-notice {
+  position: absolute;
+  left: 50%;
+  bottom: 8px;
+  transform: translateX(-50%);
+  padding: 3px 8px;
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.72);
+  color: var(--warn);
+  font-size: 11px;
+  white-space: nowrap;
+  pointer-events: none;
+}

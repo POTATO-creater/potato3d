@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import type { SubjectPrompt } from "../lib/api";
+import { withMarks } from "../lib/prompt";
+import { PromptLayer } from "./PromptLayer";
 import { useI18n } from "../i18n";
 
 interface Trim {
@@ -64,95 +66,6 @@ function Svg({ children }: { children: React.ReactNode }) {
 }
 
 /** Player compacto com linha do tempo que mostra e edita o trecho usado. */
-/** Sobreposição da marcação, no retângulo que o vídeo ocupa (object-fit: contain). */
-function PromptLayer({
-  prompt,
-  aspect,
-  editing,
-  onAdd,
-}: {
-  prompt: SubjectPrompt | null;
-  aspect: number;
-  editing: boolean;
-  onAdd: (p: { box: [number, number, number, number] } | { point: { x: number; y: number; label: 0 | 1 } }) => void;
-}) {
-  const start = useRef<{ x: number; y: number } | null>(null);
-  const [drag, setDrag] = useState<[number, number, number, number] | null>(null);
-  const stage = 16 / 9;
-  const style =
-    aspect > stage
-      ? { left: 0, width: "100%", top: `${((1 - stage / aspect) / 2) * 100}%`, height: `${(stage / aspect) * 100}%` }
-      : { top: 0, height: "100%", left: `${((1 - aspect / stage) / 2) * 100}%`, width: `${(aspect / stage) * 100}%` };
-  const at = (e: React.PointerEvent) => {
-    const r = e.currentTarget.getBoundingClientRect();
-    return { x: clamp((e.clientX - r.left) / r.width, 0, 1), y: clamp((e.clientY - r.top) / r.height, 0, 1) };
-  };
-  const rect = (a: { x: number; y: number }, b: { x: number; y: number }): [number, number, number, number] => [
-    Math.min(a.x, b.x),
-    Math.min(a.y, b.y),
-    Math.max(a.x, b.x),
-    Math.max(a.y, b.y),
-  ];
-  const box = drag ?? prompt?.box;
-  return (
-    <svg
-      className={`prompt-layer ${editing ? "editing" : ""}`}
-      style={style}
-      viewBox="0 0 1 1"
-      preserveAspectRatio="none"
-      onClick={(e) => editing && e.stopPropagation()}
-      onContextMenu={(e) => editing && e.preventDefault()}
-      onPointerDown={(e) => {
-        if (!editing) return;
-        e.stopPropagation();
-        e.currentTarget.setPointerCapture(e.pointerId);
-        start.current = at(e);
-      }}
-      onPointerMove={(e) => {
-        const s = start.current;
-        if (!s) return;
-        const p = at(e);
-        if (drag || Math.hypot(p.x - s.x, p.y - s.y) > 0.02) setDrag(rect(s, p));
-      }}
-      onPointerUp={(e) => {
-        const s = start.current;
-        start.current = null;
-        if (!s) return;
-        const p = at(e);
-        if (drag) {
-          setDrag(null);
-          const b = rect(s, p);
-          if (b[2] - b[0] > 0.01 && b[3] - b[1] > 0.01) onAdd({ box: b });
-        } else {
-          onAdd({ point: { ...p, label: e.altKey || e.button === 2 ? 0 : 1 } });
-        }
-      }}
-    >
-      {box && (
-        <rect
-          className="prompt-box"
-          x={box[0]}
-          y={box[1]}
-          width={box[2] - box[0]}
-          height={box[3] - box[1]}
-          vectorEffect="non-scaling-stroke"
-        />
-      )}
-      {prompt?.points.map((p, i) => (
-        <ellipse
-          key={i}
-          className={`prompt-point ${p.label ? "pos" : "neg"}`}
-          cx={p.x}
-          cy={p.y}
-          rx={0.025}
-          ry={0.025 * aspect}
-          vectorEffect="non-scaling-stroke"
-        />
-      ))}
-    </svg>
-  );
-}
-
 export function VideoPlayer({ src, duration: probed, fps, trim, onTrim, locked, videoRef, prompt, onPrompt }: Props) {
   const { t } = useI18n();
   const tp = t.player;
@@ -164,11 +77,12 @@ export function VideoPlayer({ src, duration: probed, fps, trim, onTrim, locked, 
   const [loopTrim, setLoopTrim] = useState(true);
   const [marking, setMarking] = useState(false);
   const [aspect, setAspect] = useState(16 / 9);
-  const editing = marking && !!onPrompt;
+  const end = trim.end ?? duration;
+  // Só se marca dentro do trecho: fora dele não há frame para a marcação.
+  const inTrim = time >= trim.start - 0.02 && time <= end + 0.02;
+  const editing = marking && !!onPrompt && inTrim;
   // A marcação vale para um frame: aparece nele (e enquanto se marca).
   const promptHere = !!prompt && Math.abs(time - (prompt.time ?? 0)) < 1.5 / (fps || 30);
-
-  const end = trim.end ?? duration;
   const pct = (t: number) => `${(clamp(t / (duration || 1), 0, 1) * 100).toFixed(3)}%`;
 
   useEffect(() => setDuration(probed), [probed, src]);
@@ -269,17 +183,18 @@ export function VideoPlayer({ src, duration: probed, fps, trim, onTrim, locked, 
         />
         {(editing || (promptHere && !playing)) && (
           <PromptLayer
-            prompt={editing && !promptHere ? null : (prompt ?? null)}
+            marks={editing && !promptHere ? null : (prompt ?? null)}
             aspect={aspect}
             editing={editing}
-            onAdd={(a) => {
+            onChange={(m) => {
               const t = videoRef.current?.currentTime ?? time;
               // Marcação em outro frame recomeça do zero.
               const base: SubjectPrompt = promptHere && prompt ? prompt : { time: t, box: null, points: [] };
-              onPrompt!("box" in a ? { ...base, box: a.box } : { ...base, points: [...base.points, a.point] });
+              onPrompt!(withMarks(base, m));
             }}
           />
         )}
+        {marking && onPrompt && !inTrim && <span className="prompt-notice">{tp.markOutside}</span>}
         {!playing && !editing && (
           <span className="player-overlay" aria-hidden>
             <Svg>{Icon.play}</Svg>
@@ -317,12 +232,16 @@ export function VideoPlayer({ src, duration: probed, fps, trim, onTrim, locked, 
         </span>
         {onPrompt && (
           <button
-            className={`pbtn ${editing ? "on" : ""}`}
+            className={`pbtn ${marking ? "on" : ""}`}
             onClick={() => {
               videoRef.current?.pause();
-              setMarking((m) => !m);
+              // Fora do trecho, leva ao início dele para marcar.
+              if (!inTrim) {
+                seek(trim.start);
+                setMarking(true);
+              } else setMarking((m) => !m);
             }}
-            title={editing ? tp.markDone : `${tp.mark} · ${tp.markHint}`}
+            title={marking ? tp.markDone : `${tp.mark} · ${tp.markHint}`}
           >
             <Svg>{Icon.target}</Svg>
           </button>

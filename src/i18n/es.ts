@@ -185,7 +185,8 @@ export const es: Messages = {
       box: "caja",
       points: (n: number) => (n === 1 ? "1 punto" : `${n} puntos`),
       clear: "Borrar",
-      howTo: "En el video, toca el objetivo ⌖ y arrastra una caja alrededor del sujeto o haz clic en él. Alt+clic marca el fondo.",
+      howTo: "En el video (o en las imágenes), toca el objetivo ⌖ y arrastra una caja alrededor del sujeto o haz clic en él. Alt+clic marca el fondo; Shift+clic borra un punto o la caja.",
+      outside: "La marca quedó fuera del tramo y se ignorará (se usa el objeto del centro). Marca de nuevo dentro de él.",
     },
     preview: {
       title: "Vista previa",
@@ -352,7 +353,8 @@ export const es: Messages = {
     loop: "Repetir solo el tramo seleccionado",
     mark: "Marcar el sujeto para SAM 2.1",
     markDone: "Terminar de marcar",
-    markHint: "Arrastra una caja o haz clic en el sujeto · Alt+clic: fondo",
+    markHint: "Arrastra una caja o haz clic en el sujeto · Alt+clic: fondo · Shift+clic: borra",
+    markOutside: "Fuera del tramo: vuelve a entrar en él para marcar",
   },
 
   viewer: {

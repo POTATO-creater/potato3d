@@ -5,7 +5,7 @@ import type { MaskOptions, MaskStats, Msg, SubjectPrompt } from "../../../src/li
 import { applyDespill, backgroundColor, borderKey, chromaMask, despillFor, type RGB } from "./chroma";
 import { encodePng } from "./png";
 import { SAM2_LICENSE, Sam2Tracker } from "./sam2";
-import { logitsToMask, promptFrame, promptPixels } from "./sam2-math";
+import { logitsToMask, promptFrame, promptPixels, type FrameOrigin } from "./sam2-math";
 import { MODELS, Segmenter } from "./segment";
 
 type Progress = (frac: number, msg: Msg) => void;
@@ -46,12 +46,12 @@ export async function makeMasks(
   s: MaskOptions,
   log: (s: string) => void,
   progress: Progress,
-  /** Instante de cada frame no vídeo (por nome), para achar o frame marcado. */
-  times?: Map<string, number>,
+  /** Instante ou imagem de origem de cada frame (por nome), para achar o frame marcado. */
+  origin?: FrameOrigin,
 ): Promise<MaskStats> {
   const names = await listImages(images);
   if (!names.length) throw new Error("não há frames para recortar");
-  if (s.method === "sam2") return sam2Masks(images, out, names, s.prompt ?? null, log, progress, times);
+  if (s.method === "sam2") return sam2Masks(images, out, names, s.prompt ?? null, log, progress, origin);
   let seg: Segmenter | null = null;
   if (s.method !== "chroma") {
     const spec = MODELS.rmbg;
@@ -105,12 +105,17 @@ async function sam2Masks(
   prompt: SubjectPrompt | null,
   log: (s: string) => void,
   progress: Progress,
-  times?: Map<string, number>,
+  origin?: FrameOrigin,
 ): Promise<MaskStats> {
   const tracker = await Sam2Tracker.create(names.length, (d, n) =>
     progress(0, { key: "masks.downloading", args: { model: "SAM 2.1", done: Math.round(d / 1e6), total: Math.round(n / 1e6) } }),
   );
-  const start = promptFrame(names, prompt, times);
+  let start = promptFrame(names, prompt, origin);
+  if (start < 0) {
+    log(`SAM 2.1: a imagem marcada (${prompt?.image}) não entrou nos frames; vale o objeto do centro`);
+    prompt = null;
+    start = 0;
+  }
   log(`${tracker.backend} (${SAM2_LICENSE})`);
   log(
     prompt && (prompt.box || prompt.points.length)

@@ -27,6 +27,7 @@ import { ExportPanel } from "./components/ExportPanel";
 import { LanguageSelect } from "./components/LanguageSelect";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { useSidebarWidth } from "./components/SidebarResizer";
+import { promptInTrim } from "./lib/prompt";
 import { basename } from "./lib/platform";
 import { I18nProvider, useI18n } from "./i18n";
 import "./styles.css";
@@ -303,7 +304,8 @@ function AppView() {
           projectDir,
           fromStage,
           frames: { ...settings.frames, trimStart: trim.start, trimEnd: trim.end },
-          masks: maskOpts,
+          // Marcação fora do trecho (o trecho mudou depois) não vale mais.
+          masks: promptInTrim(maskOpts.prompt, trim) ? maskOpts : { ...maskOpts, prompt: null },
           poses: settings.poses,
           train: settings.train,
         },

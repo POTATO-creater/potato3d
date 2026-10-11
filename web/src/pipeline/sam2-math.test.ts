@@ -48,13 +48,17 @@ test("máscara: sigmoide dos logits ampliados para o frame", () => {
   assert.equal(m[16 * 64 + 32], 255);
 });
 
-test("prompt: frame mais próximo do instante e coordenadas em pixels", () => {
+test("prompt: frame marcado (instante ou imagem) e coordenadas em pixels", () => {
   const names = ["a.jpg", "b.jpg", "c.jpg"];
-  const times = new Map([["a.jpg", 0], ["b.jpg", 1], ["c.jpg", 2]]);
+  const times = new Map([["a.jpg", { time: 0 }], ["b.jpg", { time: 1 }], ["c.jpg", { time: 2 }]]);
   const pr = { time: 1.4, box: [0.25, 0.5, 0.75, 1] as [number, number, number, number], points: [{ x: 0.5, y: 0.5, label: 0 as const }] };
   assert.equal(promptFrame(names, pr, times), 1);
   assert.equal(promptFrame(names, { ...pr, time: null }, times), 0);
   assert.deepEqual(promptPixels(pr, 200, 100), { box: [50, 50, 150, 100], points: [{ x: 100, y: 50, label: 0 }] });
+  // imagens: pelo nome da imagem de origem; -1 se ela não virou frame
+  const origin = new Map([["a.jpg", { source: "x.png" }], ["b.jpg", { source: "y.png" }]]);
+  assert.equal(promptFrame(names, { ...pr, time: null, image: "y.png" }, origin), 1);
+  assert.equal(promptFrame(names, { ...pr, time: null, image: "z.png" }, origin), -1);
   // sem marcação: o centro
   assert.deepEqual(promptPixels(null, 200, 100), { points: [{ x: 100, y: 50, label: 1 }] });
 });

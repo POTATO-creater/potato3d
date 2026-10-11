@@ -121,14 +121,21 @@ export function logitsToMask(logits: Float32Array, W: number, H: number): Uint8A
   return out;
 }
 
-/** Frame do prompt: o mais próximo do instante marcado (o primeiro, sem instante). */
-export function promptFrame(names: string[], prompt: SubjectPrompt | null, times?: Map<string, number>): number {
-  if (prompt?.time == null || !times) return 0;
+/** De onde veio cada frame (por nome): instante no vídeo ou imagem de origem. */
+export type FrameOrigin = Map<string, { time?: number | null; source?: string }>;
+
+/** Frame do prompt: o da imagem marcada, ou o mais próximo do instante
+ *  marcado (o primeiro, sem marcação); -1 se a imagem marcada não virou frame. */
+export function promptFrame(names: string[], prompt: SubjectPrompt | null, origin?: FrameOrigin): number {
+  if (!prompt || !origin) return 0;
+  if (prompt.image) return names.findIndex((n) => origin.get(n)?.source === prompt.image);
+  if (prompt.time == null) return 0;
+  const dist = (n: string) => {
+    const t = origin.get(n)?.time;
+    return t == null ? Infinity : Math.abs(t - prompt.time!);
+  };
   let best = 0;
-  names.forEach((n, i) => {
-    const t = times.get(n), b = times.get(names[best]);
-    if (t != null && (b == null || Math.abs(t - prompt.time!) < Math.abs(b - prompt.time!))) best = i;
-  });
+  names.forEach((n, i) => dist(n) < dist(names[best]) && (best = i));
   return best;
 }
 

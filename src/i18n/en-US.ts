@@ -185,7 +185,8 @@ export const enUS: Messages = {
       box: "box",
       points: (n: number) => (n === 1 ? "1 point" : `${n} points`),
       clear: "Clear",
-      howTo: "On the video, tap the target ⌖ and drag a box around the subject or click it. Alt+click marks background.",
+      howTo: "On the video (or the images), tap the target ⌖ and drag a box around the subject or click it. Alt+click marks background; Shift+click erases a point or the box.",
+      outside: "The mark is outside the selected range and will be ignored (the center object is used). Mark again inside it.",
     },
     preview: {
       title: "Preview",
@@ -352,7 +353,8 @@ export const enUS: Messages = {
     loop: "Loop only the selected range",
     mark: "Mark the subject for SAM 2.1",
     markDone: "Finish marking",
-    markHint: "Drag a box or click the subject · Alt+click: background",
+    markHint: "Drag a box or click the subject · Alt+click: background · Shift+click: erase",
+    markOutside: "Outside the range: go back inside it to mark",
   },
 
   viewer: {

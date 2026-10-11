@@ -28,6 +28,7 @@ export function MasksPanel({
   onMasks,
   locked,
   preview,
+  promptOutside,
 }: {
   os: Os | undefined;
   masks: MaskOptions;
@@ -35,6 +36,8 @@ export function MasksPanel({
   locked: boolean;
   /** Quadro para a prévia do recorte (onde o host oferece prévia). */
   preview: PreviewSource | null;
+  /** A marcação ficou fora do trecho (vai ser ignorada). */
+  promptOutside: boolean;
 }) {
   const { t } = useI18n();
   const tm = t.masks;
@@ -71,7 +74,7 @@ export function MasksPanel({
               {masks.prompt ? (
                 <p className="help">
                   {tm.prompt.marked(
-                    fmtTime(masks.prompt.time ?? 0),
+                    masks.prompt.image ?? fmtTime(masks.prompt.time ?? 0),
                     [masks.prompt.box && tm.prompt.box, masks.prompt.points.length && tm.prompt.points(masks.prompt.points.length)]
                       .filter(Boolean)
                       .join(" + "),
@@ -83,11 +86,13 @@ export function MasksPanel({
               ) : (
                 <p className="help">{tm.prompt.none}</p>
               )}
+              {promptOutside && <p className="help error">{tm.prompt.outside}</p>}
               <p className="help muted">{tm.prompt.howTo}</p>
             </div>
           )}
 
-          <MaskPreview source={preview} masks={{ ...masks, method }} locked={locked} />
+          {/* Como no job: marcação fora do trecho não vale. */}
+          <MaskPreview source={preview} masks={{ ...masks, method, prompt: promptOutside ? null : masks.prompt }} locked={locked} />
 
           {method === "chroma" && (
             <fieldset className="chroma" disabled={locked}>

@@ -191,7 +191,8 @@ export const ptBR = {
       box: "caixa",
       points: (n: number) => (n === 1 ? "1 ponto" : `${n} pontos`),
       clear: "Limpar",
-      howTo: "No vídeo, toque no alvo ⌖ e arraste uma caixa em volta do sujeito ou clique nele. Alt+clique marca o fundo.",
+      howTo: "No vídeo (ou nas imagens), toque no alvo ⌖ e arraste uma caixa em volta do sujeito ou clique nele. Alt+clique marca o fundo; Shift+clique apaga um ponto ou a caixa.",
+      outside: "A marcação ficou fora do trecho e será ignorada (vale o objeto do centro). Marque de novo dentro dele.",
     },
     preview: {
       title: "Prévia",
@@ -363,7 +364,8 @@ export const ptBR = {
     loop: "Repetir só o trecho selecionado",
     mark: "Marcar o sujeito para o SAM 2.1",
     markDone: "Concluir a marcação",
-    markHint: "Arraste uma caixa ou clique no sujeito · Alt+clique: fundo",
+    markHint: "Arraste uma caixa ou clique no sujeito · Alt+clique: fundo · Shift+clique: apaga",
+    markOutside: "Fora do trecho: volte para dentro dele para marcar",
   },
 
   viewer: {
