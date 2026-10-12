@@ -727,6 +727,28 @@ body.resizing canvas {
     transform: translateY(-3px);
   }
 }
+.select-menu-search {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow: hidden;
+}
+.select-search {
+  flex: none;
+  height: 28px;
+}
+.select-list {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+}
+.select-empty {
+  padding: 6px 8px;
+  color: var(--muted);
+}
 .select-option {
   display: flex;
   align-items: center;
@@ -1890,15 +1912,26 @@ body.resizing canvas {
 .comfy-wf-head .muted {
   flex: none;
 }
-.comfy-wf-sub {
-  margin: 12px 0 0;
+.comfy-params {
+  margin-top: 12px;
   padding-top: 10px;
   border-top: 1px solid var(--border);
-  font-size: 11px;
-  font-weight: 650;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text-2);
+}
+.comfy-params-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.comfy-param {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+  margin-top: 6px;
+}
+.comfy-param-problem {
+  grid-column: 1 / -1;
+  margin: 0;
 }
 .topbar-settings {
   display: inline-flex;
@@ -1934,6 +1967,29 @@ body.resizing canvas {
 }
 .retouch-motion {
   margin-top: 10px;
+}
+.retouch-params {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+.retouch-param {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.retouch-param-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.retouch-param-text {
+  resize: vertical;
+  min-height: 72px;
+  font: inherit;
+  line-height: 1.4;
 }
 .retouch-actions,
 .retouch-row {

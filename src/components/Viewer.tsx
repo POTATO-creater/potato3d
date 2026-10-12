@@ -401,26 +401,28 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
         if (!c) return;
         if (c.retouchPath) {
           c.root.remove(c.retouchPath);
-          c.retouchPath.traverse((o) => (o as THREE.Mesh).geometry?.dispose());
+          c.retouchPath.traverse((o) => {
+            (o as THREE.Mesh).geometry?.dispose();
+            ((o as THREE.Mesh).material as THREE.Material | undefined)?.dispose();
+          });
           c.retouchPath = null;
         }
         if (poses?.length) {
           const pts = poses.map((p) => centerOf(p));
-          const line = new THREE.Line(
-            new THREE.BufferGeometry().setFromPoints(pts),
-            new THREE.LineBasicMaterial({ color: RETOUCH, depthTest: false, transparent: true, opacity: 0.9 }),
+          const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), pathMaterial(RETOUCH, 0.95));
+          // Marcas a cada ~8% do clipe: mostram o ritmo e o sentido da câmera.
+          const step = Math.max(1, Math.round(pts.length / 12));
+          const ticks = new THREE.Points(
+            new THREE.BufferGeometry().setFromPoints(pts.filter((_, i) => i % step === 0)),
+            pathMaterial(RETOUCH, 0.95, 5),
           );
-          const ends = new THREE.Points(
-            new THREE.BufferGeometry().setFromPoints([pts[0], pts[pts.length - 1]]),
-            new THREE.PointsMaterial({ color: RETOUCH, size: 8, sizeAttenuation: false, depthTest: false }),
-          );
-          const mid = new THREE.Points(
-            new THREE.BufferGeometry().setFromPoints([pts[pts.length >> 1]]),
-            new THREE.PointsMaterial({ color: 0xffffff, size: 10, sizeAttenuation: false, depthTest: false }),
-          );
+          const end = new THREE.Points(new THREE.BufferGeometry().setFromPoints([pts[pts.length - 1]]), pathMaterial(RETOUCH, 1, 9));
+          const mid = new THREE.Points(new THREE.BufferGeometry().setFromPoints([pts[pts.length >> 1]]), pathMaterial(0xffffff, 1, 10));
+          // O início por último, por cima do fim (nas voltas os dois coincidem).
+          const start = new THREE.Points(new THREE.BufferGeometry().setFromPoints([pts[0]]), pathMaterial(PATH_START, 1, 11));
           const g = new THREE.Group();
-          g.add(line, ends, mid);
-          g.renderOrder = 2;
+          g.add(line, ticks, end, mid, start);
+          g.children.forEach((o, i) => (o.renderOrder = 2 + i));
           c.root.add(g);
           c.retouchPath = g;
         }
@@ -626,6 +628,40 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
 }
 
 const RETOUCH = 0x7fd3ff;
+/** Início da trajetória de retoque. */
+const PATH_START = 0x6fe3a1;
+
+/** Material da trajetória de retoque: desenhada por cima do splat (que não
+ *  escreve profundidade), mas apagada no trecho que passa atrás do centro da
+ *  órbita (a origem do mundo). Sem isso uma volta em torno do sujeito, vista
+ *  quase de lado, parece uma diagonal cruzando o corpo. `size` > 0: pontos. */
+function pathMaterial(color: number, opacity: number, size = 0) {
+  return new THREE.ShaderMaterial({
+    uniforms: { uColor: { value: new THREE.Color(color) }, uOpacity: { value: opacity }, uSize: { value: size } },
+    vertexShader: /* glsl */ `
+      uniform float uSize;
+      varying float vBehind;
+      void main() {
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        float cz = (viewMatrix * vec4(0.0, 0.0, 0.0, 1.0)).z;
+        vBehind = smoothstep(-0.04, 0.04, (cz - mv.z) / max(-cz, 1e-3));
+        gl_PointSize = uSize;
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: /* glsl */ `
+      uniform vec3 uColor;
+      uniform float uOpacity;
+      uniform float uSize;
+      varying float vBehind;
+      void main() {
+        if (uSize > 0.0 && length(gl_PointCoord - 0.5) > 0.5) discard;
+        gl_FragColor = vec4(uColor, uOpacity * mix(1.0, 0.22, vBehind));
+      }`,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+  });
+}
 /** Troca entre os eixos de câmera do three (+Y em cima, olha −Z) e do COLMAP. */
 const FLIP_YZ = new THREE.Matrix4().makeScale(1, -1, -1);
 

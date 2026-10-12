@@ -172,7 +172,7 @@ await (async () => {
     await sleep(500);
   }
 })();
-console.log(`[${secs()}s] restaurado`);
+console.log(`[${secs()}s] restaurado · ${await evaluate(`[...document.querySelectorAll('.retouch-clip')].pop()?.querySelector('.muted')?.textContent`)}`);
 
 // Passos do ajuste e aplicar.
 await evaluate(`(() => {

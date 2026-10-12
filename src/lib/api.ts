@@ -352,6 +352,9 @@ export interface RetouchClip {
   reference: string | null;
   restored: string | null;
   restoredWith: { workflow: string; at: number } | null;
+  /** Tamanho do vídeo restaurado (mesma proporção da referência). O ajuste
+   *  usa os frames nesse tamanho, com os intrínsecos na mesma escala. */
+  restoredSize?: [number, number] | null;
 }
 
 export interface RetouchOptions {

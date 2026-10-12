@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { normalizeUrl, outputFiles, wsUrl } from "./client.ts";
 import { initialProgress, progressFraction, reduceProgress } from "./progress.ts";
-import { checkIO, effectiveIO, guessIO, listNodes, parseWorkflow, withInput, WorkflowParseError } from "./workflow.ts";
+import { checkIO, guessIO, listNodes, parseWorkflow, withInput, withParams, workflowFps, WorkflowParseError, paramDefault, editableFields } from "./workflow.ts";
 
 const ltx = readFileSync(new URL("./fixtures/ltx-restore.json", import.meta.url), "utf8");
 
@@ -25,19 +25,9 @@ test("withInput troca só o campo de entrada, sem mexer no original", () => {
   assert.equal(g["5001"].inputs.file, "Gravando 2026-10-12 173208.mp4");
 });
 
-test("duração: palpite no EmptyAudio (segundos), fps do CreateVideo, e injeção", () => {
-  const g = parseWorkflow(ltx);
-  const io = effectiveIO(g, guessIO(g)!);
-  assert.deepEqual(io.length, { node: "9017", field: "duration", unit: "seconds" });
-  assert.equal(io.fps, 30);
-  assert.deepEqual(checkIO(g, io), []);
-  const out = withInput(g, io, "a.mp4", { frames: 97, fps: 30 });
-  assert.equal(out["9017"].inputs.duration, 3.23);
-  const frames = withInput(g, { ...io, length: { node: "9017", field: "duration", unit: "frames" } }, "a.mp4", { frames: 97, fps: 30 });
-  assert.equal(frames["9017"].inputs.duration, 97);
-  // null = sem campo de duração: nada muda além do arquivo
-  assert.equal(withInput(g, { ...io, length: null }, "a.mp4", { frames: 97, fps: 30 })["9017"].inputs.duration, 4);
-  assert.deepEqual(checkIO(g, { ...io, length: { node: "9018", field: "codec", unit: "seconds" } }), ["lengthField"]);
+test("fps do vídeo de referência: o do CreateVideo do workflow, senão 24", () => {
+  assert.equal(workflowFps(parseWorkflow(ltx)), 30);
+  assert.equal(workflowFps({ a: { class_type: "LoadVideo", inputs: { file: "x.mp4" } } }), 24);
 });
 
 test("formato do editor e lixo são recusados com o motivo", () => {
@@ -106,4 +96,22 @@ test("URL, WebSocket e arquivos de saída", () => {
     { filename: "output_00001_.mp4", subfolder: "", type: "output" },
   ]);
   assert.deepEqual(outputFiles({ gifs: [{ filename: "a.mp4" }] }), [{ filename: "a.mp4", subfolder: "", type: "output" }]);
+});
+
+test("campos personalizados: padrão do grafo, troca só com o mesmo tipo", () => {
+  const g = parseWorkflow(ltx);
+  const params = [
+    { id: "a", label: "Seed", node: "5516:4832", field: "noise_seed" },
+    { id: "b", label: "LoRA", node: "5004:5606", field: "strength_model" },
+    { id: "c", label: "Prompt", node: "5508", field: "value" },
+    { id: "d", label: "Sumiu", node: "nada", field: "x" },
+  ];
+  assert.equal(paramDefault(g, params[0]), 42);
+  const out = withParams(g, params, { a: 7, b: "1.2", c: "outro prompt", d: 3 });
+  assert.equal(out["5516:4832"].inputs.noise_seed, 7);
+  assert.equal(out["5004:5606"].inputs.strength_model, 1.5, "texto num campo numérico é ignorado");
+  assert.equal(out["5508"].inputs.value, "outro prompt");
+  assert.equal(g["5516:4832"].inputs.noise_seed, 42, "o original não muda");
+  const ksampler = listNodes(g).find((n) => n.id === "5014:5506")!;
+  assert.deepEqual(editableFields(ksampler), ["value"]);
 });

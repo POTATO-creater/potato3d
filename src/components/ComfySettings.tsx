@@ -3,8 +3,8 @@ import { useI18n } from "../i18n";
 import type { Messages } from "../i18n/pt-BR";
 import { ComfyClient, ComfyError } from "../lib/comfy/client";
 import { loadComfy, saveComfy, type ComfySettings as Settings, type ComfyWorkflow } from "../lib/comfy/settings";
-import { checkIO, effectiveIO, fileFields, guessIO, listNodes, numberFields, parseWorkflow, WorkflowParseError, type LengthParam } from "../lib/comfy/workflow";
-import { Field, NumField, Select } from "./fields";
+import { checkIO, editableFields, fileFields, guessIO, listNodes, paramDefault, parseWorkflow, WorkflowParseError, type WorkflowParam } from "../lib/comfy/workflow";
+import { Field, Select } from "./fields";
 
 /** Texto de um erro do ComfyUI para a interface. */
 export function comfyErrorText(t: Messages, e: unknown): string {
@@ -166,13 +166,7 @@ function WorkflowCard({ wf, onChange, onRemove }: { wf: ComfyWorkflow; onChange:
   const nodes = useMemo(() => listNodes(wf.graph), [wf.graph]);
   const inputNode = nodes.find((n) => n.id === wf.io.input.node);
   const fields = inputNode ? fileFields(inputNode) : [];
-  // Duração e fps: o que o usuário escolheu ou, se ainda não, o palpite.
-  const io = effectiveIO(wf.graph, wf.io);
-  const problems = checkIO(wf.graph, io);
-  const length = io.length;
-  const lengthNode = length ? nodes.find((n) => n.id === length.node) : undefined;
-  const lengthFields = lengthNode ? numberFields(lengthNode) : [];
-  const setLength = (l: LengthParam | null) => onChange({ io: { ...wf.io, length: l } });
+  const problems = checkIO(wf.graph, wf.io);
   const label = (n: (typeof nodes)[number]) => `${n.id} · ${n.title}`;
   // Nós com campo de arquivo primeiro; o resto também vale (nós customizados).
   const inputOptions = [...nodes].sort((a, b) => Number(fileFields(b).length > 0) - Number(fileFields(a).length > 0));
@@ -196,6 +190,8 @@ function WorkflowCard({ wf, onChange, onRemove }: { wf: ComfyWorkflow; onChange:
           <Select
             value={wf.io.input.node}
             aria-label={tc.inputNode}
+            searchable
+            searchPlaceholder={tc.searchNode}
             options={inputOptions.map((n) => ({ value: n.id, label: label(n), hint: n.classType }))}
             onChange={(node) => {
               const n = nodes.find((x) => x.id === node);
@@ -217,58 +213,100 @@ function WorkflowCard({ wf, onChange, onRemove }: { wf: ComfyWorkflow; onChange:
         <Select
           value={wf.io.output.node}
           aria-label={tc.outputNode}
+          searchable
+          searchPlaceholder={tc.searchNode}
           options={outputOptions.map((n) => ({ value: n.id, label: label(n), hint: n.classType }))}
           onChange={(node) => onChange({ io: { ...wf.io, output: { node } } })}
         />
       </Field>
-      <h4 className="comfy-wf-sub">{tc.lengthTitle}</h4>
-      <p className="help">{tc.lengthHelp}</p>
-      <div className="grid2">
-        <Field label={tc.lengthNode}>
-          <Select
-            value={length?.node ?? ""}
-            aria-label={tc.lengthNode}
-            options={[
-              { value: "", label: tc.lengthNone },
-              ...nodes.filter((n) => numberFields(n).length > 0).map((n) => ({ value: n.id, label: label(n), hint: n.classType })),
-            ]}
-            onChange={(node) => {
-              const n = nodes.find((x) => x.id === node);
-              const field = n ? numberFields(n)[0] : undefined;
-              setLength(n && field ? { node, field, unit: length?.unit ?? "seconds" } : null);
-            }}
-          />
-        </Field>
-        <Field label={tc.lengthField}>
-          <Select
-            value={length?.field ?? ""}
-            aria-label={tc.lengthField}
-            disabled={!length}
-            options={lengthFields.map((f) => ({ value: f, label: f, hint: String(lengthNode!.literalInputs.find((i) => i.name === f)?.value) }))}
-            onChange={(field) => length && setLength({ ...length, field })}
-          />
-        </Field>
-      </div>
-      <div className="grid2">
-        <Field label={tc.lengthUnit}>
-          <Select
-            value={length?.unit ?? "seconds"}
-            aria-label={tc.lengthUnit}
-            disabled={!length}
-            options={[
-              { value: "seconds" as const, label: tc.units.seconds },
-              { value: "frames" as const, label: tc.units.frames },
-            ]}
-            onChange={(unit) => length && setLength({ ...length, unit })}
-          />
-        </Field>
-        <NumField label={tc.fps} hint={tc.fpsHint} value={io.fps} min={1} max={120} onChange={(fps) => fps > 0 && onChange({ io: { ...wf.io, fps } })} />
-      </div>
+      <ParamsEditor wf={wf} nodes={nodes} label={label} onChange={(params) => onChange({ params })} />
       {problems.map((p) => (
         <p key={p} className="bad small">
           {tc.problems[p]}
         </p>
       ))}
+    </div>
+  );
+}
+
+/** Campos do workflow que aparecem no painel de retoque para editar antes de
+ *  enviar (prompt, seed, força da LoRA...). */
+function ParamsEditor({
+  wf,
+  nodes,
+  label,
+  onChange,
+}: {
+  wf: ComfyWorkflow;
+  nodes: ReturnType<typeof listNodes>;
+  label: (n: ReturnType<typeof listNodes>[number]) => string;
+  onChange: (params: WorkflowParam[]) => void;
+}) {
+  const { t } = useI18n();
+  const tc = t.comfy;
+  const params = wf.params ?? [];
+  const editable = nodes.filter((n) => editableFields(n).length > 0 && n.id !== wf.io.input.node);
+  const update = (id: string, patch: Partial<WorkflowParam>) => onChange(params.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+  const preview = (v: unknown) => {
+    const s = String(v);
+    return s.length > 48 ? `${s.slice(0, 48)}…` : s;
+  };
+
+  return (
+    <div className="comfy-params">
+      <div className="comfy-params-head">
+        <span className="field-label">{tc.params}</span>
+        <button
+          className="btn-sm"
+          disabled={!editable.length}
+          onClick={() => {
+            const n = editable[0];
+            const field = editableFields(n)[0];
+            onChange([...params, { id: crypto.randomUUID(), label: "", node: n.id, field }]);
+          }}
+        >
+          {tc.addParam}
+        </button>
+      </div>
+      <p className="help">{tc.paramsHelp}</p>
+      {params.map((p) => {
+        const node = nodes.find((n) => n.id === p.node);
+        const fields = node ? editableFields(node) : [];
+        const missing = paramDefault(wf.graph, p) === undefined;
+        return (
+          <div key={p.id} className="comfy-param">
+            <input
+              className="input"
+              value={p.label}
+              aria-label={tc.paramLabel}
+              placeholder={p.field || tc.paramLabel}
+              onChange={(e) => update(p.id, { label: e.currentTarget.value })}
+            />
+            <Select
+              value={p.node}
+              aria-label={tc.paramNode}
+              searchable
+              searchPlaceholder={tc.searchNode}
+              options={editable.map((n) => ({ value: n.id, label: label(n), hint: n.classType }))}
+              onChange={(nodeId) => {
+                const n = nodes.find((x) => x.id === nodeId);
+                const field = n ? editableFields(n)[0] : "";
+                update(p.id, { node: nodeId, field });
+              }}
+            />
+            <Select
+              value={p.field}
+              aria-label={tc.paramField}
+              options={fields.map((f) => ({ value: f, label: f, hint: preview(node!.literalInputs.find((i) => i.name === f)?.value) }))}
+              onChange={(field) => update(p.id, { field })}
+            />
+            <button className="btn-sm ghost" onClick={() => onChange(params.filter((x) => x.id !== p.id))} aria-label={tc.removeParam} title={tc.removeParam}>
+              ×
+            </button>
+            {missing && <p className="bad small comfy-param-problem">{tc.paramMissing}</p>}
+          </div>
+        );
+      })}
     </div>
   );
 }

@@ -19,22 +19,10 @@ export interface NodeInfo {
   literalInputs: { name: string; value: unknown }[];
 }
 
-/** Campo numérico que recebe a duração do vídeo enviado. */
-export interface LengthParam {
-  node: string;
-  field: string;
-  unit: "seconds" | "frames";
-}
-
 /** Onde o app injeta o arquivo enviado e onde lê o resultado. */
 export interface WorkflowIO {
   input: { node: string; field: string };
   output: { node: string };
-  /** Duração do vídeo. `undefined`: ainda não escolhido (vale o palpite);
-   *  `null`: o workflow não tem esse campo. */
-  length?: LengthParam | null;
-  /** Taxa de quadros do vídeo de referência; `undefined` vale o palpite. */
-  fps?: number;
 }
 
 export type WorkflowError = "notJson" | "editorFormat" | "notWorkflow" | "empty";
@@ -112,44 +100,20 @@ export function guessIO(graph: ApiGraph): WorkflowIO | null {
   return { input: { node: input.id, field: fileFields(input)[0] }, output: { node: output.id } };
 }
 
-/** Campos numéricos (widgets) de um nó. */
-export const numberFields = (node: NodeInfo) => node.literalInputs.filter((i) => typeof i.value === "number").map((i) => i.name);
+export const DEFAULT_FPS = 24;
 
-/** Palpite do campo de duração: `duration`/`seconds` em segundos;
- *  `length`/`num_frames`/`frame_count` de nós de vídeo ou latente, em frames. */
-export function guessLength(graph: ApiGraph): LengthParam | null {
-  for (const n of listNodes(graph)) {
-    const fields = numberFields(n);
-    const sec = fields.find((f) => f === "duration" || f === "seconds");
-    if (sec) return { node: n.id, field: sec, unit: "seconds" };
-    const fr = fields.find((f) => f === "num_frames" || f === "frame_count" || (f === "length" && /video|latent/i.test(n.classType)));
-    if (fr) return { node: n.id, field: fr, unit: "frames" };
-  }
-  return null;
-}
-
-/** Palpite da taxa de quadros: o primeiro `fps`/`frame_rate` literal do grafo. */
-export function guessFps(graph: ApiGraph): number | null {
+/** Taxa de quadros do vídeo de referência para um workflow: o primeiro
+ *  `fps`/`frame_rate` fixo do grafo (o vídeo sai nesse ritmo), senão 24. */
+export function workflowFps(graph: ApiGraph): number {
   for (const n of listNodes(graph)) {
     const f = n.literalInputs.find((i) => (i.name === "fps" || i.name === "frame_rate") && typeof i.value === "number");
     if (f && (f.value as number) > 0) return f.value as number;
   }
-  return null;
-}
-
-export const DEFAULT_FPS = 24;
-
-/** Configuração em vigor, com os palpites no lugar do que não foi escolhido. */
-export function effectiveIO(graph: ApiGraph, io: WorkflowIO): Required<WorkflowIO> {
-  return {
-    ...io,
-    length: io.length === undefined ? guessLength(graph) : io.length,
-    fps: io.fps ?? guessFps(graph) ?? DEFAULT_FPS,
-  };
+  return DEFAULT_FPS;
 }
 
 /** Problemas da configuração de entrada/saída diante do grafo. */
-export type IOProblem = "inputNode" | "inputField" | "outputNode" | "lengthField";
+export type IOProblem = "inputNode" | "inputField" | "outputNode";
 
 export function checkIO(graph: ApiGraph, io: WorkflowIO): IOProblem[] {
   const problems: IOProblem[] = [];
@@ -157,19 +121,47 @@ export function checkIO(graph: ApiGraph, io: WorkflowIO): IOProblem[] {
   if (!input) problems.push("inputNode");
   else if (!(io.input.field in input.inputs) || isLink(input.inputs[io.input.field])) problems.push("inputField");
   if (!graph[io.output.node]) problems.push("outputNode");
-  const len = io.length;
-  if (len && typeof graph[len.node]?.inputs[len.field] !== "number") problems.push("lengthField");
   return problems;
 }
 
-/** Cópia do grafo com o arquivo enviado no campo de entrada e, se houver
- *  campo de duração, a duração do vídeo. */
-export function withInput(graph: ApiGraph, io: WorkflowIO, filename: string, video?: { frames: number; fps: number }): ApiGraph {
+/** Cópia do grafo com o arquivo enviado no campo de entrada. O resto (duração,
+ *  resolução) o workflow tira do próprio vídeo. */
+export function withInput(graph: ApiGraph, io: WorkflowIO, filename: string): ApiGraph {
   const copy = structuredClone(graph);
   copy[io.input.node].inputs[io.input.field] = filename;
-  const len = io.length;
-  if (video && len && copy[len.node]) {
-    copy[len.node].inputs[len.field] = len.unit === "frames" ? video.frames : Math.round((video.frames / video.fps) * 100) / 100;
+  return copy;
+}
+
+/** Campo de um nó exposto no app para o usuário editar antes de enviar. */
+export interface WorkflowParam {
+  id: string;
+  label: string;
+  node: string;
+  field: string;
+}
+
+export type ParamValue = string | number | boolean;
+
+/** Valor atual do campo no grafo (o padrão), se for um valor simples. */
+export function paramDefault(graph: ApiGraph, p: Pick<WorkflowParam, "node" | "field">): ParamValue | undefined {
+  const v = graph[p.node]?.inputs[p.field];
+  return typeof v === "string" || typeof v === "number" || typeof v === "boolean" ? v : undefined;
+}
+
+/** Campos com valor simples (texto, número, liga/desliga) de um nó. */
+export function editableFields(node: NodeInfo): string[] {
+  return node.literalInputs.filter((i) => ["string", "number", "boolean"].includes(typeof i.value)).map((i) => i.name);
+}
+
+/** Cópia do grafo com os valores dos campos personalizados. Valores de tipo
+ *  diferente do original são ignorados (o grafo mudou desde a escolha). */
+export function withParams(graph: ApiGraph, params: WorkflowParam[], values: Record<string, ParamValue | undefined>): ApiGraph {
+  const copy = structuredClone(graph);
+  for (const p of params) {
+    const v = values[p.id];
+    const def = paramDefault(copy, p);
+    if (v === undefined || def === undefined || typeof v !== typeof def) continue;
+    copy[p.node].inputs[p.field] = v;
   }
   return copy;
 }

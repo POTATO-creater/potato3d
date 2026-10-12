@@ -182,12 +182,14 @@ async function applyRetouch(
     }
   }
 
-  // Frames restaurados: no tamanho do clipe, com o alpha do render.
+  // Frames restaurados: no tamanho em que o restaurador os devolveu (não
+  // reduz o que veio maior que a referência), com o alpha do render ampliado.
   const newImages: NewImage[] = [];
   const total = clips.reduce((n, c) => n + c.poses.length, 0);
+  const trainSize = (c: RetouchClip) => c.restoredSize ?? c.size;
   let done = 0;
   for (const [ci, clip] of clips.entries()) {
-    const [w, h] = clip.size;
+    const [w, h] = trainSize(clip);
     const alphas = await clipAlphaFiles(projectDir, clip.id);
     let i = 0;
     for await (const frame of videoFrames(await readFile(clip.restored!), w, h)) {
@@ -211,7 +213,13 @@ async function applyRetouch(
   // Modelo: as câmeras e imagens do projeto mais as dos clipes.
   const cams = appendCameras(
     await (await readFile(`${l.model}/cameras.bin`)).arrayBuffer(),
-    clips.map((c) => ({ width: c.size[0], height: c.size[1], ...c.intrinsics })),
+    clips.map((c) => {
+      // Intrínsecos na escala do tamanho de treino (a proporção é a mesma).
+      const [w, h] = trainSize(c);
+      const sx = w / c.size[0], sy = h / c.size[1];
+      const k = c.intrinsics;
+      return { width: w, height: h, fx: k.fx * sx, fy: k.fy * sy, cx: k.cx * sx, cy: k.cy * sy };
+    }),
   );
   let images = await (await readFile(`${l.model}/images.bin`)).arrayBuffer();
   if (options.masks) images = await renameImages(images, (n) => `${stem(n)}.png`).arrayBuffer();

@@ -3,12 +3,12 @@ import { useI18n } from "../i18n";
 import { api, fileUrl, host, type MaskOptions, type RetouchCameras, type RetouchClip, type RetouchApi, type TrainOptions } from "../lib/api";
 import { ComfyClient } from "../lib/comfy/client";
 import { progressFraction, type ComfyProgress } from "../lib/comfy/progress";
-import { loadComfy, workflowsOf } from "../lib/comfy/settings";
-import { DEFAULT_FPS, effectiveIO, withInput } from "../lib/comfy/workflow";
-import { clipFrames, clipLens, DEFAULT_CLIP, nearestCamera, orbitFrame, presetPath, viewPath, type ClipPlan } from "../lib/retouch/trajectory";
+import { COMFY_CHANGED, loadComfy, loadParamValues, saveParamValues, workflowsOf } from "../lib/comfy/settings";
+import { DEFAULT_FPS, paramDefault, withInput, withParams, workflowFps, type ParamValue, type WorkflowParam } from "../lib/comfy/workflow";
+import { clipFrames, clipLens, DEFAULT_CLIP, nearestCamera, orbitDistance, orbitFrame, peakSpeed, presetPath, turnPath, viewPath, type ClipPlan } from "../lib/retouch/trajectory";
 import { alphaPng, createClipEncoder, videoInfo } from "../lib/retouch/video";
 import { comfyErrorText } from "./ComfySettings";
-import { NumField, Select } from "./fields";
+import { Field, NumField, Select, Toggle } from "./fields";
 import type { ColmapPose, ViewerHandle } from "./Viewer";
 
 const DEFAULT_STEPS = 3000;
@@ -18,11 +18,14 @@ const WF_KEY = "splatforge.retouchWorkflow.v1";
 /** Duração e inclinação escolhidas por último. */
 const MOTION_KEY = "splatforge.retouchMotion.v1";
 const DEFAULT_TILT = 30;
-/** Abaixo disso uma volta inteira passa rápido demais para o modelo de vídeo. */
-const ORBIT_MIN_SECONDS = 8;
+/** Acima disso a câmera passa rápido demais e o modelo de vídeo borra
+ *  (estimativa; ajustar com a experiência). */
+const MAX_SPEED = 30;
 
-const KINDS = ["view", "below", "above", "orbitBelow", "orbitAbove", "wave"] as const;
+const KINDS = ["view", "orbit", "below", "above", "orbitBelow", "orbitAbove", "wave"] as const;
 type Kind = (typeof KINDS)[number];
+/** Movimentos que partem da vista atual: a altura vem dela (sem inclinação). */
+const FROM_VIEW: Kind[] = ["view", "orbit"];
 /** O que a trajetória guarda do clique: a vista mirada ou a foto do meio. A
  *  trajetória em si é refeita quando a duração ou a inclinação mudam. */
 interface Draft {
@@ -32,22 +35,44 @@ interface Draft {
   nearest: number;
 }
 
+type Distance = "photos" | "view";
+
 interface Motion {
   kind: Kind;
   seconds: number | null;
   tilt: number;
+  /** Distância de arcos e voltas: a das fotos ou a da vista do clique. */
+  distance: Distance;
+  /** Lado maior do vídeo de referência, em px. */
+  longSide: number;
+  /** Proporção do vídeo: "lens" (a da lente das fotos) ou "L:A". */
+  aspect: string;
 }
+
+const ASPECTS = ["lens", "9:16", "2:3", "3:4", "1:1", "4:3", "3:2", "16:9"];
+/** Largura/altura de uma proporção "L:A"; undefined = a da lente. */
+const aspectValue = (a: string) => {
+  const [w, h] = a.split(":").map(Number);
+  return w > 0 && h > 0 ? w / h : undefined;
+};
+
+/** Opções de resolução (lado maior); o menor sai da proporção da lente,
+ *  ambos arredondados para múltiplos de 32. */
+const LONG_SIDES = [512, 640, 768, 960, 1088, 1280, 1536, 1920];
 
 function loadMotion(): Motion {
   try {
-    const raw = JSON.parse(localStorage.getItem(MOTION_KEY) ?? "null") as { kind?: unknown; seconds?: unknown; tilt?: unknown } | null;
+    const raw = JSON.parse(localStorage.getItem(MOTION_KEY) ?? "null") as { kind?: unknown; seconds?: unknown; tilt?: unknown; distance?: unknown; longSide?: unknown; aspect?: unknown } | null;
     return {
+      distance: raw?.distance === "view" ? "view" : "photos",
+      longSide: LONG_SIDES.includes(raw?.longSide as number) ? (raw!.longSide as number) : DEFAULT_CLIP.longSide,
+      aspect: ASPECTS.includes(raw?.aspect as string) ? (raw!.aspect as string) : "lens",
       kind: KINDS.includes(raw?.kind as Kind) ? (raw!.kind as Kind) : "view",
       seconds: typeof raw?.seconds === "number" && raw.seconds > 0 ? raw.seconds : null,
       tilt: typeof raw?.tilt === "number" && raw.tilt > 0 ? raw.tilt : DEFAULT_TILT,
     };
   } catch {
-    return { kind: "view", seconds: null, tilt: DEFAULT_TILT };
+    return { kind: "view", seconds: null, tilt: DEFAULT_TILT, distance: "photos", longSide: DEFAULT_CLIP.longSide, aspect: "lens" };
   }
 }
 interface Task {
@@ -59,6 +84,13 @@ interface Task {
 }
 
 const pad = (i: number) => String(i).padStart(5, "0");
+/** Proporção legível de um tamanho (1080×1920 → 9:16). */
+function lensRatio(w: number, h: number): string {
+  const g = (a: number, b: number): number => (b ? g(b, a % b) : a);
+  const d = g(Math.round(w), Math.round(h)) || 1;
+  const [rw, rh] = [Math.round(w) / d, Math.round(h) / d];
+  return rw <= 32 && rh <= 32 ? `${rw}:${rh}` : (w / h).toFixed(2);
+}
 const restoredOk = (c: RetouchClip) => !!c.restored;
 
 export function RetouchPanel(props: {
@@ -85,6 +117,8 @@ export function RetouchPanel(props: {
   const [clips, setClips] = useState<RetouchClip[]>([]);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [motion, setMotion] = useState(loadMotion);
+  /** Clipe sob o mouse (a trajetória dele aparece no 3D). */
+  const [hovered, setHovered] = useState<string | null>(null);
   const [task, setTask] = useState<Task | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [applied, setApplied] = useState<{ clips: string[]; appliedAt: number; base: string } | null>(null);
@@ -125,15 +159,31 @@ export function RetouchPanel(props: {
   useEffect(() => {
     const v = viewer.current;
     if (!v || !cams) return;
-    const { size, intrinsics } = clipLens(cams.lens, DEFAULT_CLIP.longSide);
+    const { size, intrinsics } = clipLens(cams.lens, motion.longSide, aspectValue(motion.aspect));
     v.setFrameGuide({ size, fovY: 2 * Math.atan(size[1] / 2 / intrinsics.fy) });
     return () => v.setFrameGuide(null);
-  }, [cams, viewer]);
+  }, [cams, viewer, motion.longSide, motion.aspect]);
 
+  // A configuração muda no diálogo de Integrações: relê a cada mudança.
+  const [, setComfyVersion] = useState(0);
+  useEffect(() => {
+    const onChange = () => setComfyVersion((v) => v + 1);
+    window.addEventListener(COMFY_CHANGED, onChange);
+    return () => window.removeEventListener(COMFY_CHANGED, onChange);
+  }, []);
   const restoreWorkflows = workflowsOf(loadComfy(), "restore");
   const workflow = restoreWorkflows.find((w) => w.id === workflowId) ?? restoreWorkflows[0] ?? null;
-  const io = workflow ? effectiveIO(workflow.graph, workflow.io) : null;
-  const fps = io?.fps ?? DEFAULT_FPS;
+  const fps = workflow ? workflowFps(workflow.graph) : DEFAULT_FPS;
+  // Valores dos campos personalizados do workflow escolhido.
+  const [paramValues, setParamValues] = useState<Record<string, ParamValue>>({});
+  useEffect(() => setParamValues(workflow ? loadParamValues(workflow.id) : {}), [workflow?.id]);
+  const setParam = (id: string, v: ParamValue | undefined) => {
+    if (!workflow) return;
+    const next: Record<string, ParamValue | undefined> = { ...paramValues, [id]: v };
+    if (v === undefined) delete next[id];
+    setParamValues(next as Record<string, ParamValue>);
+    saveParamValues(workflow.id, next);
+  };
   const seconds = motion.seconds ?? Math.round((DEFAULT_CLIP.frames / fps) * 10) / 10;
   const frames = clipFrames(seconds, fps);
   const busy = !!task || props.disabled;
@@ -168,43 +218,66 @@ export function RetouchPanel(props: {
     const v = viewer.current;
     if (!cams || !v) return;
     const pose = v.viewPose();
-    if (kind === "view" && !pose) return;
+    if (FROM_VIEW.includes(kind) && !pose) return;
     const nearest = pose ? nearestCamera(cams.cameras, pose, orbitFrame(cams.cameras).center) : 0;
     setDraft({ kind, pose, nearest });
   };
 
   // Trajetória do rascunho, refeita a cada mudança de duração ou inclinação.
   const tilt = motion.tilt;
+  const distance = motion.distance;
+  const longSide = motion.longSide;
+  const aspect = aspectValue(motion.aspect);
   const draftPlan = useMemo((): ClipPlan | null => {
-    if (!draft || !cams || (draft.kind === "view" && !draft.pose)) return null;
+    if (!draft || !cams || (FROM_VIEW.includes(draft.kind) && !draft.pose)) return null;
     const { cameras, lens } = cams;
     const m = cameras.length;
-    const clip = { ...DEFAULT_CLIP, frames };
+    const clip = { ...DEFAULT_CLIP, frames, longSide, aspect };
+    // Arcos e voltas na distância das fotos ou na da vista do clique.
+    const radius = distance === "view" && draft.pose ? orbitDistance(cameras, draft.pose) : undefined;
     switch (draft.kind) {
       case "view":
         // Um sexto da órbita de ponta a ponta; a vista mirada fica no meio.
         return viewPath(cameras, lens, draft.pose!, { ...clip, span: Math.max(6, Math.round(m / 6)), sweepDeg: 12 });
+      case "orbit":
+        // Volta inteira na altura da vista, começando nela; a distância é a
+        // escolhida (a da vista ou a das fotos).
+        return turnPath(cameras, lens, draft.pose!, {
+          ...clip,
+          radius: distance === "photos" ? orbitDistance(cameras, cameras[draft.nearest]) : undefined,
+        });
       case "below":
       case "above":
-        // Arco de pouco menos de meia volta em volta da foto mais próxima.
-        return presetPath(cameras, lens, { ...clip, center: draft.nearest, span: Math.round(m * 0.45), elevDeg: draft.kind === "below" ? -tilt : tilt });
+        // Arco de um terço da órbita em volta da foto mais próxima.
+        return presetPath(cameras, lens, { ...clip, radius, center: draft.nearest, span: Math.round(m / 3), elevDeg: draft.kind === "below" ? -tilt : tilt });
       case "orbitBelow":
       case "orbitAbove":
       case "wave":
-        // Volta inteira: começa e termina na foto mais próxima da vista.
+        // Volta inteira: começa e termina na foto mais próxima da vista. A
+        // descida é mais curta que nos arcos, para a volta passar mais tempo
+        // na altura nova. A onda dispensa rampa: o seno já passa liso pelo
+        // ponto em que o fim encontra o começo (uma rampa ali faria um degrau).
         return presetPath(cameras, lens, {
           ...clip,
+          radius,
+          ramp: draft.kind === "wave" ? 0 : 0.25,
           center: draft.nearest + m / 2,
           span: m,
           elevDeg: draft.kind === "orbitAbove" ? tilt : -tilt,
           shape: draft.kind === "wave" ? "wave" : "arc",
         });
     }
-  }, [draft, cams, frames, tilt]);
+  }, [draft, cams, frames, tilt, distance, longSide, aspect]);
+  const speed = draftPlan ? peakSpeed(draftPlan.poses, fps) : 0;
 
+  // Trajetória no 3D: a do rascunho ou, sem rascunho, a do clipe sob o mouse.
+  // Sai do estado, e não de mouseenter/mouseleave: um cartão que some sob o
+  // cursor (clipe excluído) não dispara mouseleave e deixaria o desenho preso.
+  const hoveredPoses = clips.find((c) => c.id === hovered)?.poses ?? null;
+  const shownPath = draftPlan?.poses ?? hoveredPoses;
   useEffect(() => {
-    if (draftPlan) viewer.current?.showPath(draftPlan.poses);
-  }, [draftPlan, viewer]);
+    viewer.current?.showPath(shownPath);
+  }, [shownPath, viewer]);
 
   const generate = () =>
     draft &&
@@ -251,19 +324,24 @@ export function RetouchPanel(props: {
       const saved = await rt.saveClip(projectDir, clip, files);
       setClips((cs) => [...cs, saved]);
       setDraft(null);
-      v.showPath(null);
     });
 
   // ------------------------------------------------------------- ComfyUI --
 
-  const checkFrames = async (clip: RetouchClip, video: Blob) => {
+  /** Confere o restaurado e devolve o tamanho dele. O número de frames tem
+   *  de ser o mesmo; a proporção também (o tamanho pode mudar: o ajuste
+   *  escala os intrínsecos), senão o frame não corresponde mais à pose. */
+  const checkRestored = async (clip: RetouchClip, video: Blob): Promise<[number, number]> => {
     const info = await videoInfo(video);
     if (info.frames !== clip.poses.length) throw new Error(tr.frameMismatch(info.frames, clip.poses.length));
+    const want = clip.size[0] / clip.size[1];
+    const got = info.width / info.height;
+    if (Math.abs(got / want - 1) > 0.02) throw new Error(tr.aspectMismatch(`${info.width}×${info.height}`, `${clip.size[0]}×${clip.size[1]}`));
+    return [info.width, info.height];
   };
 
   const send = (clip: RetouchClip) =>
     workflow &&
-    io &&
     run(clip.id, async ({ abort }, progress) => {
       const settings = loadComfy();
       const client = new ComfyClient(settings.url);
@@ -272,7 +350,7 @@ export function RetouchPanel(props: {
       const name = await client.upload(reference, `gorbit_${clip.id}.mp4`, abort.signal);
       const titles = Object.fromEntries(Object.entries(workflow.graph).map(([id, n]) => [id, n._meta?.title || n.class_type]));
       const files = await client.run(
-        withInput(workflow.graph, io, name, { frames: clip.poses.length, fps: clip.fps }),
+        withParams(withInput(workflow.graph, workflow.io, name), workflow.params ?? [], paramValues),
         workflow.io.output.node,
         (p: ComfyProgress) => {
           const text =
@@ -286,15 +364,15 @@ export function RetouchPanel(props: {
       progress(0.96, tr.downloading);
       const video = files.find((f) => /\.(mp4|webm|mov|mkv)$/i.test(f.filename)) ?? files[0];
       const restored = await client.download(video, abort.signal);
-      await checkFrames(clip, restored);
-      const saved = await rt.saveClip(projectDir, { ...clip, restoredWith: { workflow: workflow.name, at: Date.now() } }, { "restored.mp4": restored });
+      const restoredSize = await checkRestored(clip, restored);
+      const saved = await rt.saveClip(projectDir, { ...clip, restoredSize, restoredWith: { workflow: workflow.name, at: Date.now() } }, { "restored.mp4": restored });
       setClips((cs) => cs.map((c) => (c.id === saved.id ? saved : c)));
     });
 
   const importRestored = (clip: RetouchClip, file: File) =>
     run(clip.id, async () => {
-      await checkFrames(clip, file);
-      const saved = await rt.saveClip(projectDir, { ...clip, restoredWith: { workflow: file.name, at: Date.now() } }, { "restored.mp4": file });
+      const restoredSize = await checkRestored(clip, file);
+      const saved = await rt.saveClip(projectDir, { ...clip, restoredSize, restoredWith: { workflow: file.name, at: Date.now() } }, { "restored.mp4": file });
       setClips((cs) => cs.map((c) => (c.id === saved.id ? saved : c)));
     });
 
@@ -406,7 +484,52 @@ export function RetouchPanel(props: {
           disabled={busy}
           onChange={(v) => v > 0 && updateMotion({ seconds: v })}
         />
-        <NumField label={tr.tilt} hint={tr.tiltHint} value={tilt} min={5} max={80} step={5} suffix="°" disabled={busy} onChange={(v) => v > 0 && updateMotion({ tilt: v })} />
+        <NumField
+          label={tr.tilt}
+          hint={tr.tiltHint}
+          value={tilt}
+          min={5}
+          max={80}
+          step={5}
+          suffix="°"
+          disabled={busy || FROM_VIEW.includes(motion.kind)}
+          onChange={(v) => v > 0 && updateMotion({ tilt: v })}
+        />
+      </div>
+      <Field label={tr.distance} hint={motion.kind === "view" ? tr.distanceViewHint : tr.distanceHint}>
+        <Select
+          value={motion.kind === "view" ? "view" : distance}
+          aria-label={tr.distance}
+          disabled={busy || motion.kind === "view"}
+          options={[
+            { value: "photos" as const, label: tr.distances.photos },
+            { value: "view" as const, label: tr.distances.view },
+          ]}
+          onChange={(d) => updateMotion({ distance: d })}
+        />
+      </Field>
+      <div className="grid2">
+        <Field label={tr.aspect} hint={tr.aspectHint}>
+          <Select
+            value={motion.aspect}
+            aria-label={tr.aspect}
+            disabled={busy || !cams}
+            options={ASPECTS.map((a) => ({ value: a, label: a === "lens" ? cams ? tr.aspectLens(lensRatio(cams.lens.width, cams.lens.height)) : tr.aspectLens("") : a }))}
+            onChange={(a) => updateMotion({ aspect: a })}
+          />
+        </Field>
+        <Field label={tr.resolution} hint={tr.resolutionHint}>
+          <Select
+            value={longSide}
+            aria-label={tr.resolution}
+            disabled={busy || !cams}
+            options={LONG_SIDES.map((ls) => {
+              const [w, h] = cams ? clipLens(cams.lens, ls, aspect).size : [ls, ls];
+              return { value: ls, label: `${w}×${h}` };
+            })}
+            onChange={(ls) => updateMotion({ longSide: ls })}
+          />
+        </Field>
       </div>
       {restoreWorkflows.length > 1 && (
         <div className="retouch-field">
@@ -430,11 +553,9 @@ export function RetouchPanel(props: {
       {draft && draftPlan && (
         <div className="retouch-draft">
           <span className="small">
-            {tr.labels[draft.kind](tilt)} · {tr.draft(draftPlan.poses.length, draftPlan.poses.length / fps, draftPlan.size[0], draftPlan.size[1])}
+            {tr.labels[draft.kind](tilt)} · {tr.draft(draftPlan.poses.length, draftPlan.poses.length / fps, draftPlan.size[0], draftPlan.size[1], Math.round(speed))}
           </span>
-          {(draft.kind === "orbitBelow" || draft.kind === "orbitAbove" || draft.kind === "wave") && seconds < ORBIT_MIN_SECONDS && (
-            <span className="help warn">{tr.orbitFast(ORBIT_MIN_SECONDS)}</span>
-          )}
+          {speed > MAX_SPEED && <span className="help warn">{tr.tooFast(Math.round(speed), Math.ceil((seconds * speed) / MAX_SPEED), MAX_SPEED)}</span>}
           <div className="retouch-row">
             <button className="btn-sm" disabled={busy} onClick={generate}>
               {tr.generate}
@@ -445,10 +566,7 @@ export function RetouchPanel(props: {
             <button
               className="btn-sm ghost"
               disabled={busy}
-              onClick={() => {
-                setDraft(null);
-                viewer.current?.showPath(null);
-              }}
+              onClick={() => setDraft(null)}
             >
               {tr.discard}
             </button>
@@ -460,7 +578,7 @@ export function RetouchPanel(props: {
       <h3 className="retouch-sub">{tr.clips}</h3>
       {clips.length === 0 && <p className="help">{tr.noClips}</p>}
       {clips.map((c) => (
-        <div key={c.id} className="retouch-clip" onMouseEnter={() => !draft && viewer.current?.showPath(c.poses)} onMouseLeave={() => !draft && viewer.current?.showPath(null)}>
+        <div key={c.id} className="retouch-clip" onMouseEnter={() => setHovered(c.id)} onMouseLeave={() => setHovered((h) => (h === c.id ? null : h))}>
           <div className="retouch-clip-head">
             <span className="retouch-clip-name">{c.label}</span>
             <span className={`retouch-chip ${c.restored ? "on" : ""}`}>{c.restored ? tr.status.restored : tr.status.reference}</span>
@@ -468,6 +586,7 @@ export function RetouchPanel(props: {
           <span className="muted small">
             {new Date(c.createdAt).toLocaleString(locale, { dateStyle: "short", timeStyle: "short" })} · {c.poses.length} frames · {c.size[0]}×{c.size[1]}
             {c.restoredWith && ` · ${tr.restoredWith(c.restoredWith.workflow)}`}
+            {c.restoredSize && (c.restoredSize[0] !== c.size[0] || c.restoredSize[1] !== c.size[1]) && ` · ${tr.restoredSize(`${c.restoredSize[0]}×${c.restoredSize[1]}`)}`}
           </span>
           <div className="retouch-row">
             <button className="btn-sm" disabled={busy || !workflow || !c.reference} onClick={() => send(c)}>
@@ -508,6 +627,23 @@ export function RetouchPanel(props: {
       />
 
       {!workflow && clips.length > 0 && <p className="help warn">{tr.noWorkflow}</p>}
+      {workflow && !!workflow.params?.length && (
+        <>
+          <h3 className="retouch-sub">{tr.workflowParams(workflow.name)}</h3>
+          <div className="retouch-params">
+            {workflow.params.map((p) => (
+              <ParamField
+                key={p.id}
+                param={p}
+                fallback={paramDefault(workflow.graph, p)}
+                value={paramValues[p.id]}
+                disabled={busy}
+                onChange={(v) => setParam(p.id, v)}
+              />
+            ))}
+          </div>
+        </>
+      )}
 
       {clips.length > 0 && (
         <div className="retouch-apply">
@@ -539,6 +675,64 @@ export function RetouchPanel(props: {
       {error && <p className="bad small retouch-error">{error}</p>}
       {reviewing && <ReviewDialog clip={reviewing} onClose={() => setReviewing(null)} />}
     </section>
+  );
+}
+
+/** Editor de um campo personalizado do workflow, no tipo do valor original.
+ *  `fallback` é o valor do workflow (padrão); undefined = campo sumiu. */
+function ParamField(props: {
+  param: WorkflowParam;
+  fallback: ParamValue | undefined;
+  value: ParamValue | undefined;
+  disabled: boolean;
+  onChange: (v: ParamValue | undefined) => void;
+}) {
+  const { t } = useI18n();
+  const tr = t.retouch;
+  const { param, fallback } = props;
+  const name = param.label.trim() || param.field;
+  if (fallback === undefined) return <p className="help warn">{tr.paramMissing(name)}</p>;
+  // Valor salvo de outro tipo (o workflow mudou): vale o padrão.
+  const value = props.value !== undefined && typeof props.value === typeof fallback ? props.value : fallback;
+  const changed = value !== fallback;
+  const reset = changed && (
+    <button className="link small" disabled={props.disabled} onClick={() => props.onChange(undefined)}>
+      {tr.paramReset}
+    </button>
+  );
+  if (typeof fallback === "boolean") {
+    return (
+      <div className="retouch-param">
+        <Toggle label={name} checked={value as boolean} disabled={props.disabled} onChange={(v) => props.onChange(v)} />
+        {reset}
+      </div>
+    );
+  }
+  const long = typeof fallback === "string" && (fallback.length > 60 || fallback.includes("\n"));
+  return (
+    <div className="retouch-param">
+      <div className="retouch-param-head">
+        <span className="field-label">{name}</span>
+        {reset}
+      </div>
+      {typeof fallback === "number" ? (
+        <input
+          className="input num"
+          type="number"
+          step="any"
+          value={value as number}
+          disabled={props.disabled}
+          onChange={(e) => {
+            const v = e.currentTarget.valueAsNumber;
+            if (!Number.isNaN(v)) props.onChange(v);
+          }}
+        />
+      ) : long ? (
+        <textarea className="input retouch-param-text" rows={4} value={value as string} disabled={props.disabled} onChange={(e) => props.onChange(e.currentTarget.value)} />
+      ) : (
+        <input className="input" value={value as string} disabled={props.disabled} onChange={(e) => props.onChange(e.currentTarget.value)} />
+      )}
+    </div>
   );
 }
 
