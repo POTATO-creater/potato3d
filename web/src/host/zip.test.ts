@@ -3,6 +3,7 @@
 // desktop).  pnpm test:web
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -72,10 +73,7 @@ test("gravado aqui, lido pelo Python (CRC e tamanhos)", { skip: !python && "sem 
   ]).toString();
   const [json, sha] = out.trim().split("\n");
   assert.equal(json, '{"frames":[]}');
-  const expected = execFileSync("python3", ["-I", "-c", "import sys,hashlib;print(hashlib.sha1(open(sys.argv[1],'rb').read()).hexdigest())", "/dev/stdin"], {
-    input: img,
-  }).toString();
-  assert.equal(sha, expected.trim());
+  assert.equal(sha, createHash("sha1").update(img).digest("hex"));
 });
 
 test("gravado pelo Python, lido aqui (com e sem compressão)", { skip: !python && "sem python3" }, async () => {
