@@ -22,6 +22,13 @@ interface Ctx {
   controls: OrbitControls;
   /** Recebe a transformação COLMAP → mundo (centro na origem, "up" em +Y). */
   root: THREE.Group;
+  /** A mesma transformação, mas a das poses com que o splat exibido foi
+   *  treinado: ao refazer as poses, o splat antigo continua na tela até o
+   *  primeiro snapshot do treino novo e não pode herdar o alinhamento novo
+   *  (nem a falta dele, que o deixaria de cabeça para baixo). */
+  splatRoot: THREE.Group;
+  /** `splatRoot` já tem o alinhamento do splat exibido. */
+  splatAligned: boolean;
   mesh: SplatMesh | null;
   path: THREE.Object3D | null;
   /** Destaque do ponto sob o cursor (filho de `path`). */
@@ -68,7 +75,8 @@ export function Viewer({ splat, frame, placeholder, onPickCamera }: Props) {
     const spark = new SparkRenderer({ renderer });
     scene.add(spark);
     const root = new THREE.Group();
-    scene.add(root);
+    const splatRoot = new THREE.Group();
+    scene.add(root, splatRoot);
 
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
@@ -102,7 +110,7 @@ export function Viewer({ splat, frame, placeholder, onPickCamera }: Props) {
       renderer.render(scene, camera);
     });
 
-    ctx.current = { renderer, camera, controls, root, mesh: null, path: null, hover: null, invalidate };
+    ctx.current = { renderer, camera, controls, root, splatRoot, splatAligned: false, mesh: null, path: null, hover: null, invalidate };
 
     // Ponto de câmera mais próximo do cursor, em pixels da tela.
     const v = new THREE.Vector3();
@@ -184,16 +192,9 @@ export function Viewer({ splat, frame, placeholder, onPickCamera }: Props) {
       c.path = null;
       c.hover = null;
     }
-    if (!frame) {
-      c.root.position.set(0, 0, 0);
-      c.root.quaternion.identity();
-      return;
-    }
-    const up = new THREE.Vector3(...frame.up).normalize();
-    const q = new THREE.Quaternion().setFromUnitVectors(up, new THREE.Vector3(0, 1, 0));
-    const center = new THREE.Vector3(...frame.center).applyQuaternion(q);
-    c.root.quaternion.copy(q);
-    c.root.position.copy(center.negate());
+    alignTo(c.root, frame);
+    if (!c.splatAligned) alignSplat(frame);
+    if (!frame) return;
 
     const pts = frame.cameras.map((p) => new THREE.Vector3(...p));
     const group = new THREE.Group();
@@ -257,12 +258,13 @@ export function Viewer({ splat, frame, placeholder, onPickCamera }: Props) {
     if (!c) return;
     if (!splat) {
       if (c.mesh) {
-        c.root.remove(c.mesh);
+        c.splatRoot.remove(c.mesh);
         c.mesh.dispose();
         c.mesh = null;
         c.invalidate();
         setHasMesh(false);
       }
+      alignSplat(frameRef.current);
       return;
     }
     let stale = false;
@@ -277,13 +279,15 @@ export function Viewer({ splat, frame, placeholder, onPickCamera }: Props) {
           return;
         }
         const prev = c.mesh;
-        c.root.add(mesh);
-        c.invalidate();
-        c.mesh = mesh;
         if (prev) {
-          c.root.remove(prev);
+          c.splatRoot.remove(prev);
           prev.dispose();
         }
+        // Splat novo: nasce com o alinhamento das poses atuais.
+        alignSplat(frameRef.current);
+        c.splatRoot.add(mesh);
+        c.invalidate();
+        c.mesh = mesh;
         if (!frame && !prev) fitToMesh(mesh);
         setHasMesh(true);
       })
@@ -295,9 +299,18 @@ export function Viewer({ splat, frame, placeholder, onPickCamera }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [splat?.path, splat?.version]);
 
+  /** Alinha o splat a `frame`; sem frame, fica à espera do próximo. */
+  function alignSplat(frame: SceneFrame | null) {
+    const c = ctx.current!;
+    alignTo(c.splatRoot, frame);
+    c.splatAligned = !!frame;
+    c.invalidate();
+  }
+
   function fitToMesh(mesh: SplatMesh) {
     const c = ctx.current!;
-    const box = mesh.getBoundingBox(true).applyMatrix4(c.root.matrixWorld);
+    c.splatRoot.updateMatrixWorld(true);
+    const box = mesh.getBoundingBox(true).applyMatrix4(c.splatRoot.matrixWorld);
     const center = box.getCenter(new THREE.Vector3());
     const size = box.getSize(new THREE.Vector3()).length();
     c.controls.target.copy(center);
@@ -371,4 +384,18 @@ export function Viewer({ splat, frame, placeholder, onPickCamera }: Props) {
       </div>
     </div>
   );
+}
+
+/** Transformação COLMAP → mundo: centro na origem, "up" em +Y. */
+function alignTo(group: THREE.Group, frame: SceneFrame | null) {
+  if (!frame) {
+    group.position.set(0, 0, 0);
+    group.quaternion.identity();
+    return;
+  }
+  const up = new THREE.Vector3(...frame.up).normalize();
+  const q = new THREE.Quaternion().setFromUnitVectors(up, new THREE.Vector3(0, 1, 0));
+  const center = new THREE.Vector3(...frame.center).applyQuaternion(q);
+  group.quaternion.copy(q);
+  group.position.copy(center.negate());
 }
