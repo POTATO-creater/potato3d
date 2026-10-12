@@ -229,6 +229,36 @@ export interface ExportStats {
   seconds: number;
 }
 
+/** Pacote do projeto (.gorbit): um ZIP com o que já foi processado, para
+ *  abrir em outra máquina (ou no outro app) como um projeto em cache. */
+export const PACKAGE_EXT = "gorbit";
+
+export interface PackRequest {
+  projectDir: string;
+  /** De `Host.pickPackageDest`. */
+  dest: string;
+  /** Etapas prontas a levar além dos frames (as de um job em andamento, não). */
+  include: { masks: boolean; poses: boolean; splat: boolean };
+  /** Vídeo ou imagens de origem, se ainda estiverem abertos. */
+  source: { kind: "video"; path: string } | { kind: "images"; paths: string[] } | null;
+  /** Ajustes da interface, devolvidos como vieram ao abrir o pacote. */
+  session: unknown;
+}
+
+export interface PackStats {
+  path: string;
+  bytes: number;
+  files: number;
+}
+
+export interface UnpackedProject {
+  projectDir: string;
+  /** A fonte restaurada: o vídeo ou as imagens (nunca os dois). */
+  video: string | null;
+  images: string[] | null;
+  session: unknown;
+}
+
 export interface SplatInfo {
   count: number;
   shDegree: number;
@@ -310,6 +340,10 @@ export interface Api {
     options: ExportOptions,
     onProgress: (p: { fraction: number; message: Msg }) => void,
   ): Promise<ExportStats>;
+  /** Pode rodar durante um job: `include` diz o que já está pronto. */
+  packProject(request: PackRequest, onProgress: (fraction: number) => void): Promise<PackStats>;
+  /** Extrai um pacote num projeto novo (nunca sobrescreve um existente). */
+  unpackProject(path: string, onProgress: (fraction: number) => void): Promise<UnpackedProject>;
   /** `rmbg`: incluir o modelo RMBG-1.4 (só baixado quando escolhido). */
   installPlan(rmbg: boolean): Promise<InstallPlan>;
   cancelInstall(): Promise<void>;
@@ -346,6 +380,8 @@ export interface Host {
    *  falhar quando a pasta não tem imagens. */
   pickFramesFolder(): Promise<string[]>;
   pickFolder(defaultPath?: string): Promise<string | null>;
+  /** Onde salvar o pacote do projeto; null se cancelado. */
+  pickPackageDest(projectDir: string): Promise<string | null>;
   /** Mostra o arquivo no gerenciador de arquivos (no web, baixa). */
   reveal(path: string): Promise<void>;
   /** Arquivos e pastas soltos na janela; devolve a função que para de ouvir. */

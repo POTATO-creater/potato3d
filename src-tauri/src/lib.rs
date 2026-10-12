@@ -5,6 +5,7 @@ pub mod frames;
 pub mod installer;
 pub mod masks;
 pub mod msg;
+pub mod package;
 pub mod pipeline;
 pub mod proc;
 pub mod scene;
@@ -116,6 +117,35 @@ async fn export_splat(
     result.map_err(err)?.map_err(|e| format!("{e:#}"))
 }
 
+/// Pode rodar com um job em andamento: a interface só pede as etapas que
+/// ele não está reescrevendo.
+#[tauri::command]
+async fn pack_project(request: package::PackRequest, on_progress: Channel<f32>) -> CmdResult<package::PackStats> {
+    tauri::async_runtime::spawn_blocking(move || package::pack(&request, throttled(on_progress)))
+        .await
+        .map_err(err)?
+        .map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+async fn unpack_project(path: String, on_progress: Channel<f32>) -> CmdResult<package::Unpacked> {
+    tauri::async_runtime::spawn_blocking(move || package::unpack(&PathBuf::from(path), throttled(on_progress)))
+        .await
+        .map_err(err)?
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// ~15 atualizações por segundo bastam para a barra.
+fn throttled(channel: Channel<f32>) -> impl FnMut(f32) {
+    let mut last = std::time::Instant::now() - std::time::Duration::from_secs(1);
+    move |fraction| {
+        if last.elapsed().as_millis() >= 66 || fraction >= 1.0 {
+            last = std::time::Instant::now();
+            let _ = channel.send(fraction);
+        }
+    }
+}
+
 #[tauri::command]
 fn start_job(config: JobConfig, on_event: Channel<JobEvent>, state: State<'_, AppState>) -> CmdResult<()> {
     let mut job = state.job.lock().unwrap();
@@ -194,6 +224,8 @@ pub fn run() {
             scene_frame,
             splat_info,
             export_splat,
+            pack_project,
+            unpack_project,
             start_job,
             cancel_job,
             install_plan,

@@ -10,16 +10,18 @@ const toHex = (c: [number, number, number]) => `#${c.map((v) => v.toString(16).p
 const fromHex = (h: string): [number, number, number] => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)) as never;
 
 /** Métodos de recorte disponíveis em cada sistema. */
+export function maskMethods(os: Os | undefined): MaskMethod[] {
+  return os === "windows"
+    ? ["people", "general", "rmbg", "chroma"]
+    : os === "web"
+      ? ["rmbg", "sam2", "chroma"]
+      : os === "macos"
+        ? ["auto", "rmbg", "chroma"]
+        : ["auto", "chroma"];
+}
+
 function methods(t: Messages, os: Os | undefined): { value: MaskMethod; label: string; hint: string }[] {
-  const ids: MaskMethod[] =
-    os === "windows"
-      ? ["people", "general", "rmbg", "chroma"]
-      : os === "web"
-        ? ["rmbg", "sam2", "chroma"]
-        : os === "macos"
-          ? ["auto", "rmbg", "chroma"]
-          : ["auto", "chroma"];
-  return ids.map((value) => ({ value, ...t.masks.methods[value] }));
+  return maskMethods(os).map((value) => ({ value, ...t.masks.methods[value] }));
 }
 
 export function MasksPanel({

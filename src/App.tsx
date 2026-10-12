@@ -4,6 +4,7 @@ import {
   DEFAULT_CHROMA,
   host,
   IMAGE_EXT,
+  PACKAGE_EXT,
   type ExportStats,
   type ImageSet,
   type JobEvent,
@@ -20,11 +21,12 @@ import { fmtDuration } from "./lib/format";
 import { revealLabel, stageBlurbs } from "./lib/platform";
 import { ToolsSetup } from "./components/ToolsSetup";
 import { PRESETS, presetById, type PresetId } from "./lib/presets";
-import { Sidebar } from "./components/Sidebar";
+import { Sidebar, type PackageStatus } from "./components/Sidebar";
 import { Viewer } from "./components/Viewer";
 import { StageStrip } from "./components/StageStrip";
 import { FrameLightbox, FramesGrid, LogView } from "./components/FramesGrid";
 import { ExportPanel } from "./components/ExportPanel";
+import { maskMethods } from "./components/MasksPanel";
 import { LanguageSelect } from "./components/LanguageSelect";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { useSidebarWidth } from "./components/SidebarResizer";
@@ -34,7 +36,9 @@ import { I18nProvider, useI18n } from "./i18n";
 import "./styles.css";
 
 const VIDEO_EXT = ["mp4", "mov", "m4v", "webm", "mkv", "avi"];
-const isVideo = (p: string) => VIDEO_EXT.includes(p.split(".").pop()?.toLowerCase() ?? "");
+const extOf = (p: string) => p.split(".").pop()?.toLowerCase() ?? "";
+const isVideo = (p: string) => VIDEO_EXT.includes(extOf(p));
+const isPackage = (p: string) => extOf(p) === PACKAGE_EXT;
 const STORE_KEY = "splatforge.settings.v3";
 const MASKS_KEY = "splatforge.masks.v1";
 
@@ -78,6 +82,43 @@ function loadStored(): { preset: PresetId | "custom"; settings: Settings } {
     /* armazenamento indisponível: usa o padrão */
   }
   return { preset: "balanced", settings: presetById("balanced").settings };
+}
+
+/** Ajustes da interface que vão no pacote do projeto (.gorbit). */
+interface Session {
+  settings: Settings;
+  masks: MaskOptions;
+  trim: { start: number; end: number | null };
+}
+
+/** Sessão de um pacote, mesclada com os padrões atuais: pode vir de outra
+ *  versão do app (com campos a menos) ou do outro app (desktop ↔ web), com um
+ *  método de recorte que não existe aqui. */
+function readSession(raw: unknown, current: Session, os: Tools["os"] | undefined): Session | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Partial<Session>;
+  const s = r.settings;
+  const m = r.masks;
+  const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  return {
+    settings: s
+      ? {
+          frames: { ...current.settings.frames, ...s.frames },
+          poses: { ...current.settings.poses, ...s.poses },
+          train: { ...current.settings.train, ...s.train },
+        }
+      : current.settings,
+    masks: m
+      ? {
+          ...current.masks,
+          ...m,
+          method: maskMethods(os).includes(m.method) ? m.method : current.masks.method,
+          chroma: { ...DEFAULT_CHROMA, ...m.chroma },
+          prompt: m.prompt ?? null,
+        }
+      : current.masks,
+    trim: { start: num(r.trim?.start) ?? 0, end: num(r.trim?.end) },
+  };
 }
 
 function matchPreset(s: Settings): PresetId | "custom" {
@@ -128,6 +169,8 @@ function AppView() {
   const [lastExport, setLastExport] = useState<ExportStats | null>(null);
   /** Mostra a exportação no 3D em vez do splat do treino. */
   const [previewExport, setPreviewExport] = useState<{ version: number } | null>(null);
+  const [pack, setPack] = useState<PackageStatus | null>(null);
+  const packBusy = pack?.kind === "saving" || pack?.kind === "opening";
 
   // Logs ficam num ref e só re-renderizam a cada 250 ms.
   const logs = useRef<string[]>([]);
@@ -193,8 +236,9 @@ function AppView() {
     [],
   );
 
+  /** `dir`: projeto já escolhido (pacote aberto); senão o padrão do vídeo. */
   const chooseVideo = useCallback(
-    async (path: string) => {
+    async (path: string, dir?: string) => {
       setVideoPath(path);
       setVideo(null);
       setImageSet(null);
@@ -208,13 +252,14 @@ function AppView() {
       } catch (e) {
         setSourceError({ kind: "video", message: String(e) });
       }
-      await openProject(await api.defaultProjectDir(path));
+      await openProject(dir ?? (await api.defaultProjectDir(path)));
     },
     [openProject],
   );
 
+  /** Devolve false se nenhuma imagem serviu (a entrada anterior fica). */
   const chooseImages = useCallback(
-    async (paths: string[]) => {
+    async (paths: string[], dir?: string) => {
       setSourceError(null);
       let set: ImageSet;
       try {
@@ -222,7 +267,7 @@ function AppView() {
       } catch (e) {
         // Mantém a entrada anterior: nada aqui serve como frame.
         setSourceError({ kind: "images", message: String(e) });
-        return;
+        return false;
       }
       setVideoPath(null);
       setVideo(null);
@@ -231,32 +276,100 @@ function AppView() {
       setMaskOpts((m) => (m.prompt ? { ...m, prompt: null } : m));
       logs.current = [];
       setLogLines([]);
-      await openProject(await api.defaultProjectDir(set.dir));
+      await openProject(dir ?? (await api.defaultProjectDir(set.dir)));
+      return true;
     },
     [openProject],
   );
 
-  /** Um vídeo, ou então imagens e pastas de frames. */
-  const openPaths = useCallback(
-    (paths: string[]) => {
-      const v = paths.find(isVideo);
-      if (v) chooseVideo(v);
-      else if (paths.length) chooseImages(paths);
+  const session: Session = { settings, masks: maskOpts, trim };
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
+
+  /** Projeto salvo em .gorbit: extrai num projeto novo e o abre com a fonte e
+   *  os ajustes de quando foi salvo, como um projeto em cache. */
+  const openPackage = useCallback(
+    async (path: string) => {
+      setPack({ kind: "opening", fraction: 0 });
+      try {
+        const r = await api.unpackProject(path, (fraction) => setPack({ kind: "opening", fraction }));
+        const restored = r.video ? (await chooseVideo(r.video, r.projectDir), true) : r.images ? await chooseImages(r.images, r.projectDir) : false;
+        if (!restored) {
+          // Sem a fonte: as etapas prontas continuam valendo (só os frames não refazem).
+          setVideoPath(null);
+          setVideo(null);
+          setImageSet(null);
+          logs.current = [];
+          setLogLines([]);
+          await openProject(r.projectDir);
+        }
+        const s = readSession(r.session, sessionRef.current, tools?.os);
+        if (s) {
+          setSettings(s.settings);
+          setPreset(matchPreset(s.settings));
+          setMaskOpts(s.masks);
+          setTrim(s.trim);
+        }
+        setPack(null);
+      } catch (e) {
+        setPack({ kind: "error", message: String(e) });
+      }
     },
-    [chooseVideo, chooseImages],
+    [chooseVideo, chooseImages, openProject, tools?.os],
   );
 
-  // Arrastar e soltar um vídeo, imagens ou uma pasta em qualquer lugar da janela.
+  /** Um pacote, um vídeo, ou então imagens e pastas de frames. */
+  const openPaths = useCallback(
+    (paths: string[]) => {
+      const pkg = paths.find(isPackage);
+      const v = paths.find(isVideo);
+      if (pkg) openPackage(pkg);
+      else if (v) chooseVideo(v);
+      else if (paths.length) chooseImages(paths);
+    },
+    [chooseVideo, chooseImages, openPackage],
+  );
+
+  // Arrastar e soltar um vídeo, imagens, uma pasta ou um pacote em qualquer lugar da janela.
   useEffect(
     () =>
       host.onDrop((paths) => {
-        if (!job.running) openPaths(paths);
+        if (!job.running && !packBusy) openPaths(paths);
       }),
-    [openPaths, job.running],
+    [openPaths, job.running, packBusy],
   );
 
   async function pickFiles() {
-    openPaths(await host.pickFiles([...VIDEO_EXT, ...IMAGE_EXT]));
+    openPaths(await host.pickFiles([...VIDEO_EXT, ...IMAGE_EXT, PACKAGE_EXT]));
+  }
+
+  async function pickPackage() {
+    const [p] = await host.pickFiles([PACKAGE_EXT]);
+    if (p) openPaths([p]);
+  }
+
+  /** Salva o projeto em .gorbit, inclusive no meio de um job: vão só as
+   *  etapas prontas que ele não está refazendo (o reducer já as descartou). */
+  async function savePackage() {
+    if (!projectDir || !job.frames.length || packBusy) return;
+    const dest = await host.pickPackageDest(projectDir);
+    if (!dest) return;
+    setPack({ kind: "saving", fraction: 0 });
+    try {
+      const stats = await api.packProject(
+        {
+          projectDir,
+          dest,
+          include: { masks: !!job.masks, poses: !!job.poses, splat: !!job.finalPly },
+          source: videoPath ? { kind: "video", path: videoPath } : imageSet ? { kind: "images", paths: imageSet.paths } : null,
+          session,
+        },
+        (fraction) => setPack({ kind: "saving", fraction }),
+      );
+      setPack({ kind: "saved", name: basename(stats.path), bytes: stats.bytes });
+    } catch (e) {
+      setPack({ kind: "error", message: String(e) });
+    }
   }
 
   async function pickFramesFolder() {
@@ -299,7 +412,8 @@ function AppView() {
 
   /** Roda as etapas de `from` a `to` (a mesma, para rodar só uma). */
   async function run(from: Stage, to: Stage = "train") {
-    if (!sourcePath || !projectDir) return;
+    // A fonte só é lida na etapa de frames (um pacote pode vir sem ela).
+    if (!projectDir || (!sourcePath && from === "frames") || packBusy) return;
     const masksForPoses = maskOpts.enabled && maskOpts.forPoses;
     const gone = discardedBy(from, to, masksForPoses);
     if (gone.has("poses")) setFrame(null);
@@ -313,7 +427,7 @@ function AppView() {
     try {
       await api.startJob(
         {
-          videoPath: sourcePath,
+          videoPath: sourcePath ?? "",
           images: imageSet?.paths ?? null,
           projectDir,
           fromStage: from,
@@ -333,7 +447,7 @@ function AppView() {
 
   /** Recusa ou aceita de volta frames (menu de contexto da grade). */
   async function setRejected(names: string[], rejected: boolean) {
-    if (!projectDir || job.running || !names.length) return;
+    if (!projectDir || job.running || packBusy || !names.length) return;
     try {
       const project = await api.setFramesRejected(projectDir, names, rejected);
       dispatch({ type: "framesEdited", project });
@@ -397,11 +511,13 @@ function AppView() {
       return i >= STAGES.indexOf(from) && i <= STAGES.indexOf(to);
     });
   const hasSource = !!projectDir && (!!video || !!imageSet);
+  /** Só a etapa de frames lê a fonte; as outras usam o que já está no projeto. */
+  const startable = (st: Stage) => hasSource || (!!projectDir && st !== "frames" && job.frames.length > 0);
   /** Por que cada etapa não pode rodar sozinha; null = pode. */
   const blocked = Object.fromEntries(
     STAGES.map((st) => {
       const tool = missingFor(st, st)[0];
-      const reason = !hasSource
+      const reason = !startable(st)
         ? t.stageStrip.needsSource
         : st === "masks" && !maskOpts.enabled
           ? t.sidebar.enableMasks
@@ -433,6 +549,9 @@ function AppView() {
         projectDir={projectDir}
         onPickProject={pickProject}
         onRevealProject={() => projectDir && host.reveal(job.finalPly ?? projectDir)}
+        onSavePackage={projectDir && job.frames.length ? savePackage : undefined}
+        onOpenPackage={pickPackage}
+        packageStatus={pack}
         preset={preset}
         onPreset={(id) => {
           setPreset(id);
@@ -453,7 +572,7 @@ function AppView() {
         onFromStage={setFromStage}
         available={available}
         running={job.running}
-        canRun={hasSource && missingFor(fromStage, "train").length === 0}
+        canRun={startable(fromStage) && !packBusy && missingFor(fromStage, "train").length === 0}
         onRun={() => run(fromStage)}
         onCancel={() => api.cancelJob()}
         exportPanel={
@@ -573,7 +692,7 @@ function AppView() {
                 version={framesVersion}
                 masksDir={job.masksDir}
                 onReject={projectDir ? setRejected : undefined}
-                locked={job.running}
+                locked={job.running || packBusy}
               />
             </div>
           )}

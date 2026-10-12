@@ -2,9 +2,9 @@
 
 import { Channel, convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import type { Api, ExportStats, Host, InstallEvent, InstallPlan, JobEvent } from "./api";
+import { PACKAGE_EXT, type Api, type ExportStats, type Host, type InstallEvent, type InstallPlan, type JobEvent } from "./api";
 
 function channel<T>(onMessage: (m: T) => void) {
   const c = new Channel<T>();
@@ -24,6 +24,8 @@ const api: Api = {
   splatInfo: (path) => invoke("splat_info", { path }),
   exportSplat: (projectDir, options, onProgress) =>
     invoke<ExportStats>("export_splat", { projectDir, options, onProgress: channel(onProgress) }),
+  packProject: (request, onProgress) => invoke("pack_project", { request, onProgress: channel(onProgress) }),
+  unpackProject: (path, onProgress) => invoke("unpack_project", { path, onProgress: channel(onProgress) }),
   installPlan: (rmbg) => invoke<InstallPlan>("install_plan", { rmbg }),
   cancelInstall: () => invoke("cancel_install"),
   installTools: (rmbg, onEvent) => invoke("install_tools", { rmbg, onEvent: channel<InstallEvent>(onEvent) }),
@@ -48,6 +50,14 @@ export const tauriHost: Host = {
   async pickFolder(defaultPath) {
     const p = await open({ directory: true, multiple: false, defaultPath });
     return typeof p === "string" ? p : null;
+  },
+  async pickPackageDest(projectDir) {
+    // Ao lado da pasta do projeto: video_splat → video_splat.gorbit.
+    const p = await save({
+      defaultPath: `${projectDir.replace(/[\\/]+$/, "")}.${PACKAGE_EXT}`,
+      filters: [{ name: "Gausify Orbit", extensions: [PACKAGE_EXT] }],
+    });
+    return p ?? null;
   },
   reveal: (path) => revealItemInDir(path),
   readBlob: (path) => fetch(convertFileSrc(path)).then((r) => r.blob()),

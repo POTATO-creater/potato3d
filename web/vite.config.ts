@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { ortWasmGzip } from "./ort-wasm-plugin";
@@ -8,6 +9,8 @@ import { serviceWorker } from "./sw-plugin";
 // web/pkg).
 export default defineConfig({
   root: import.meta.dirname,
+  // Vai no manifest.json do pacote do projeto (.gorbit).
+  define: { __APP_VERSION__: JSON.stringify(JSON.parse(readFileSync(`${import.meta.dirname}/../package.json`, "utf8")).version) },
   // Só agem no build: o .wasm do ONNX Runtime sai gzipado (limite de 25 MiB
   // do Cloudflare) e o service worker do cache offline, que no dev atrapalharia o HMR.
   plugins: [react(), ortWasmGzip(), serviceWorker(`${import.meta.dirname}/src/sw.template.js`)],

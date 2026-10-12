@@ -1,7 +1,7 @@
 // Host da versão web: os mesmos comandos do backend em Rust, implementados
 // no navegador (WebGPU, WASM, OPFS). A interface (src/) é a mesma do desktop.
 
-import { IMAGE_EXT, type Api, type Host, type InstallEvent, type JobEvent, type Tools } from "../../../src/lib/api";
+import { IMAGE_EXT, PACKAGE_EXT, type Api, type Host, type InstallEvent, type JobEvent, type Tools } from "../../../src/lib/api";
 import { brushRuntime } from "../brush";
 import { probeVideo } from "../pipeline/frames";
 import { cachedModel, downloadModel, MODELS } from "../pipeline/segment";
@@ -9,8 +9,10 @@ import { readFrame, readLens } from "../scene";
 import { exportSplat, splatInfo } from "./export";
 import {
   addImages,
+  addPackage,
   addVideo,
   basename,
+  download,
   groupName,
   inputImage,
   readFile,
@@ -23,6 +25,7 @@ import {
 import { applyUpdate, onUpdate } from "./update";
 import { runJob } from "./job";
 import { maskPreview, previewIdle } from "./preview";
+import { packProject, pickPackageDest, unpackProject } from "./package";
 import { importFolder, importUrl, layout, openProject, projectFor, readState, saveState, setFramesRejected } from "./project";
 
 const params = new URLSearchParams(location.search);
@@ -130,6 +133,9 @@ const api: Api = {
     return result;
   },
 
+  packProject,
+  unpackProject,
+
   async installPlan(rmbg) {
     const need = rmbg && !(await cachedModel(MODELS.rmbg));
     const spec = MODELS.rmbg;
@@ -169,12 +175,14 @@ const dropped = (paths: string[]) => dropHandlers.forEach((h) => h(paths));
 const ext = (name: string) => name.split(".").pop()?.toLowerCase() ?? "";
 // `._foo.jpg`: metadados do macOS em discos exFAT/FAT, não imagens.
 const isImage = (name: string) => !name.startsWith(".") && IMAGE_EXT.includes(ext(name));
+const isPackage = (name: string) => ext(name) === PACKAGE_EXT;
 
-/** Arquivos escolhidos ou soltos → caminhos: vídeos à parte, imagens
- *  agrupadas (as de uma pasta sob o nome dela). */
+/** Arquivos escolhidos ou soltos → caminhos: vídeos e pacotes à parte,
+ *  imagens agrupadas (as de uma pasta sob o nome dela). */
 function register(loose: File[], folders: { name: string; files: File[] }[] = []): string[] {
   const images = loose.filter((f) => isImage(f.name));
-  const paths = loose.filter((f) => !isImage(f.name)).map(addVideo);
+  const paths = loose.filter((f) => isPackage(f.name)).map(addPackage);
+  paths.push(...loose.filter((f) => !isImage(f.name) && !isPackage(f.name)).map(addVideo));
   if (images.length) paths.push(...addImages(images, groupName(images.map((f) => f.name))));
   for (const d of folders) paths.push(...addImages(d.files.filter((f) => isImage(f.name)), d.name));
   return paths;
@@ -239,23 +247,15 @@ function pickFiles(accept: string, folder = false): Promise<File[]> {
   });
 }
 
-function download(blob: Blob, name: string) {
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = name;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
-}
-
 export const webHost: Host = {
   api,
   // As URLs mudam a cada publicação, então o cache-buster não é preciso.
   fileUrl: (path) => urlOf(path),
   async pickFiles(extensions) {
     const files = await pickFiles(["video/*", "image/*", ...extensions.map((e) => `.${e}`)].join(","));
-    // Um vídeo de cada vez: entre vários arquivos, o vídeo tem prioridade.
-    const video = files.find((f) => !isImage(f.name));
-    return video ? register([video]) : register(files);
+    // Um vídeo (ou pacote) de cada vez: entre vários arquivos, ele tem prioridade.
+    const single = files.find((f) => !isImage(f.name));
+    return single ? register([single]) : register(files);
   },
   async pickFramesFolder() {
     const files = await pickFiles("", true);
@@ -282,6 +282,7 @@ export const webHost: Host = {
     await importFolder(src, root);
     return root;
   },
+  pickPackageDest,
   async reveal(path) {
     download(await readPublished(path), basename(path));
   },
