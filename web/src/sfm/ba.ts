@@ -3,7 +3,7 @@
 // mundo→câmera com atualização à esquerda R ← exp(δr) R, t ← t + δt.
 // Perda de Huber (IRLS) em pixels.
 
-import { choleskySolve, expSO3, inv3, type Mat3, mul3, type Vec3 } from "./linalg";
+import { choleskySolve, expSO3, inv3, type Mat3, mul3, type Vec3 } from "./linalg.ts";
 
 export interface BAProblem {
   f: number;

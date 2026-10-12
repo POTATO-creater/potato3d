@@ -66,6 +66,11 @@ fn load_project(project_dir: String) -> ProjectState {
 }
 
 #[tauri::command]
+fn set_frames_rejected(project_dir: String, names: Vec<String>, rejected: bool) -> CmdResult<ProjectState> {
+    pipeline::set_frames_rejected(&project_dir, &names, rejected).map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
 fn scene_frame(project_dir: String) -> CmdResult<scene::SceneFrame> {
     scene::read(&Layout::new(project_dir).model()).map_err(|e| format!("{e:#}"))
 }
@@ -185,6 +190,7 @@ pub fn run() {
             probe_images,
             default_project_dir,
             load_project,
+            set_frames_rejected,
             scene_frame,
             splat_info,
             export_splat,

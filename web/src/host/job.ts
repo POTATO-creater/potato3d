@@ -47,9 +47,10 @@ export async function runJob(cfg: JobConfig, emit: (e: JobEvent) => void, signal
   }
 }
 
-async function run(cfg: JobConfig, emit: (e: JobEvent) => void, signal: AbortSignal, at: { stage: Stage | null }) {
+async function run(cfg: JobConfig, emit: (e: JobEvent) => void, signal: AbortSignal, at: { stage: Stage | null }): Promise<string | null> {
   const l = layout(cfg.projectDir);
   const from = cfg.fromStage;
+  const to = before(cfg.toStage ?? "train", from) ? from : (cfg.toStage ?? "train");
   let state: ProjectState = await readState(l.root);
   const secs = (t: number) => (performance.now() - t) / 1000;
 
@@ -61,7 +62,7 @@ async function run(cfg: JobConfig, emit: (e: JobEvent) => void, signal: AbortSig
     await pruneProjects(l.root);
     // Etapas seguintes ficam inválidas.
     const clear = async () => {
-      for (const p of [l.images, `${l.dataset}/sparse`, l.masks, l.alpha, l.training, l.finalPly, l.exports]) await remove(p);
+      for (const p of [l.images, l.rejected, `${l.dataset}/sparse`, l.masks, l.alpha, l.training, l.finalPly, l.exports]) await remove(p);
       return dirAt(l.images, true);
     };
     let picked: PickedFrame[];
@@ -88,6 +89,7 @@ async function run(cfg: JobConfig, emit: (e: JobEvent) => void, signal: AbortSig
   } else if (!state.frames.length || !(await exists(l.images))) {
     throw new Error("não há frames extraídos neste projeto; rode a partir da etapa de frames");
   }
+  if (to === "frames") return null;
 
   // ---------- 2. Recorte (opcional) ----------
   const m = cfg.masks;
@@ -103,6 +105,8 @@ async function run(cfg: JobConfig, emit: (e: JobEvent) => void, signal: AbortSig
       await publishDir(l.masks, /\.png$/i);
       rep.progress(1, m.method === "chroma" ? { key: "masks.doneChroma", args: { n: stats.count } } : { key: "masks.done", args: { n: stats.count, backend: stats.backend } });
       state = { ...state, masks: stats, masksDir: l.masks };
+      // As poses usaram o recorte anterior.
+      if (m.forPoses) state = { ...state, poses: null, finalPly: null, lastPsnr: null, lastExport: null };
       await saveState(l.root, state);
       emit({ type: "masksReady", stats, dir: l.masks });
       emit({ type: "stageDone", stage: "masks", seconds: secs(t) });
@@ -110,6 +114,7 @@ async function run(cfg: JobConfig, emit: (e: JobEvent) => void, signal: AbortSig
       emit({ type: "stageSkipped", stage: "masks", reason: { key: "masks.disabled" } });
     }
   }
+  if (to === "masks") return null;
   if (m.enabled && !(state.masks && (await exists(l.masks))))
     throw new Error("não há recortes neste projeto; rode a partir da etapa de recorte");
 
@@ -130,6 +135,9 @@ async function run(cfg: JobConfig, emit: (e: JobEvent) => void, signal: AbortSig
         ...DEFAULT_SFM,
         window: cfg.poses.matchWindow,
         closedLoop: cfg.poses.closedLoop,
+        flatOrbit: cfg.poses.flatOrbit,
+        fillMissing: cfg.poses.fillMissing,
+        times: new Map(state.frames.filter((f) => !f.source).map((f) => [f.path.split("/").pop()!, f.time])),
         masksDir: m.enabled && m.forPoses ? await dirAt(l.masks) : undefined,
         signal,
       },
@@ -143,16 +151,19 @@ async function run(cfg: JobConfig, emit: (e: JobEvent) => void, signal: AbortSig
       total: Number(s.total),
       points: Number(s.points),
       reprojectionError: Number(s.meanError),
-      mapper: "SfM incremental (navegador)",
+      mapper: ["SfM incremental (navegador)", s.flat ? "órbita plana" : null].filter(Boolean).join(" · "),
+      inferred: Number(s.inferred ?? 0),
+      refined: Number(s.refined ?? 0),
     };
     if (stats.registered < 3) throw new Error(`só ${stats.registered} câmeras registradas; o vídeo não reconstrói`);
     state = { ...state, poses: stats, finalPly: null, lastPsnr: null, lastExport: null };
     await saveState(l.root, state);
     emit({ type: "posesReady", stats });
     emit({ type: "stageDone", stage: "poses", seconds: secs(t) });
-  } else if (!(await hasModel())) {
+  } else if (!state.poses || !(await hasModel())) {
     throw new Error("não há poses calculadas neste projeto; rode a partir da etapa de poses");
   }
+  if (to === "poses") return null;
 
   // ---------- 4. Treino ----------
   at.stage = "train";

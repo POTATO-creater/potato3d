@@ -26,6 +26,8 @@ export const layout = (root: string) => ({
   state: `${root}/project.json`,
   dataset: `${root}/dataset`,
   images: `${root}/dataset/images`,
+  /** Frames recusados à mão, fora do dataset. */
+  rejected: `${root}/rejected`,
   model: `${root}/dataset/sparse/0`,
   masks: `${root}/masks`,
   alpha: `${root}/dataset_alpha`,
@@ -65,6 +67,7 @@ export async function openProject(root: string): Promise<ProjectState> {
   const l = layout(root);
   const s = await readState(root);
   await publishDir(l.images, IMAGE_EXT);
+  await publishDir(l.rejected, IMAGE_EXT);
   if (s.masks) await publishDir(l.masks, /\.png$/i);
   for (const p of [s.finalPly, s.lastExport?.path])
     if (p) {
@@ -76,6 +79,41 @@ export async function openProject(root: string): Promise<ProjectState> {
       }
     }
   return s;
+}
+
+/** Recusa (move para `rejected/`) ou aceita de volta frames, como
+ *  `set_frames_rejected` em src-tauri/src/pipeline.rs. */
+export async function setFramesRejected(root: string, names: string[], rejected: boolean): Promise<ProjectState> {
+  const l = layout(root);
+  const state = await readState(root);
+  const want = new Set(names);
+  let changed = false;
+  let missingMask = false;
+  const frames = [...state.frames];
+  const save = async () => {
+    if (!changed) return state;
+    const next: ProjectState = { ...state, frames, poses: null, ...(missingMask ? { masks: null, masksDir: null } : {}) };
+    await saveState(root, next);
+    return next;
+  };
+  try {
+    for (const [i, f] of frames.entries()) {
+      const name = basename(f.path);
+      if (!!f.rejected === rejected || !want.has(name)) continue;
+      const path = `${rejected ? l.rejected : l.images}/${name}`;
+      publish(path, await writeFile(path, await readFile(f.path)));
+      await remove(f.path);
+      if (!rejected && !(await exists(`${l.masks}/${stem(name)}.png`))) missingMask = true;
+      const { rejected: _, ...rest } = f;
+      frames[i] = rejected ? { ...rest, path, rejected: true } : { ...rest, path };
+      changed = true;
+    }
+  } catch (e) {
+    // Grava o que já mudou de lugar antes de repassar o erro.
+    await save();
+    throw e;
+  }
+  return save();
 }
 
 /** Mantém só os projetos mais recentes: cada um ocupa centenas de MB na
@@ -119,7 +157,9 @@ async function datasetState(root: string, mapper: string, saved?: ProjectState):
       : await framesOf(l.images);
   const bin = async (n: string) => (await exists(`${l.model}/${n}`) ? (await readFile(`${l.model}/${n}`)).arrayBuffer() : null);
   const images = await bin("images.bin");
-  const masks = saved?.masks && (await listFiles(l.masks, /\.png$/i)).length === names.size ? saved.masks : null;
+  // Pode haver recortes a mais, de frames recusados (que não vêm junto).
+  const cut = new Set(await listFiles(l.masks, /\.png$/i));
+  const masks = saved?.masks && [...names].every((n) => cut.has(`${stem(n)}.png`)) ? saved.masks : null;
   return {
     ...emptyState(),
     videoPath: saved?.videoPath ?? null,

@@ -5,6 +5,7 @@ import type { Msg } from "../../../src/lib/api";
 import { colmapFiles } from "./colmap";
 import type { FeatureRequest, FeatureResult } from "./features.worker";
 import { HammingMatcher } from "./matcher";
+import { correspondences, fillMissing, flattenOrbit } from "./orbit.ts";
 import type { ImageFeatures, SfmModel } from "./reconstruct";
 import type { SfmWorkerMessage } from "./sfm.worker";
 
@@ -16,6 +17,13 @@ export interface SfmOptions {
   closedLoop: boolean;
   /** Máscaras `<nome sem extensão>.png` (0 = ignorar): features só no sujeito. */
   masksDir?: FileSystemDirectoryHandle;
+  /** Câmeras forçadas no mesmo plano da órbita. */
+  flatOrbit?: boolean;
+  /** Pose inferida pelos vizinhos para os frames não registrados. */
+  fillMissing?: boolean;
+  /** Instante de cada imagem pelo nome, para a inferência seguir a velocidade
+   *  da câmera; sem ele, vale a ordem dos nomes. */
+  times?: Map<string, number>;
   /** Cancela: os workers são encerrados e a promessa rejeita. */
   signal?: AbortSignal;
 }
@@ -51,6 +59,16 @@ export function orbitPairs(n: number, window: number, closed: boolean): [number,
       }
     }
   return out;
+}
+
+/** Instante de cada imagem (na ordem dos nomes); se faltar ou não crescer
+ *  (frames de imagens soltas), o número no nome (00012.jpg → 12), que guarda
+ *  os buracos dos frames recusados. */
+export function orbitTimes(names: string[], times?: Map<string, number>): number[] {
+  const t = names.map((n) => times?.get(n));
+  if (t.every((v, i) => v !== undefined && (i === 0 || v > t[i - 1]!))) return t as number[];
+  const idx = names.map((n) => Number(n.replace(/\.[^.]+$/, "")));
+  return idx.every((v, i) => Number.isFinite(v) && (i === 0 || v > idx[i - 1])) ? idx : names.map((_, i) => i);
 }
 
 async function extractAll(
@@ -164,10 +182,45 @@ export async function runSfm(
     w.postMessage({ imgs, matches, closedLoop: opts.closedLoop });
   });
   timings.reconstruction = performance.now() - t2;
-  timings.total = performance.now() - t0;
   log(
     `Reconstrução: ${model.stats.registered}/${names.length} câmeras, ${model.stats.points} pontos, ` +
       `erro médio ${Number(model.stats.meanError).toFixed(2)} px, f = ${model.f.toFixed(1)} em ${(timings.reconstruction / 1000).toFixed(1)} s`,
   );
+
+  // Testes (scripts/web-bench/headless.mjs): `?sfmDrop=0,20,21` tira essas
+  // câmeras do modelo, como se a reconstrução não as tivesse registrado;
+  // `?sfmRefine=0` desliga o refinamento das poses inferidas.
+  const test = new URLSearchParams(globalThis.location?.search ?? "");
+  const drop = new Set((test.get("sfmDrop") ?? "").split(",").filter(Boolean).map(Number));
+  if (drop.size) {
+    for (const i of drop) model.poses[i] = null;
+    model.points = model.points
+      .map((p) => ({ ...p, obs: p.obs.filter(([i]) => !drop.has(i)) }))
+      .filter((p) => p.obs.length >= 2);
+    model.stats.registered = model.poses.filter(Boolean).length;
+    log(`teste: ${drop.size} câmeras tiradas do modelo`);
+  }
+
+  // Correções da órbita, como em colmap.rs (órbita plana) e pipeline.rs.
+  const xy = feats.map((f) => f.xy);
+  if (opts.flatOrbit) {
+    progress(0.99, { key: "poses.flattening" });
+    const dev = flattenOrbit(model, xy);
+    if (dev == null) log("órbita plana não aplicada: as câmeras quase não formam um arco");
+    else {
+      model.stats.flat = 1;
+      log(`órbita plana: maior desvio de altura corrigido ${(dev * 100).toFixed(2)}% do raio, erro ${Number(model.stats.meanError).toFixed(2)} px`);
+    }
+  }
+  if (opts.fillMissing) {
+    const at = orbitTimes(names, opts.times);
+    const corr = test.get("sfmRefine") === "0" ? undefined : correspondences(model, xy, matches);
+    const { inferred, refined } = fillMissing(model, at, { flat: opts.flatOrbit, correspondences: corr });
+    model.stats.inferred = inferred.length;
+    model.stats.refined = refined.length;
+    if (inferred.length) log(`poses inferidas pelos vizinhos: ${inferred.map((i) => names[i]).join(", ")}`);
+    for (const [i, n] of refined) log(`pose de ${names[i]} refinada contra ${n} pontos 3D`);
+  }
+  timings.total = performance.now() - t0;
   return { model, files: colmapFiles(model, names, feats.map((f) => f.xy)), names, timings };
 }

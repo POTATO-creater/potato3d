@@ -120,6 +120,9 @@ export interface PoseOptions {
   closedLoop: boolean;
   /** Câmeras forçadas no mesmo plano. Ausente em configurações antigas. */
   flatOrbit?: boolean;
+  /** Frames sem pose registrada ganham uma inferida pelos vizinhos e entram
+   *  no treino. Ausente em configurações antigas. */
+  fillMissing?: boolean;
 }
 
 export interface TrainOptions {
@@ -148,6 +151,8 @@ export interface JobConfig extends Omit<Settings, "frames"> {
   images: string[] | null;
   projectDir: string;
   fromStage: Stage;
+  /** Última etapa a rodar (inclusive); ausente = até o treino. */
+  toStage?: Stage;
   frames: FrameOptions;
   masks: MaskOptions;
 }
@@ -159,6 +164,9 @@ export interface FrameInfo {
   /** Nome da imagem de origem quando os frames vieram de imagens (aí `time`
    *  não se aplica). */
   source?: string;
+  /** Recusado à mão: o arquivo sai do dataset (fica em `rejected/`) e não
+   *  entra no recorte, nas poses nem no treino. */
+  rejected?: boolean;
 }
 
 export interface ModelStats {
@@ -167,6 +175,10 @@ export interface ModelStats {
   points: number;
   reprojectionError: number | null;
   mapper: string;
+  /** Poses inferidas pelos vizinhos (frames que o SfM não registrou). */
+  inferred?: number;
+  /** Dessas, as refinadas contra os pontos 3D. */
+  refined?: number;
 }
 
 export interface ProjectState {
@@ -235,7 +247,8 @@ export type JobEvent =
   | { type: "posesReady"; stats: ModelStats }
   | { type: "train"; event: TrainEvent }
   | { type: "stageDone"; stage: Stage; seconds: number }
-  | { type: "finished"; ply: string; seconds: number }
+  /** `ply` null quando o job parou antes do treino. */
+  | { type: "finished"; ply: string | null; seconds: number }
   | { type: "failed"; stage: Stage | null; error: string }
   | { type: "cancelled" };
 
@@ -274,6 +287,9 @@ export interface Api {
   sceneFrame(projectDir: string): Promise<SceneFrame>;
   cancelJob(): Promise<void>;
   splatInfo(path: string): Promise<SplatInfo>;
+  /** Recusa (ou aceita de volta) frames pelo nome do arquivo. Invalida as
+   *  poses; aceitar um frame sem recorte invalida também o recorte. */
+  setFramesRejected(projectDir: string, names: string[], rejected: boolean): Promise<ProjectState>;
   exportSplat(
     projectDir: string,
     options: ExportOptions,

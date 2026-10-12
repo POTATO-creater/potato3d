@@ -1185,9 +1185,18 @@ body.resizing canvas {
   gap: 8px;
 }
 .stage-title {
+  /* Só encolhe depois que o rótulo da ferramenta sumiu. */
+  flex-shrink: 0.001;
+  min-width: 0;
   font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
+/* Em janela estreita, o rótulo da ferramenta some antes do título. */
 .stage-tool {
+  flex-shrink: 100;
+  min-width: 0;
   font-size: 11px;
   color: var(--muted);
   white-space: nowrap;
@@ -1195,9 +1204,41 @@ body.resizing canvas {
   text-overflow: ellipsis;
 }
 .stage-time {
+  flex: none;
   margin-left: auto;
   font-size: 11.5px;
   color: var(--text-2);
+  white-space: nowrap;
+}
+/* ▶ de cada etapa: roda só ela. */
+.stage-run {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin: -3px -4px -3px auto;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.stage-time + .stage-run {
+  margin-left: 0;
+}
+.stage-run:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.stage-run:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.stage-run.stop {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 .dot {
   flex: none;
@@ -1314,6 +1355,7 @@ body.resizing canvas {
 
 .frames-summary {
   display: flex;
+  align-items: center;
   gap: 14px;
   margin-bottom: 12px;
   font-size: 12.5px;
@@ -1352,6 +1394,78 @@ body.resizing canvas {
 }
 .thumb.weak {
   border-color: rgba(255, 107, 107, 0.6);
+}
+.thumb.menu-open {
+  border-color: var(--accent);
+}
+/* Recusado: fora do dataset, mas ainda visível para aceitar de volta. */
+.thumb.rejected img {
+  opacity: 0.35;
+  filter: grayscale(1);
+}
+.thumb.rejected .thumb-bar {
+  opacity: 0.35;
+}
+.thumb-tag,
+.rejected-tag {
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(255, 107, 107, 0.16);
+  color: var(--bad);
+}
+.thumb-tag {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  background: rgba(30, 10, 10, 0.8);
+}
+.rejected-tag {
+  margin-left: 8px;
+}
+.frames-hint {
+  margin-left: auto;
+  font-size: 11.5px;
+}
+.ctx-menu {
+  position: fixed;
+  z-index: 20;
+  min-width: 190px;
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+}
+.ctx-menu button {
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ctx-menu button:hover:not(:disabled) {
+  background: var(--panel-3);
+}
+.ctx-menu button.danger {
+  color: var(--bad);
+}
+.ctx-menu button:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+.ctx-menu hr {
+  margin: 4px 2px;
+  border: 0;
+  border-top: 1px solid var(--border);
 }
 .thumb-meta {
   position: absolute;
@@ -1409,9 +1523,10 @@ body.resizing canvas {
   width: 46px;
   height: 46px;
   margin-top: -23px;
-  font-size: 30px;
-  line-height: 1;
-  padding-bottom: 4px;
+}
+.lightbox-nav svg {
+  width: 22px;
+  height: 22px;
 }
 .lightbox-nav.prev {
   left: 20px;
@@ -1424,9 +1539,6 @@ body.resizing canvas {
   right: 20px;
   width: 36px;
   height: 36px;
-  font-size: 22px;
-  line-height: 1;
-  padding-bottom: 2px;
 }
 .lightbox-nav:hover:not(:disabled),
 .lightbox-close:hover {

@@ -48,6 +48,9 @@ pub struct FrameInfo {
     /// `time` não se aplica).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+    /// Recusado à mão: a imagem fica em `rejected/`, fora do dataset.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub rejected: bool,
 }
 
 /// Frames já extraídos, na ordem da órbita.
@@ -220,6 +223,7 @@ pub fn select(
             time: opts.trim_start + best as f64 / sample_fps,
             sharpness: scores[best],
             source: None,
+            rejected: false,
         });
     }
     std::fs::remove_dir_all(raw_dir)?;
@@ -409,6 +413,7 @@ pub fn from_images(
             time: 0.0,
             sharpness: scores[k],
             source: Some(name_of(&sources[k])),
+            rejected: false,
         })
         .collect())
 }

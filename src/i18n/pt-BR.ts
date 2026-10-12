@@ -126,6 +126,8 @@ export const ptBR = {
     closedLoopHint: "casa o fim com o começo",
     flatOrbit: "Forçar órbita plana",
     flatOrbitHint: "câmeras na mesma altura; só para vídeos que giram em nível",
+    fillMissing: "Usar todos os frames",
+    fillMissingHint: "frames sem câmera estimada ganham pose inferida pelos vizinhos e entram no treino",
     training: "Treino (Brush)",
     steps: "Passos",
     shDegree: "Grau SH",
@@ -308,6 +310,14 @@ export const ptBR = {
     next: "Próximo",
     close: "Fechar",
     noLog: "Nenhum log ainda.",
+    rejected: "Recusado",
+    reject: "Recusar frame",
+    accept: "Aceitar frame",
+    open: "Abrir",
+    rejectWeak: (n: number) => `Recusar os ${n} com pouca nitidez`,
+    acceptAll: (n: number) => `Aceitar todos os ${n} recusados`,
+    rejectedCount: (n: number) => `${n} recusados`,
+    rejectHint: "Botão direito para recusar ou aceitar",
   },
 
   stageStrip: {
@@ -325,6 +335,15 @@ export const ptBR = {
     stepsPerSec: (n: string) => `${n} passos/s`,
     remaining: "Restante",
     psnrTitle: "Medido em frames que não entram no treino. >30 dB é ótimo; <25 dB indica vídeo inconsistente.",
+    inferred: "Inferidas",
+    inferredTitle: "Câmeras que a estimativa não registrou, posicionadas pela trajetória dos frames vizinhos",
+    refined: "Refinadas",
+    refinedTitle: "Poses inferidas que foram ajustadas aos pontos 3D que o frame enxerga",
+    rejected: "Recusados",
+    runStage: "Executar só esta etapa",
+    stopStage: "Cancelar",
+    needsSource: "Abra um vídeo ou imagens",
+    needsTool: (name: string) => `Requer ${name}`,
   },
 
   setup: {
@@ -396,6 +415,7 @@ export const ptBR = {
     "stage.starting": () => "Iniciando",
     "stage.failed": () => "Falhou",
     "stage.cancelled": () => "Cancelado",
+    "stage.framesChanged": () => "Os frames mudaram: execute de novo",
 
     "frames.reading": () => "Lendo vídeo",
     "frames.decoding": () => "Decodificando vídeo",

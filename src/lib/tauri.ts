@@ -19,6 +19,7 @@ const api: Api = {
   defaultProjectDir: (videoPath) => invoke("default_project_dir", { videoPath }),
   loadProject: (projectDir) => invoke("load_project", { projectDir }),
   sceneFrame: (projectDir) => invoke("scene_frame", { projectDir }),
+  setFramesRejected: (projectDir, names, rejected) => invoke("set_frames_rejected", { projectDir, names, rejected }),
   cancelJob: () => invoke("cancel_job"),
   splatInfo: (path) => invoke("splat_info", { path }),
   exportSplat: (projectDir, options, onProgress) =>
