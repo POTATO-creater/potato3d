@@ -307,6 +307,36 @@ impl Despill {
     }
 }
 
+/// Raio da erosão do alpha de treino. A borda da máscara mistura sujeito e
+/// fundo (e o recorte vaza um pouco além do contorno); sem erodir, o Brush
+/// aprende essa franja como uma casca colorida em volta do objeto. Mesmo
+/// valor do TripoSplat (filtro de mínimo 3×3).
+const ALPHA_ERODE: u32 = 1;
+
+/// Erosão em escala de cinza: mínimo numa janela (2r+1)², separável, com a
+/// borda da imagem replicada (o sujeito que toca a borda não encolhe ali).
+pub fn erode(mask: &GrayImage, r: u32) -> GrayImage {
+    if r == 0 {
+        return mask.clone();
+    }
+    let (w, h) = mask.dimensions();
+    let r = r as i64;
+    let min_along = |src: &GrayImage, dx: i64, dy: i64| {
+        GrayImage::from_fn(w, h, |x, y| {
+            let m = (-r..=r)
+                .map(|k| {
+                    let sx = (x as i64 + k * dx).clamp(0, w as i64 - 1) as u32;
+                    let sy = (y as i64 + k * dy).clamp(0, h as i64 - 1) as u32;
+                    src.get_pixel(sx, sy)[0]
+                })
+                .min()
+                .unwrap();
+            image::Luma([m])
+        })
+    };
+    min_along(&min_along(mask, 1, 0), 0, 1)
+}
+
 /// Lê a máscara de um frame já no tamanho dele.
 fn load_mask(masks: &Path, img_path: &Path, (w, h): (u32, u32)) -> Result<GrayImage> {
     let stem = img_path.file_stem().context("nome de frame inválido")?;
@@ -365,7 +395,8 @@ pub fn background_color(images: &[PathBuf], masks: &Path) -> Result<Option<[u8; 
 }
 
 /// Monta o dataset de treino com fundo transparente: PNGs RGBA (alpha =
-/// máscara) e uma cópia do modelo COLMAP com os nomes trocados para `.png`.
+/// máscara erodida em `ALPHA_ERODE` px) e uma cópia do modelo COLMAP com os
+/// nomes trocados para `.png`.
 /// O Brush procura cada imagem pelo nome registrado no `images.bin`.
 /// `despill`: intensidade 0–100; devolve a cor de fundo quando aplicou.
 pub fn build_alpha_dataset(dataset: &Path, masks: &Path, out: &Path, despill: Option<f32>) -> Result<Option<[u8; 3]>> {
@@ -387,7 +418,7 @@ pub fn build_alpha_dataset(dataset: &Path, masks: &Path, out: &Path, despill: Op
     images.par_iter().try_for_each(|img_path| -> Result<()> {
         let stem = img_path.file_stem().context("nome de frame inválido")?;
         let mut rgba = image::open(img_path)?.into_rgba8();
-        let mask = load_mask(masks, img_path, rgba.dimensions())?;
+        let mask = erode(&load_mask(masks, img_path, rgba.dimensions())?, ALPHA_ERODE);
         for (px, m) in rgba.pixels_mut().zip(mask.pixels()) {
             px[3] = m[0];
             if let Some(d) = despill.filter(|_| m[0] > 0) {
@@ -757,6 +788,27 @@ mod tests {
         assert_eq!(shape, [1, 3, 672, 512]);
         let m = ModelKind::Modnet.postprocess(&vec![0.5; 512 * 672], (512, 672), 960, 1280);
         assert!(m.pixels().all(|p| p[0] == 128));
+    }
+
+    /// Quadrado 4×4 encolhe 1 px de cada lado; o que toca a borda da imagem
+    /// não encolhe ali; a franja suave anda 1 px para dentro.
+    #[test]
+    fn erode_shrinks_one_pixel() {
+        let mut m = GrayImage::new(10, 8);
+        for y in 2..6 {
+            for x in 2..6 {
+                m.put_pixel(x, y, image::Luma([255]));
+            }
+        }
+        for y in 0..8 {
+            m.put_pixel(9, y, image::Luma([255]));
+            m.put_pixel(8, y, image::Luma([128]));
+        }
+        let e = erode(&m, 1);
+        let on = |x, y| e.get_pixel(x, y)[0];
+        assert_eq!((on(2, 2), on(3, 3), on(4, 4), on(5, 5)), (0, 255, 255, 0));
+        assert_eq!((on(9, 0), on(9, 7), on(8, 3)), (128, 128, 0));
+        assert_eq!(erode(&m, 0), m);
     }
 
     /// Fundo verde com um quadrado vermelho no meio e um "furo" verde dentro

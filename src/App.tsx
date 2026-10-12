@@ -67,7 +67,13 @@ type Tab = "viewer" | "frames" | "log";
 function loadStored(): { preset: PresetId | "custom"; settings: Settings } {
   try {
     const raw = localStorage.getItem(STORE_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const saved = JSON.parse(raw);
+      // Preset nomeado segue a definição atual (ajustes novos chegam a quem já
+      // o escolheu); só o "personalizado" guarda os valores salvos.
+      const p = PRESETS.find((x) => x.id === saved.preset);
+      return p ? { preset: p.id, settings: p.settings } : saved;
+    }
   } catch {
     /* armazenamento indisponível: usa o padrão */
   }

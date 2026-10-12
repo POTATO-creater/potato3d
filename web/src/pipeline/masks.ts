@@ -3,6 +3,7 @@
 
 import type { MaskOptions, MaskStats, Msg, SubjectPrompt } from "../../../src/lib/api";
 import { applyDespill, backgroundColor, borderKey, chromaMask, despillFor, type RGB } from "./chroma";
+import { ALPHA_ERODE, erode } from "./erode";
 import { encodePng } from "./png";
 import { SAM2_LICENSE, Sam2Tracker } from "./sam2";
 import { logitsToMask, promptFrame, promptPixels, type FrameOrigin } from "./sam2-math";
@@ -146,7 +147,7 @@ async function sam2Masks(
   return { count: names.length, noSubject, meanCoverage: coverage / names.length, backend: tracker.backend, keyColor: null };
 }
 
-/** PNG RGBA com A = máscara (alfa direto) e despill no sujeito. */
+/** PNG RGBA com A = máscara erodida (alfa direto) e despill no sujeito. */
 export async function buildAlpha(
   images: FileSystemDirectoryHandle,
   masks: FileSystemDirectoryHandle,
@@ -176,7 +177,8 @@ export async function buildAlpha(
     );
   }
   for (let i = 0; i < names.length; i++) {
-    const { rgba, mask, w, h } = await load(names[i]);
+    const { rgba, mask: raw, w, h } = await load(names[i]);
+    const mask = erode(raw, w, h, ALPHA_ERODE);
     if (despill) applyDespill(rgba, mask, despill);
     for (let p = 0; p < mask.length; p++) rgba[4 * p + 3] = mask[p];
     await write(out, `${stem(names[i])}.png`, await encodePng(rgba, w, h, 4));

@@ -26,7 +26,10 @@
 //
 // Ajustes (partem do preset Prévia): --preset preview|balanced|quality,
 // --frames N, --steps N, --max-res N, --flat (órbita plana), --fill (usar
-// todos os frames; com &sfmDrop=0,20,… na URL, simula câmeras perdidas). O Chrome vem de CHROME (padrão: o do
+// todos os frames; com &sfmDrop=0,20,… na URL, simula câmeras perdidas),
+// --contrib N (poda por contribuição negativa, julgando quem contribuiu em ≥ N
+// vistas; --contrib-ratio R e --contrib-start F ajustam), --opac-solid W,
+// --opac-binary W e --volume W (regularização de opacidade e volume). O Chrome vem de CHROME (padrão: o do
 // macOS em /Applications).
 
 import { spawn } from "node:child_process";
@@ -161,6 +164,12 @@ if (opt("steps")) settings.train.totalSteps = Number(opt("steps"));
 if (opt("max-res")) settings.train.maxResolution = Number(opt("max-res"));
 if (flag("flat")) settings.poses.flatOrbit = true;
 if (flag("fill")) settings.poses.fillMissing = true;
+if (opt("contrib")) settings.train.contribPruneMinViews = Number(opt("contrib"));
+if (opt("contrib-ratio")) settings.train.contribPruneRatio = Number(opt("contrib-ratio"));
+if (opt("contrib-start")) settings.train.contribPruneStart = Number(opt("contrib-start"));
+if (opt("opac-solid")) settings.train.opacSolidWeight = Number(opt("opac-solid"));
+if (opt("opac-binary")) settings.train.opacBinaryWeight = Number(opt("opac-binary"));
+if (opt("volume")) settings.train.volumeRegWeight = Number(opt("volume"));
 const mask = opt("mask");
 const masks = {
   enabled: !!mask,
