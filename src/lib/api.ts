@@ -136,6 +136,21 @@ export interface TrainOptions {
   ssimWeight: number;
   /** Regularização de escala; omitido = padrão do Brush. */
   scaleLossWeight?: number;
+  /** Poda as gaussianas cuja contribuição para a perda, somada nas vistas
+   *  da janela de refinamento, é negativa (atrapalham mais que ajudam:
+   *  fantasmas e contornos duplicados). Mínimo de vistas para julgar;
+   *  omitido ou 0 = desligado. Só no Brush do web por enquanto. */
+  contribPruneMinViews?: number;
+  /** Quão nítido o prejuízo precisa ser: saldo < −razão × soma dos |efeitos|. */
+  contribPruneRatio?: number;
+  /** Fração do treino antes de começar a podar por contribuição. */
+  contribPruneStart?: number;
+  /** Regularização do DeG: peso da média de 1 − α (empurra para opaco). */
+  opacSolidWeight?: number;
+  /** Peso da média de α(1 − α) (empurra a opacidade para 0 ou 1). */
+  opacBinaryWeight?: number;
+  /** Peso do tamanho médio das gaussianas, relativo à cena (compactas). */
+  volumeRegWeight?: number;
 }
 
 export interface Settings {

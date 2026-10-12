@@ -301,6 +301,24 @@ O que foi preciso consertar para o treino rodar (e rodar rápido) no navegador:
     resumed after completion" no fim do treino).
   - `Training.exportPly()`: o mesmo export do Brush nativo (piso de escala
     embutido, unidades do dataset restauradas).
+- **Patch `web/brush/deg.patch` (experimental, tudo desligado por padrão):**
+  duas ideias do DeG (paper do TripoSplat).
+  - Regularização de opacidade e volume (`opacBinaryWeight`,
+    `opacSolidWeight`, `volumeRegWeight` nas opções de treino). Na órbita de
+    teste com máscara, `opacBinaryWeight: 0.01` levou as gaussianas
+    semitransparentes de 71% para 14% com −0,2 dB nos frames de teste;
+    `volumeRegWeight: 1` deixou-as ~3× menores e 46% menos numerosas, com
+    −0,4 dB. Visualmente a base ficou melhor (bordas mais suaves), então
+    nenhum preset liga essas opções.
+  - Contribuição exata de cada gaussiana para a perda L1 da vista (quanto a
+    perda sobe se ela sumir), num kernel irmão do backward do rasterizador;
+    `contribPruneMinViews > 0` poda as de saldo negativo
+    (`contribPruneRatio`, `contribPruneStart` ajustam). Não melhorou a
+    aparência nos testes: a névoa vem de gaussianas que ajudam os frames.
+  - Teste nativo: `cargo +1.99 test -p brush-render --lib
+    contribution_matches_removal` (no clone `web/.brush`). O `pnpm web:wasm`
+    refaz o clone do zero: gere o patch (`git diff` contra o commit com o
+    brush-js.patch aplicado) antes de compilar.
 
 ### Etapas no navegador
 

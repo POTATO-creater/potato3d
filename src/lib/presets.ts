@@ -16,6 +16,10 @@ export interface Preset {
 // passo é ~3× mais barato e, no mesmo tempo, rende PSNR maior.
 //   sem SSIM  5k → 29,7 dB (~3 min) · 15k → 32,6 dB (8,6 min)
 //   com SSIM  7k → 31,8 dB (9,3 min) · 20k → 33,2 dB (~28 min)
+//
+// opacBinaryWeight (só no Brush do web) fica de fora: no mesmo vídeo, com
+// máscara, 0,01 levou as gaussianas semitransparentes de 71% para 14% e tirou
+// a névoa sob o queixo, mas endureceu as bordas — a base pareceu melhor.
 export const PRESETS: Preset[] = [
   {
     id: "preview",

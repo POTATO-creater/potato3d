@@ -81,6 +81,12 @@ function applyOptions(cfg: Record<string, unknown>, o: TrainOptions, log: (s: st
     "eval-every": o.evalSplitEvery ? o.exportEvery : 0,
   };
   if (o.scaleLossWeight != null) set["scale-loss-weight"] = o.scaleLossWeight;
+  if (o.contribPruneMinViews) set["contrib-prune-min-views"] = o.contribPruneMinViews;
+  if (o.contribPruneRatio != null) set["contrib-prune-ratio"] = o.contribPruneRatio;
+  if (o.contribPruneStart != null) set["contrib-prune-start"] = o.contribPruneStart;
+  if (o.opacSolidWeight) set["opac-solid-weight"] = o.opacSolidWeight;
+  if (o.opacBinaryWeight) set["opac-binary-weight"] = o.opacBinaryWeight;
+  if (o.volumeRegWeight) set["volume-reg-weight"] = o.volumeRegWeight;
   for (const [k, v] of Object.entries(set)) {
     if (k in cfg) cfg[k] = v;
     else log(`Opção "${k}" não existe nesta versão do Brush; ignorada.`);
@@ -122,6 +128,7 @@ export async function train(dir: FileSystemDirectoryHandle, opts: TrainOptions, 
       case BrushMessageKind.SplatsUpdated:
       case BrushMessageKind.RefineStep:
         if (m.numSplats != null) splats = m.numSplats;
+        if (m.prunedHarmful) ev.log(`passo ${m.iter}: ${m.prunedHarmful} gaussianas podadas por contribuição negativa`);
         break;
       case BrushMessageKind.TrainStep:
         iter = m.iter ?? iter;
