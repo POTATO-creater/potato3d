@@ -68,9 +68,16 @@ function enableSubgroupsInShaders(device: GPUDevice) {
     );
 }
 
+/** Fundo do treino com máscara: cor uniforme sorteada a cada passo (0,5 ± 0,5).
+ *  No preto ± 0,1 do Brush, camadas escuras e semitransparentes fora da
+ *  silhueta quase não custam nada e viram uma silhueta fantasma em volta do
+ *  sujeito; com o fundo variando, qualquer transparência indevida pesa na
+ *  perda. Mesmos valores em src-tauri/src/brush.rs. */
+export const MASKED_BACKGROUND = { color: [0.5, 0.5, 0.5], noise: 0.5 };
+
 /** Campos do `TrainStreamConfig` (JSON achatado, kebab-case) que o
  *  Gausify Orbit controla; o resto fica no padrão do Brush. */
-function applyOptions(cfg: Record<string, unknown>, o: TrainOptions, log: (s: string) => void) {
+function applyOptions(cfg: Record<string, unknown>, o: TrainOptions, masked: boolean, log: (s: string) => void) {
   const set: Record<string, unknown> = {
     "total-train-iters": o.totalSteps,
     "sh-degree": Math.min(o.shDegree, 3),
@@ -87,6 +94,10 @@ function applyOptions(cfg: Record<string, unknown>, o: TrainOptions, log: (s: st
   if (o.opacSolidWeight) set["opac-solid-weight"] = o.opacSolidWeight;
   if (o.opacBinaryWeight) set["opac-binary-weight"] = o.opacBinaryWeight;
   if (o.volumeRegWeight) set["volume-reg-weight"] = o.volumeRegWeight;
+  if (masked) {
+    set["background-color"] = MASKED_BACKGROUND.color;
+    set["background-noise-strength"] = MASKED_BACKGROUND.noise;
+  }
   for (const [k, v] of Object.entries(set)) {
     if (k in cfg) cfg[k] = v;
     else log(`Opção "${k}" não existe nesta versão do Brush; ignorada.`);
@@ -109,12 +120,19 @@ export interface TrainEvents {
   log(line: string): void;
 }
 
-/** Treina o dataset da pasta e devolve o .ply final. Soltar o stream (no
- *  cancelamento) descarta o trabalho pendente do Burn. */
-export async function train(dir: FileSystemDirectoryHandle, opts: TrainOptions, ev: TrainEvents, signal: AbortSignal): Promise<Uint8Array> {
+/** Treina o dataset da pasta e devolve o .ply final. `masked`: as imagens têm
+ *  o alpha das máscaras (dataset_alpha). Soltar o stream (no cancelamento)
+ *  descarta o trabalho pendente do Burn. */
+export async function train(
+  dir: FileSystemDirectoryHandle,
+  opts: TrainOptions,
+  masked: boolean,
+  ev: TrainEvents,
+  signal: AbortSignal,
+): Promise<Uint8Array> {
   const { app } = await brushRuntime();
   const t = app.startTrainingFromDirectory(dir, async (initial: Record<string, unknown>) =>
-    applyOptions({ ...initial }, opts, ev.log),
+    applyOptions({ ...initial }, opts, masked, ev.log),
   );
   let iter = 0, splats = 0, lastSnapshot = 0;
   const handle = (m: BrushMessage) => {

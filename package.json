@@ -12,6 +12,7 @@
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
     "dev:mock": "VITE_MOCK=1 vite --port 1430 --strictPort",
     "web:wasm": "node scripts/build-brush-web.mjs",
+    "brush:native": "node scripts/build-brush-web.mjs --native",
     "web:dev": "vite --config web/vite.config.ts",
     "web:build": "vite build --config web/vite.config.ts",
     "web:deploy": "pnpm web:build && wrangler deploy",

@@ -139,7 +139,7 @@ export interface TrainOptions {
   /** Poda as gaussianas cuja contribuição para a perda, somada nas vistas
    *  da janela de refinamento, é negativa (atrapalham mais que ajudam:
    *  fantasmas e contornos duplicados). Mínimo de vistas para julgar;
-   *  omitido ou 0 = desligado. Só no Brush do web por enquanto. */
+   *  omitido ou 0 = desligado. */
   contribPruneMinViews?: number;
   /** Quão nítido o prejuízo precisa ser: saldo < −razão × soma dos |efeitos|. */
   contribPruneRatio?: number;
