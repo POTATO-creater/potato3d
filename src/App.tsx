@@ -28,6 +28,7 @@ import { FrameLightbox, FramesGrid, LogView } from "./components/FramesGrid";
 import { ExportPanel } from "./components/ExportPanel";
 import { maskMethods } from "./components/MasksPanel";
 import { LanguageSelect } from "./components/LanguageSelect";
+import { ComfySettingsButton } from "./components/ComfySettings";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { useSidebarWidth } from "./components/SidebarResizer";
 import { promptInTrim } from "./lib/prompt";
@@ -623,6 +624,7 @@ function AppView() {
               {revealLabel(t, tools?.os, ".ply")}
             </button>
           )}
+          {api.retouch && <ComfySettingsButton />}
           <LanguageSelect />
         </div>
 

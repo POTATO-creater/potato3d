@@ -34,6 +34,12 @@ export const layout = (root: string) => ({
   training: `${root}/training`,
   finalPly: `${root}/splat.ply`,
   exports: `${root}/export`,
+  /** Clipes de retoque, um por pasta (retouch/<id>/clip.json…). */
+  retouch: `${root}/retouch`,
+  /** Dataset do treino incremental, fora de dataset/ (o Brush lê tudo de lá). */
+  retouchDataset: `${root}/dataset_retouch`,
+  /** Splat de antes do retoque: base do ajuste e do desfazer. */
+  retouchBase: `${root}/splat_before_retouch.ply`,
 });
 
 export const emptyState = (): ProjectState => ({
@@ -45,6 +51,7 @@ export const emptyState = (): ProjectState => ({
   finalPly: null,
   lastPsnr: null,
   lastExport: null,
+  retouch: null,
 });
 
 /** project.json mais o instante da última gravação (para a limpeza). */

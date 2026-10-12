@@ -409,6 +409,55 @@ export const ptBR = {
     recenter: "Recentrar",
   },
 
+  /** Integração com o ComfyUI (configuração e erros). */
+  comfy: {
+    open: "Integrações",
+    openTitle: "Configurar a integração com o ComfyUI",
+    title: "Integração com o ComfyUI",
+    close: "Fechar",
+    server: "Servidor",
+    url: "Endereço",
+    urlHint: "Onde o ComfyUI está rodando",
+    test: "Testar conexão",
+    testing: "Testando…",
+    connected: (what: string) => `Conectado · ${what}`,
+    corsHelp:
+      "Inicie o ComfyUI com --enable-cors-header para o navegador poder falar com ele. Se o Chrome pedir acesso à rede local, permita.",
+    workflows: "Workflows",
+    import: "Importar .json",
+    empty: "Nenhum workflow ainda. No ComfyUI, use Workflow → Export (API) e importe o arquivo aqui.",
+    name: "Nome",
+    kind: "Uso",
+    kinds: { restore: "Restauração de vídeo" },
+    kindHints: { restore: "Recebe o vídeo renderizado do splat e devolve o vídeo restaurado, com o mesmo número de frames." },
+    inputNode: "Nó de entrada do vídeo",
+    inputField: "Campo do arquivo",
+    outputNode: "Nó de saída do vídeo",
+    nodes: (n: number) => `${n} nós`,
+    remove: "Remover",
+    problems: {
+      inputNode: "O nó de entrada não existe neste workflow.",
+      inputField: "Esse campo não recebe um nome de arquivo.",
+      outputNode: "O nó de saída não existe neste workflow.",
+    },
+    noGuess: "Não achei um nó de carregar e um de salvar vídeo; confira a entrada e a saída abaixo.",
+    parseErrors: {
+      notJson: "O arquivo não é um JSON válido.",
+      editorFormat: "Este é o formato do editor. No ComfyUI, use Workflow → Export (API).",
+      notWorkflow: "O arquivo não parece um workflow do ComfyUI no formato de API.",
+      empty: "O workflow está vazio.",
+    },
+    storageFull: "O navegador não deixou salvar a configuração (armazenamento cheio ou bloqueado).",
+    errors: {
+      network: "Sem resposta do ComfyUI nesse endereço. Ele está rodando com --enable-cors-header?",
+      http: (d: string) => `O ComfyUI respondeu com erro: ${d}`,
+      validation: (d: string) => `O ComfyUI recusou o workflow: ${d}`,
+      execution: (d: string) => `Erro durante a execução no ComfyUI: ${d}`,
+      interrupted: "A execução foi interrompida no ComfyUI.",
+      noOutput: (node: string) => `O workflow terminou sem gerar arquivo no nó de saída ${node}.`,
+    },
+  },
+
   /** Versão web: aviso de versão nova baixada pelo service worker. */
   update: {
     available: "Há uma nova versão do Gausify Orbit pronta para usar.",

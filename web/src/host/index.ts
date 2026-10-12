@@ -26,6 +26,7 @@ import { applyUpdate, onUpdate } from "./update";
 import { runJob } from "./job";
 import { maskPreview, previewIdle } from "./preview";
 import { packProject, pickPackageDest, unpackProject } from "./package";
+import { retouchApi } from "./retouch";
 import { importFolder, importUrl, layout, openProject, projectFor, readState, saveState, setFramesRejected } from "./project";
 
 const params = new URLSearchParams(location.search);
@@ -167,6 +168,8 @@ const api: Api = {
   async cancelInstall() {
     install?.abort();
   },
+
+  retouch: retouchApi,
 };
 
 const dropHandlers = new Set<(paths: string[]) => void>();

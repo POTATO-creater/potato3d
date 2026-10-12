@@ -16,7 +16,7 @@
     "web:dev": "vite --config web/vite.config.ts",
     "web:build": "vite build --config web/vite.config.ts",
     "web:deploy": "pnpm web:build && wrangler deploy",
-    "test:web": "node --test web/src/*/*.test.ts src/lib/*.test.ts worker/*.test.ts"
+    "test:web": "node --test web/src/*/*.test.ts src/lib/*.test.ts src/lib/*/*.test.ts worker/*.test.ts"
   },
   "dependencies": {
     "@sparkjsdev/spark": "^2.3.1",
