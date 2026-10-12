@@ -120,6 +120,8 @@ export const es: Messages = {
     closedLoopHint: "empareja el final con el inicio",
     flatOrbit: "Forzar órbita plana",
     flatOrbitHint: "cámaras a la misma altura; solo para videos que giran a nivel",
+    fillMissing: "Usar todos los fotogramas",
+    fillMissingHint: "los fotogramas sin cámara estimada reciben una pose inferida de sus vecinos",
     training: "Entrenamiento (Brush)",
     steps: "Pasos",
     shDegree: "Grado SH",
@@ -299,6 +301,14 @@ export const es: Messages = {
     next: "Siguiente",
     close: "Cerrar",
     noLog: "Aún no hay registro.",
+    rejected: "Rechazado",
+    reject: "Rechazar fotograma",
+    accept: "Aceptar fotograma",
+    open: "Abrir",
+    rejectWeak: (n: number) => `Rechazar los ${n} con poca nitidez`,
+    acceptAll: (n: number) => `Aceptar los ${n} rechazados`,
+    rejectedCount: (n: number) => `${n} rechazados`,
+    rejectHint: "Clic derecho para rechazar o aceptar",
   },
 
   stageStrip: {
@@ -316,6 +326,15 @@ export const es: Messages = {
     stepsPerSec: (n) => `${n} pasos/s`,
     remaining: "Restante",
     psnrTitle: "Medido en frames que no entran en el entrenamiento. >30 dB es excelente; <25 dB indica un video inconsistente.",
+    inferred: "Inferidas",
+    inferredTitle: "Cámaras que la estimación no registró, ubicadas según la trayectoria de los fotogramas vecinos",
+    refined: "Refinadas",
+    refinedTitle: "Poses inferidas ajustadas a los puntos 3D que ve el fotograma",
+    rejected: "Rechazados",
+    runStage: "Ejecutar solo esta etapa",
+    stopStage: "Cancelar",
+    needsSource: "Abre un vídeo o imágenes",
+    needsTool: (name: string) => `Requiere ${name}`,
   },
 
   setup: {
@@ -383,6 +402,7 @@ export const es: Messages = {
     "stage.starting": () => "Iniciando",
     "stage.failed": () => "Falló",
     "stage.cancelled": () => "Cancelado",
+    "stage.framesChanged": () => "Los fotogramas cambiaron: ejecuta de nuevo",
 
     "frames.reading": () => "Leyendo video",
     "frames.decoding": () => "Decodificando video",

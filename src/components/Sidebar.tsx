@@ -273,11 +273,12 @@ export function Sidebar(p: Props) {
               </div>
               <Toggle label={ts.closedLoop} hint={ts.closedLoopHint} checked={s.poses.closedLoop}
                 onChange={(v) => set("poses", { closedLoop: v })} />
-              {!web && (
-                <Toggle label={ts.flatOrbit} hint={ts.flatOrbitHint}
-                  checked={s.poses.flatOrbit ?? false}
-                  onChange={(v) => set("poses", { flatOrbit: v })} />
-              )}
+              <Toggle label={ts.flatOrbit} hint={ts.flatOrbitHint}
+                checked={s.poses.flatOrbit ?? false}
+                onChange={(v) => set("poses", { flatOrbit: v })} />
+              <Toggle label={ts.fillMissing} hint={ts.fillMissingHint}
+                checked={s.poses.fillMissing ?? false}
+                onChange={(v) => set("poses", { fillMissing: v })} />
 
               <h3>{ts.training}</h3>
               <div className="grid2">

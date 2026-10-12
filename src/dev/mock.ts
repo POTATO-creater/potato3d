@@ -90,7 +90,7 @@ async function fakeInstall(channel: Channel<any>) {
   channel.onmessage({ type: "finished" });
 }
 
-async function replay(channel: Channel<JobEvent>, from: string) {
+async function replay(channel: Channel<JobEvent>, from: string, to = "train") {
   cancelled = false;
   const order = ["frames", "masks", "poses", "train"];
   const events = (await readEvents()).filter((e) => {
@@ -104,7 +104,8 @@ async function replay(channel: Channel<JobEvent>, from: string) {
             : e.type === "posesReady"
               ? "poses"
               : "train";
-    return !stage || order.indexOf(stage) >= order.indexOf(from);
+    if (e.type === "finished") return to === "train";
+    return !stage || (order.indexOf(stage) >= order.indexOf(from) && order.indexOf(stage) <= order.indexOf(to));
   });
   for (const e of events) {
     if (cancelled) {
@@ -115,7 +116,12 @@ async function replay(channel: Channel<JobEvent>, from: string) {
     await new Promise((r) => setTimeout(r, delay));
     channel.onmessage(e);
   }
+  // Gravações completas terminam no treino: o fim de um job parcial é sintético.
+  if (to !== "train") channel.onmessage({ type: "finished", ply: null, seconds: 1 });
 }
+
+/** Projeto aberto, para simular a recusa de frames sem mexer no disco. */
+let project: any = null;
 
 export function installMock() {
   mockWindows("main");
@@ -145,15 +151,29 @@ export function installMock() {
           return { paths, dir: paths[0].replace(/\/[^/]*$/, ""), width: 960, height: 540 };
         }
         case "load_project":
-          return (
+          return (project =
             (env.project && (await readJson(`${env.project}/project.json`))) ?? {
               videoPath: null,
               frames: [],
               poses: null,
               finalPly: null,
               lastPsnr: null,
-            }
-          );
+            });
+        case "set_frames_rejected": {
+          // Os caminhos ficam onde estão: só a marca muda.
+          const names = new Set<string>(args.names);
+          let changed = false;
+          project = {
+            ...project,
+            frames: project.frames.map((f: any) => {
+              if (!!f.rejected === args.rejected || !names.has(f.path.split("/").pop())) return f;
+              changed = true;
+              return { ...f, rejected: args.rejected || undefined };
+            }),
+          };
+          if (changed) project.poses = null;
+          return project;
+        }
         case "default_project_dir":
           return env.project ?? args.videoPath.replace(/\.[^.]+$/, "_splat");
         case "splat_info":
@@ -166,7 +186,7 @@ export function installMock() {
           return f;
         }
         case "start_job":
-          replay(args.onEvent, args.config.fromStage);
+          replay(args.onEvent, args.config.fromStage, args.config.toStage);
           return null;
         case "install_plan":
           if (params.get("os") !== "windows")

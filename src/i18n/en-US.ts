@@ -120,6 +120,8 @@ export const enUS: Messages = {
     closedLoopHint: "matches the end with the start",
     flatOrbit: "Force flat orbit",
     flatOrbitHint: "cameras at the same height; only for videos that rotate level",
+    fillMissing: "Use every frame",
+    fillMissingHint: "frames without an estimated camera get a pose inferred from their neighbors",
     training: "Training (Brush)",
     steps: "Steps",
     shDegree: "SH degree",
@@ -299,6 +301,14 @@ export const enUS: Messages = {
     next: "Next",
     close: "Close",
     noLog: "No log yet.",
+    rejected: "Rejected",
+    reject: "Reject frame",
+    accept: "Accept frame",
+    open: "Open",
+    rejectWeak: (n: number) => `Reject the ${n} low-sharpness frames`,
+    acceptAll: (n: number) => `Accept all ${n} rejected`,
+    rejectedCount: (n: number) => `${n} rejected`,
+    rejectHint: "Right-click to reject or accept",
   },
 
   stageStrip: {
@@ -316,6 +326,15 @@ export const enUS: Messages = {
     stepsPerSec: (n) => `${n} steps/s`,
     remaining: "Remaining",
     psnrTitle: "Measured on frames left out of training. >30 dB is great; <25 dB means an inconsistent video.",
+    inferred: "Inferred",
+    inferredTitle: "Cameras the estimation did not register, placed along the path of the neighboring frames",
+    refined: "Refined",
+    refinedTitle: "Inferred poses adjusted to the 3D points the frame sees",
+    rejected: "Rejected",
+    runStage: "Run only this stage",
+    stopStage: "Cancel",
+    needsSource: "Open a video or images",
+    needsTool: (name: string) => `Requires ${name}`,
   },
 
   setup: {
@@ -383,6 +402,7 @@ export const enUS: Messages = {
     "stage.starting": () => "Starting",
     "stage.failed": () => "Failed",
     "stage.cancelled": () => "Cancelled",
+    "stage.framesChanged": () => "Frames changed: run again",
 
     "frames.reading": () => "Reading video",
     "frames.decoding": () => "Decoding video",

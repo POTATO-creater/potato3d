@@ -53,9 +53,27 @@ export const initialJob: JobState = {
 };
 
 export type JobAction =
-  | { type: "start"; from: Stage }
+  /** `masksForPoses`: o recorte entra nas poses (refazê-lo invalida as poses). */
+  | { type: "start"; from: Stage; to: Stage; masksForPoses: boolean }
   | { type: "event"; event: JobEvent }
-  | { type: "load"; project: ProjectState };
+  | { type: "load"; project: ProjectState }
+  /** Frames recusados ou aceitos de volta (`Api.setFramesRejected`). */
+  | { type: "framesEdited"; project: ProjectState };
+
+/** Etapas cujo resultado um job de `from` a `to` descarta, as mesmas regras
+ *  dos backends: as que ele roda e as seguintes que dependiam delas. */
+export function discardedBy(from: Stage, to: Stage, masksForPoses: boolean): Set<Stage> {
+  const f = STAGES.indexOf(from);
+  const t = Math.max(f, STAGES.indexOf(to));
+  const runs = (st: Stage) => STAGES.indexOf(st) >= f && STAGES.indexOf(st) <= t;
+  const out = new Set<Stage>();
+  if (runs("frames")) STAGES.forEach((st) => out.add(st));
+  if (runs("masks")) out.add("masks");
+  // Recortar de novo sem usar o recorte nas poses as reaproveita.
+  if ((runs("poses") && from !== "masks") || (runs("masks") && masksForPoses)) out.add("poses");
+  if (runs("train") || out.has("poses")) out.add("train");
+  return out;
+}
 
 export function jobReducer(s: JobState, a: JobAction): JobState {
   switch (a.type) {
@@ -83,9 +101,12 @@ export function jobReducer(s: JobState, a: JobAction): JobState {
 
     case "start": {
       const from = STAGES.indexOf(a.from);
+      const to = Math.max(from, STAGES.indexOf(a.to));
+      const gone = discardedBy(a.from, a.to, a.masksForPoses);
       const stages = { ...s.stages };
       STAGES.forEach((st, i) => {
-        if (i >= from) stages[st] = { status: "queued", fraction: 0, message: { key: "stage.queued" } };
+        if (i >= from && i <= to) stages[st] = { status: "queued", fraction: 0, message: { key: "stage.queued" } };
+        else if (gone.has(st)) stages[st] = idle();
       });
       return {
         ...s,
@@ -93,15 +114,23 @@ export function jobReducer(s: JobState, a: JobAction): JobState {
         stages,
         error: null,
         totalSeconds: null,
-        frames: from <= 0 ? [] : s.frames,
-        masks: from <= 1 ? null : s.masks,
-        masksDir: from <= 1 ? null : s.masksDir,
-        // Partindo do recorte, as poses podem ser reaproveitadas (stageSkipped).
-        poses: from === 0 || from === 2 ? null : s.poses,
-        train: null,
-        evals: [],
-        finalPly: null,
+        frames: gone.has("frames") ? [] : s.frames,
+        masks: gone.has("masks") ? null : s.masks,
+        masksDir: gone.has("masks") ? null : s.masksDir,
+        poses: gone.has("poses") ? null : s.poses,
+        ...(gone.has("train") ? { train: null, evals: [], finalPly: null } : {}),
       };
+    }
+
+    case "framesEdited": {
+      const p = a.project;
+      let next: JobState = { ...s, frames: p.frames };
+      const outdated = (st: Stage, patch: Partial<JobState>) => {
+        next = patchStage({ ...next, ...patch }, st, { status: "idle", fraction: 0, message: { key: "stage.framesChanged" }, seconds: undefined });
+      };
+      if (!p.masks && s.masks) outdated("masks", { masks: null, masksDir: null });
+      if (!p.poses && s.poses) outdated("poses", { poses: null });
+      return next;
     }
 
     case "event":
@@ -138,9 +167,9 @@ function applyEvent(s: JobState, e: JobEvent): JobState {
       return {
         ...s,
         running: false,
-        finalPly: e.ply,
         totalSeconds: e.seconds,
-        splat: { path: e.ply, iter: null, version: Date.now() },
+        // Sem ply: o job parou antes do treino.
+        ...(e.ply ? { finalPly: e.ply, splat: { path: e.ply, iter: null, version: Date.now() } } : {}),
       };
     case "failed": {
       const next = { ...s, running: false, error: { stage: e.stage, message: e.error } };

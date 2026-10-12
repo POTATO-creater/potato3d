@@ -84,6 +84,10 @@ pub struct PoseOptions {
     /// Força todas as câmeras no mesmo plano (vídeo que gira em nível).
     #[serde(default)]
     pub flat_orbit: bool,
+    /// Frames sem pose registrada ganham uma inferida pelos vizinhos
+    /// (`scene::fill_missing`, aplicada pelo pipeline).
+    #[serde(default)]
+    pub fill_missing: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -94,6 +98,12 @@ pub struct ModelStats {
     pub points: u64,
     pub reprojection_error: Option<f64>,
     pub mapper: String,
+    /// Poses inferidas pelos vizinhos (frames que o COLMAP não registrou).
+    #[serde(default)]
+    pub inferred: u32,
+    /// Dessas, as refinadas contra os pontos 3D.
+    #[serde(default)]
+    pub refined: u32,
 }
 
 pub struct Paths<'a> {
@@ -107,6 +117,8 @@ pub struct Paths<'a> {
     pub use_gpu: bool,
     /// Máscaras `<imagem>.png` (preto = ignorar features do fundo).
     pub masks: Option<PathBuf>,
+    /// Instante de cada frame pelo nome, para `PoseOptions::fill_missing`.
+    pub times: &'a std::collections::HashMap<String, f64>,
 }
 
 fn gpu_flag(on: bool) -> &'static str {
@@ -358,7 +370,7 @@ pub async fn run(
     mut on_progress: impl FnMut(f32, Msg),
     mut on_log: impl FnMut(&str),
 ) -> Result<ModelStats> {
-    let Paths { colmap, images, work, model_out, use_gpu, masks } = paths;
+    let Paths { colmap, images, work, model_out, use_gpu, masks, times } = paths;
     if work.exists() {
         std::fs::remove_dir_all(work)?;
     }
@@ -454,6 +466,29 @@ pub async fn run(
         }
     }
 
+    let (mut inferred, mut refined) = (0, 0);
+    if opts.fill_missing {
+        // Correspondências dos frames que ficaram de fora, pelo banco da
+        // tentativa que gerou o modelo; sem elas, as poses só são inferidas.
+        let corr = correspondences(&db_dir.join("database.db"), model_out).unwrap_or_else(|e| {
+            on_log(&format!("sem correspondências para refinar as poses inferidas: {e:#}"));
+            Default::default()
+        });
+        let fill = crate::scene::FillOptions { flat: opts.flat_orbit, correspondences: &corr };
+        match crate::scene::fill_missing(model_out, images, times, &fill) {
+            Ok(f) => {
+                if !f.inferred.is_empty() {
+                    on_log(&format!("poses inferidas pelos vizinhos: {}", f.inferred.join(", ")));
+                }
+                for (name, inliers) in &f.refined {
+                    on_log(&format!("pose de {name} refinada contra {inliers} pontos 3D"));
+                }
+                (inferred, refined) = (f.inferred.len() as u32, f.refined.len() as u32);
+            }
+            Err(e) => on_log(&format!("poses não inferidas: {e:#}")),
+        }
+    }
+
     on_progress(1.0, msg!("poses.ready", features = features));
     Ok(ModelStats {
         registered,
@@ -461,12 +496,137 @@ pub async fn run(
         points,
         reprojection_error: err,
         mapper: label,
+        inferred,
+        refined,
     })
+}
+
+/// Correspondências 2D → 3D de cada imagem do banco que o modelo não
+/// registrou: seus matches geométricos (two_view_geometries) com imagens
+/// registradas, levados aos pontos 3D que essas imagens enxergam. Um ponto 2D
+/// casado com pontos 3D diferentes fica com o mais votado.
+pub fn correspondences(db: &Path, model: &Path) -> Result<std::collections::HashMap<String, crate::scene::Correspondences>> {
+    use rusqlite::{Connection, OpenFlags};
+    use std::collections::HashMap;
+    // pair_id = id1 · 2³¹−1 + id2 (id1 < id2), como no COLMAP.
+    const MAX_IMAGES: i64 = 2_147_483_647;
+
+    let (tracks, points) = crate::scene::read_tracks(model)?;
+    let conn = Connection::open_with_flags(db, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let mut names = HashMap::new();
+    {
+        let mut st = conn.prepare("SELECT image_id, name FROM images")?;
+        for row in st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))? {
+            let (id, name) = row?;
+            names.insert(id, name);
+        }
+    }
+    let keypoints = |id: i64| -> Result<Vec<[f64; 2]>> {
+        let (rows, cols, data): (i64, i64, Vec<u8>) =
+            conn.query_row("SELECT rows, cols, data FROM keypoints WHERE image_id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        let f = |i: usize| f32::from_le_bytes(data[4 * i..4 * i + 4].try_into().unwrap()) as f64;
+        let cols = cols as usize;
+        anyhow::ensure!(data.len() >= rows as usize * cols * 4 && cols >= 2, "keypoints da imagem {id} malformados");
+        Ok((0..rows as usize).map(|k| [f(k * cols), f(k * cols + 1)]).collect())
+    };
+
+    // O ponto 2D k de uma imagem registrada é o keypoint k do banco: só vale
+    // quando as contagens batem.
+    let mut aligned = HashMap::new();
+    let mut votes: HashMap<i64, HashMap<u32, HashMap<i64, u32>>> = HashMap::new();
+    let mut st = conn.prepare("SELECT pair_id, rows, data FROM two_view_geometries WHERE rows > 0")?;
+    for row in st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, Vec<u8>>(2)?)))? {
+        let (pair, rows, data) = row?;
+        let (id1, id2) = (pair / MAX_IMAGES, pair % MAX_IMAGES);
+        let (Some(n1), Some(n2)) = (names.get(&id1), names.get(&id2)) else { continue };
+        // Exatamente uma das duas fora do modelo.
+        let (missing, reg, missing_first) = match (tracks.contains_key(n1), tracks.contains_key(n2)) {
+            (false, true) => (id1, n2, true),
+            (true, false) => (id2, n1, false),
+            _ => continue,
+        };
+        let reg_id = if missing_first { id2 } else { id1 };
+        let ids = &tracks[reg];
+        if !*aligned.entry(reg_id).or_insert_with(|| keypoints(reg_id).map_or(false, |k| k.len() == ids.len())) {
+            continue;
+        }
+        let v = votes.entry(missing).or_default();
+        let u = |i: usize| u32::from_le_bytes(data[4 * i..4 * i + 4].try_into().unwrap());
+        for m in 0..(rows as usize).min(data.len() / 8) {
+            let (a, b) = (u(2 * m), u(2 * m + 1));
+            let (km, kr) = if missing_first { (a, b) } else { (b, a) };
+            if let Some(&pid) = ids.get(kr as usize).filter(|&&p| p >= 0) {
+                *v.entry(km).or_default().entry(pid).or_default() += 1;
+            }
+        }
+    }
+
+    let mut out = HashMap::new();
+    for (id, v) in votes {
+        let kps = keypoints(id)?;
+        let corr: crate::scene::Correspondences = v
+            .into_iter()
+            .filter_map(|(k, pids)| {
+                let pid = pids.into_iter().max_by_key(|&(_, n)| n)?.0;
+                Some((*kps.get(k as usize)?, *points.get(&(pid as u64))?))
+            })
+            .collect();
+        out.insert(names[&id].clone(), corr);
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Num projeto real (poses calculadas pelo app), tira câmeras do modelo e
+    /// compara a pose inferida e a refinada com a que o COLMAP tinha achado:
+    ///   SPLATFORGE_TEST_PROJECT=<projeto> cargo test refine_real -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn refine_real_project() {
+        let project = PathBuf::from(std::env::var("SPLATFORGE_TEST_PROJECT").expect("SPLATFORGE_TEST_PROJECT"));
+        let (model, images) = (project.join("dataset/sparse/0"), project.join("dataset/images"));
+        let db = project.join("colmap/attempt1/database.db");
+        let truth = crate::scene::read_poses(&model).unwrap();
+        let mut names: Vec<&String> = truth.keys().collect();
+        names.sort();
+        // Uma rajada no meio, perdas soltas e as duas pontas.
+        let lost: Vec<String> = [0, 20, 21, 22, 23, 24, 50, 70, 71, names.len() - 1].iter().map(|&i| names[i].clone()).collect();
+
+        let mut results = Vec::new();
+        for refine in [false, true] {
+            let dir = std::env::temp_dir().join(format!("splatforge_refine_real_{refine}"));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            for f in ["cameras.bin", "points3D.bin", "frames.bin", "rigs.bin"] {
+                let _ = std::fs::copy(model.join(f), dir.join(f));
+            }
+            crate::scene::drop_images(&model.join("images.bin"), &dir.join("images.bin"), &lost).unwrap();
+            let corr = if refine { correspondences(&db, &dir).unwrap() } else { Default::default() };
+            let times = Default::default();
+            let opts = crate::scene::FillOptions { flat: false, correspondences: &corr };
+            let filled = crate::scene::fill_missing(&dir, &images, &times, &opts).unwrap();
+            assert_eq!(filled.inferred.len(), lost.len());
+            let radius = crate::scene::read(&model).unwrap().radius;
+            let got = crate::scene::read_poses(&dir).unwrap();
+            let errs: Vec<(f64, f64)> = lost
+                .iter()
+                .map(|n| crate::scene::pose_error(&got[n], &truth[n], radius))
+                .collect();
+            for (n, (dc, da)) in lost.iter().zip(&errs) {
+                let k = corr.get(n).map_or(0, |c| c.len());
+                println!("{} {n}: centro {:.3}% do raio, rotação {:.3}°, {k} correspondências", if refine { "refinada" } else { "inferida" }, dc * 100.0, da);
+            }
+            println!("refinadas: {:?}", filled.refined);
+            results.push(errs);
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+        let mean = |e: &[(f64, f64)]| e.iter().map(|x| x.0).sum::<f64>() / e.len() as f64;
+        println!("média: inferida {:.3}%, refinada {:.3}%", mean(&results[0]) * 100.0, mean(&results[1]) * 100.0);
+        assert!(mean(&results[1]) <= mean(&results[0]));
+    }
 
     #[test]
     fn parses_glog_progress() {

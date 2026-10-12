@@ -23,7 +23,7 @@ import {
 import { applyUpdate, onUpdate } from "./update";
 import { runJob } from "./job";
 import { maskPreview, previewIdle } from "./preview";
-import { importFolder, importUrl, layout, openProject, projectFor, readState, saveState } from "./project";
+import { importFolder, importUrl, layout, openProject, projectFor, readState, saveState, setFramesRejected } from "./project";
 
 const params = new URLSearchParams(location.search);
 let job: AbortController | null = null;
@@ -85,6 +85,8 @@ const api: Api = {
     }
     return openProject(dir);
   },
+
+  setFramesRejected,
 
   async sceneFrame(dir) {
     const model = layout(dir).model;

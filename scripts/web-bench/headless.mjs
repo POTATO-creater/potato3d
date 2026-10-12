@@ -25,7 +25,8 @@
 //            Use `pnpm web:wasm --profiling` para ter os nomes do WASM.
 //
 // Ajustes (partem do preset Prévia): --preset preview|balanced|quality,
-// --frames N, --steps N, --max-res N. O Chrome vem de CHROME (padrão: o do
+// --frames N, --steps N, --max-res N, --flat (órbita plana), --fill (usar
+// todos os frames; com &sfmDrop=0,20,… na URL, simula câmeras perdidas). O Chrome vem de CHROME (padrão: o do
 // macOS em /Applications).
 
 import { spawn } from "node:child_process";
@@ -158,6 +159,8 @@ const settings = structuredClone(presetById(opt("preset", "preview")).settings);
 if (opt("frames")) settings.frames.targetFrames = Number(opt("frames"));
 if (opt("steps")) settings.train.totalSteps = Number(opt("steps"));
 if (opt("max-res")) settings.train.maxResolution = Number(opt("max-res"));
+if (flag("flat")) settings.poses.flatOrbit = true;
+if (flag("fill")) settings.poses.fillMissing = true;
 const mask = opt("mask");
 const masks = {
   enabled: !!mask,

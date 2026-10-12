@@ -34,6 +34,7 @@ futures-util = "0.3.34"
 # Texturas do .sog: libwebp compilado do fonte (cc), sem nada para instalar.
 # ~18% menor que o encoder em Rust puro (image-webp), que não faz LZ77 bem.
 libwebp-sys = "0.14"
+rusqlite = { version = "0.40.2", features = ["bundled"] }
 
 # Recorte no Windows: MODNet/BiRefNet/RMBG com ONNX Runtime (estático) + DirectML.dll.
 [target.'cfg(windows)'.dependencies]

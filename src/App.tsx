@@ -7,6 +7,7 @@ import {
   type ExportStats,
   type ImageSet,
   type JobEvent,
+  STAGES,
   type MaskOptions,
   type SceneFrame,
   type Settings,
@@ -14,7 +15,7 @@ import {
   type Tools,
   type VideoInfo,
 } from "./lib/api";
-import { initialJob, jobReducer } from "./lib/job";
+import { discardedBy, initialJob, jobReducer } from "./lib/job";
 import { fmtDuration } from "./lib/format";
 import { revealLabel, stageBlurbs } from "./lib/platform";
 import { ToolsSetup } from "./components/ToolsSetup";
@@ -288,21 +289,27 @@ function AppView() {
     }
   }
 
-  async function run() {
+  /** Roda as etapas de `from` a `to` (a mesma, para rodar só uma). */
+  async function run(from: Stage, to: Stage = "train") {
     if (!sourcePath || !projectDir) return;
-    if (fromStage !== "train") setFrame(null);
-    dispatch({ type: "start", from: fromStage });
-    // Um novo treino invalida a exportação (o backend também a esquece).
-    setLastExport(null);
-    setPreviewExport(null);
-    setTab(fromStage === "frames" ? "frames" : "viewer");
+    const masksForPoses = maskOpts.enabled && maskOpts.forPoses;
+    const gone = discardedBy(from, to, masksForPoses);
+    if (gone.has("poses")) setFrame(null);
+    dispatch({ type: "start", from, to, masksForPoses });
+    if (gone.has("train")) {
+      // Um novo treino invalida a exportação (o backend também a esquece).
+      setLastExport(null);
+      setPreviewExport(null);
+    }
+    setTab(from === "frames" || to === "masks" ? "frames" : "viewer");
     try {
       await api.startJob(
         {
           videoPath: sourcePath,
           images: imageSet?.paths ?? null,
           projectDir,
-          fromStage,
+          fromStage: from,
+          toStage: to,
           frames: { ...settings.frames, trimStart: trim.start, trimEnd: trim.end },
           // Marcação fora do trecho (o trecho mudou depois) não vale mais.
           masks: promptInTrim(maskOpts.prompt, trim) ? maskOpts : { ...maskOpts, prompt: null },
@@ -311,6 +318,20 @@ function AppView() {
         },
         onEvent,
       );
+    } catch (e) {
+      dispatch({ type: "event", event: { type: "failed", stage: null, error: String(e) } });
+    }
+  }
+
+  /** Recusa ou aceita de volta frames (menu de contexto da grade). */
+  async function setRejected(names: string[], rejected: boolean) {
+    if (!projectDir || job.running || !names.length) return;
+    try {
+      const project = await api.setFramesRejected(projectDir, names, rejected);
+      dispatch({ type: "framesEdited", project });
+      // A partida não pode ficar numa etapa cujo pré-requisito deixou de valer.
+      const need: Stage | null = maskOpts.enabled && !project.masks ? "masks" : !project.poses ? "poses" : null;
+      if (need && STAGES.indexOf(fromStage) > STAGES.indexOf(need)) setFromStage(need);
     } catch (e) {
       dispatch({ type: "event", event: { type: "failed", stage: null, error: String(e) } });
     }
@@ -352,12 +373,40 @@ function AppView() {
       ).filter((t) => !t.ok)
     : [];
 
+  const accepted = job.frames.filter((f) => !f.rejected).length;
   const available: Record<Stage, boolean> = {
     frames: true,
-    masks: job.frames.length > 0,
-    poses: job.frames.length > 0 && (!maskOpts.enabled || !maskOpts.forPoses || !!job.masks),
+    masks: accepted > 0,
+    poses: accepted > 0 && (!maskOpts.enabled || !maskOpts.forPoses || !!job.masks),
     train: !!job.poses && (!maskOpts.enabled || !!job.masks),
   };
+
+  // Ferramenta de que cada etapa precisa (chaves de `missing`).
+  const toolStage: Record<(typeof missing)[number]["key"], Stage> = { ffmpeg: "frames", model: "masks", colmap: "poses", brush: "train" };
+  const missingFor = (from: Stage, to: Stage) =>
+    missing.filter((m) => {
+      const i = STAGES.indexOf(toolStage[m.key]);
+      return i >= STAGES.indexOf(from) && i <= STAGES.indexOf(to);
+    });
+  const hasSource = !!projectDir && (!!video || !!imageSet);
+  /** Por que cada etapa não pode rodar sozinha; null = pode. */
+  const blocked = Object.fromEntries(
+    STAGES.map((st) => {
+      const tool = missingFor(st, st)[0];
+      const reason = !hasSource
+        ? t.stageStrip.needsSource
+        : st === "masks" && !maskOpts.enabled
+          ? t.sidebar.enableMasks
+          : !available[st]
+            ? st === "train"
+              ? t.sidebar.needsPoses
+              : t.sidebar.needsFrames
+            : tool
+              ? t.stageStrip.needsTool(tool.name)
+              : null;
+      return [st, reason];
+    }),
+  ) as Record<Stage, string | null>;
 
   const blurbs = stageBlurbs(t, tools?.os);
 
@@ -396,8 +445,8 @@ function AppView() {
         onFromStage={setFromStage}
         available={available}
         running={job.running}
-        canRun={!!projectDir && (!!video || !!imageSet) && missing.length === 0}
-        onRun={run}
+        canRun={hasSource && missingFor(fromStage, "train").length === 0}
+        onRun={() => run(fromStage)}
         onCancel={() => api.cancelJob()}
         exportPanel={
           projectDir &&
@@ -433,7 +482,7 @@ function AppView() {
             </button>
             <button className={tab === "frames" ? "active" : ""} onClick={() => setTab("frames")}>
               {t.app.tabs.frames}
-              {job.frames.length ? ` (${job.frames.length})` : ""}
+              {job.frames.length ? ` (${accepted})` : ""}
             </button>
             <button className={tab === "log" ? "active" : ""} onClick={() => setTab("log")}>
               {t.app.tabs.log}
@@ -511,7 +560,13 @@ function AppView() {
           )}
           {tab === "frames" && (
             <div className="pane scroll">
-              <FramesGrid frames={job.frames} version={framesVersion} masksDir={job.masksDir} />
+              <FramesGrid
+                frames={job.frames}
+                version={framesVersion}
+                masksDir={job.masksDir}
+                onReject={projectDir ? setRejected : undefined}
+                locked={job.running}
+              />
             </div>
           )}
           {tab === "log" && (
@@ -521,7 +576,16 @@ function AppView() {
           )}
         </div>
 
-        <StageStrip job={job} totalSteps={settings.train.totalSteps} tools={tools} masks={maskOpts} images={!!imageSet} />
+        <StageStrip
+          job={job}
+          totalSteps={settings.train.totalSteps}
+          tools={tools}
+          masks={maskOpts}
+          images={!!imageSet}
+          blocked={blocked}
+          onRunStage={(st) => run(st, st)}
+          onCancel={() => api.cancelJob()}
+        />
       </main>
     </div>
   );

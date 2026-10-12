@@ -38,6 +38,9 @@ pub struct JobConfig {
     pub images: Option<Vec<String>>,
     pub project_dir: String,
     pub from_stage: Stage,
+    /// Última etapa a rodar (inclusive); ausente = até o treino.
+    #[serde(default)]
+    pub to_stage: Option<Stage>,
     pub frames: FrameOptions,
     #[serde(default)]
     pub masks: MaskOptions,
@@ -58,7 +61,8 @@ pub enum JobEvent {
     StageSkipped { stage: Stage, reason: Msg },
     Train { event: TrainEvent },
     StageDone { stage: Stage, seconds: f64 },
-    Finished { ply: String, seconds: f64 },
+    /// `ply` ausente quando o job parou antes do treino.
+    Finished { ply: Option<String>, seconds: f64 },
     Failed { stage: Option<Stage>, error: String },
     Cancelled,
 }
@@ -105,6 +109,11 @@ impl Layout {
     }
     pub fn images(&self) -> PathBuf {
         self.dataset().join("images")
+    }
+    /// Frames recusados à mão: fora de `dataset/`, para o COLMAP, o recorte
+    /// e o Brush não os verem.
+    fn rejected(&self) -> PathBuf {
+        self.root.join("rejected")
     }
     pub fn model(&self) -> PathBuf {
         self.dataset().join("sparse").join("0")
@@ -199,8 +208,9 @@ async fn run_inner(
     emit: &Emit,
     cancel: &CancellationToken,
     current: &mut Option<Stage>,
-) -> Result<String> {
+) -> Result<Option<String>> {
     let layout = Layout::new(&cfg.project_dir);
+    let to = cfg.to_stage.unwrap_or(Stage::Train).max(cfg.from_stage);
     std::fs::create_dir_all(&layout.root).context("não foi possível criar a pasta do projeto")?;
     let mut state = layout.load();
     let video = PathBuf::from(&cfg.video_path);
@@ -238,6 +248,7 @@ async fn run_inner(
         // Etapas seguintes ficam inválidas.
         let _ = std::fs::remove_dir_all(layout.dataset().join("sparse"));
         let _ = std::fs::remove_dir_all(layout.masks());
+        let _ = std::fs::remove_dir_all(layout.rejected());
         state = ProjectState {
             video_path: Some(cfg.video_path.clone()),
             frames: picked.clone(),
@@ -248,6 +259,9 @@ async fn run_inner(
         emit(JobEvent::StageDone { stage: Stage::Frames, seconds: t0.elapsed().as_secs_f64() });
     } else if !layout.images().exists() {
         anyhow::bail!("não há frames extraídos neste projeto; rode a partir da etapa de frames");
+    }
+    if to == Stage::Frames {
+        return Ok(None);
     }
 
     // ---------- 2. Recorte (opcional) ----------
@@ -269,12 +283,22 @@ async fn run_inner(
             );
             state.masks = Some(stats.clone());
             state.masks_dir = Some(layout.masks().to_string_lossy().into_owned());
+            if cfg.masks.for_poses {
+                // As poses usaram o recorte anterior.
+                state.poses = None;
+                state.final_ply = None;
+                state.last_psnr = None;
+                state.last_export = None;
+            }
             layout.save(&state)?;
             emit(JobEvent::MasksReady { stats, dir: layout.masks().to_string_lossy().into_owned() });
             emit(JobEvent::StageDone { stage: Stage::Masks, seconds: t0.elapsed().as_secs_f64() });
         } else {
             emit(JobEvent::StageSkipped { stage: Stage::Masks, reason: msg!("masks.disabled") });
         }
+    }
+    if to == Stage::Masks {
+        return Ok(None);
     }
     if cfg.masks.enabled && !masks_ready(&state) {
         anyhow::bail!("não há recortes neste projeto; rode a partir da etapa de recorte");
@@ -293,6 +317,13 @@ async fn run_inner(
         let t0 = Instant::now();
         let colmap_bin = Tools::require(&tools.colmap, "COLMAP", install_hint("colmap"))?;
         let rep = Reporter::new(emit, Stage::Poses);
+        // Instante de cada frame, para a inferência de poses seguir a velocidade da câmera.
+        let times = state
+            .frames
+            .iter()
+            .filter(|f| f.source.is_none() && !f.rejected)
+            .filter_map(|f| Some((Path::new(&f.path).file_name()?.to_string_lossy().into_owned(), f.time)))
+            .collect();
         let stats = colmap::run(
             colmap::Paths {
                 colmap: &colmap_bin,
@@ -306,6 +337,7 @@ async fn run_inner(
                 } else {
                     None
                 },
+                times: &times,
             },
             &cfg.poses,
             cancel,
@@ -321,8 +353,11 @@ async fn run_inner(
         layout.save(&state)?;
         emit(JobEvent::PosesReady { stats });
         emit(JobEvent::StageDone { stage: Stage::Poses, seconds: t0.elapsed().as_secs_f64() });
-    } else if !layout.model().join("images.bin").exists() {
+    } else if state.poses.is_none() || !layout.model().join("images.bin").exists() {
         anyhow::bail!("não há poses calculadas neste projeto; rode a partir da etapa de poses");
+    }
+    if to == Stage::Poses {
+        return Ok(None);
     }
 
     // ---------- 4. Treino ----------
@@ -377,7 +412,7 @@ async fn run_inner(
     state.last_export = None;
     layout.save(&state)?;
     emit(JobEvent::StageDone { stage: Stage::Train, seconds: t0.elapsed().as_secs_f64() });
-    Ok(ply)
+    Ok(Some(ply))
 }
 
 /// Frames do vídeo: candidatos pelo ffmpeg e o mais nítido de cada janela.
@@ -433,6 +468,43 @@ async fn extract_video(
     .await?
 }
 
+/// Recusa (move para `rejected/`) ou aceita de volta frames, pelo nome do
+/// arquivo. As poses deixam de valer; aceitar um frame que ficou sem recorte
+/// invalida também o recorte.
+pub fn set_frames_rejected(project_dir: &str, names: &[String], rejected: bool) -> Result<ProjectState> {
+    let layout = Layout::new(project_dir);
+    let mut state = layout.load();
+    let dest_dir = if rejected { layout.rejected() } else { layout.images() };
+    std::fs::create_dir_all(&dest_dir)?;
+    let (mut changed, mut missing_mask) = (false, false);
+    let mut moved = Ok(());
+    for f in state.frames.iter_mut().filter(|f| f.rejected != rejected) {
+        let src = PathBuf::from(&f.path);
+        let Some(name) = src.file_name() else { continue };
+        if !names.iter().any(|n| n.as_str() == name) {
+            continue;
+        }
+        let dest = dest_dir.join(name);
+        if let Err(e) = std::fs::rename(&src, &dest) {
+            moved = Err(anyhow::Error::new(e).context(format!("não foi possível mover {}", src.display())));
+            break;
+        }
+        missing_mask |= !rejected && !layout.masks().join(name).with_extension("png").exists();
+        f.path = dest.to_string_lossy().into_owned();
+        f.rejected = rejected;
+        changed = true;
+    }
+    // Grava o que já mudou de lugar mesmo se um arquivo falhou no meio.
+    if changed {
+        if missing_mask {
+            state.masks = None;
+            state.masks_dir = None;
+        }
+        state.poses = None;
+        layout.save(&state)?;
+    }
+    moved.map(|_| state)
+}
 /// Exporta o splat final do projeto com os ajustes de otimização e guarda o
 /// resultado no `project.json`.
 pub fn export_project(project_dir: &str, opts: &ExportOptions, progress: impl FnMut(f32, &Msg)) -> Result<ExportStats> {
@@ -451,4 +523,50 @@ pub fn export_project(project_dir: &str, opts: &ExportOptions, progress: impl Fn
 pub fn default_project_dir(video: &Path) -> PathBuf {
     let stem = video.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "projeto".into());
     video.with_file_name(format!("{stem}_splat"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reject_and_accept_frames() {
+        let root = std::env::temp_dir().join("splatforge_reject_test");
+        let _ = std::fs::remove_dir_all(&root);
+        let layout = Layout::new(&root);
+        std::fs::create_dir_all(layout.images()).unwrap();
+        std::fs::create_dir_all(layout.masks()).unwrap();
+        let frames = (0..3)
+            .map(|i| {
+                let path = layout.images().join(format!("{i:05}.jpg"));
+                std::fs::write(&path, b"x").unwrap();
+                FrameInfo { path: path.to_string_lossy().into_owned(), time: i as f64, sharpness: 1.0, source: None, rejected: false }
+            })
+            .collect();
+        // Só os frames 0 e 1 têm recorte.
+        for i in 0..2 {
+            std::fs::write(layout.masks().join(format!("{i:05}.png")), b"m").unwrap();
+        }
+        let stats = ModelStats { registered: 3, total: 3, points: 10, reprojection_error: None, mapper: "t".into(), inferred: 0, refined: 0 };
+        let masks = MaskStats { count: 2, no_subject: 0, mean_coverage: 0.5, backend: "t".into(), key_color: None };
+        layout
+            .save(&ProjectState { frames, masks: Some(masks), poses: Some(stats), ..Default::default() })
+            .unwrap();
+        let dir = root.to_string_lossy().into_owned();
+
+        let s = set_frames_rejected(&dir, &["00001.jpg".into(), "00002.jpg".into()], true).unwrap();
+        assert!(s.poses.is_none() && s.masks.is_some());
+        assert!(s.frames[1].rejected && s.frames[2].rejected && !s.frames[0].rejected);
+        assert!(layout.rejected().join("00001.jpg").exists() && !layout.images().join("00001.jpg").exists());
+        assert_eq!(layout.load().frames[2].path, layout.rejected().join("00002.jpg").to_string_lossy());
+
+        // Aceitar de volta um frame com recorte mantém o recorte...
+        let s = set_frames_rejected(&dir, &["00001.jpg".into()], false).unwrap();
+        assert!(!s.frames[1].rejected && s.masks.is_some());
+        assert!(layout.images().join("00001.jpg").exists());
+        // ...e um sem recorte o invalida.
+        let s = set_frames_rejected(&dir, &["00002.jpg".into()], false).unwrap();
+        assert!(s.masks.is_none() && !s.frames[2].rejected);
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

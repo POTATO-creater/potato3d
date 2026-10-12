@@ -32,12 +32,56 @@ function Metric({ label, value, tone }: { label: string; value: string; tone?: "
   );
 }
 
+/** ▶ roda só a etapa; na etapa em andamento vira ■ (cancela o job). */
+function StageButton({
+  running,
+  blocked,
+  busy,
+  onRun,
+  onCancel,
+}: {
+  running: boolean;
+  /** Motivo de não poder rodar; null = pode. */
+  blocked: string | null;
+  /** Algum job está rodando. */
+  busy: boolean;
+  onRun: () => void;
+  onCancel: () => void;
+}) {
+  const { t } = useI18n();
+  const tl = t.stageStrip;
+  if (running)
+    return (
+      <button className="stage-run stop" onClick={onCancel} aria-label={tl.stopStage} title={tl.stopStage}>
+        <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden>
+          <rect x="2.5" y="2.5" width="7" height="7" rx="1.2" fill="currentColor" />
+        </svg>
+      </button>
+    );
+  return (
+    <button
+      className="stage-run"
+      onClick={onRun}
+      disabled={busy || !!blocked}
+      aria-label={tl.runStage}
+      title={blocked && !busy ? `${tl.runStage}: ${blocked}` : tl.runStage}
+    >
+      <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden>
+        <path d="M3.5 2.2v7.6L9.8 6z" fill="currentColor" strokeLinejoin="round" stroke="currentColor" strokeWidth="0.8" />
+      </svg>
+    </button>
+  );
+}
+
 export function StageStrip({
   job,
   totalSteps,
   tools,
   masks: maskOpts,
   images,
+  blocked,
+  onRunStage,
+  onCancel,
 }: {
   job: JobState;
   totalSteps: number;
@@ -45,12 +89,17 @@ export function StageStrip({
   masks: MaskOptions;
   /** Os frames vêm de imagens, não de um vídeo. */
   images?: boolean;
+  /** Por que cada etapa não pode rodar sozinha agora; null = pode. */
+  blocked: Record<Stage, string | null>;
+  onRunStage: (stage: Stage) => void;
+  onCancel: () => void;
 }) {
   const { t, tm } = useI18n();
   const tl = t.stageStrip;
   const { stages, frames, masks, poses, train, evals } = job;
   const labels = stageToolLabels(t, tools, maskOpts, images);
 
+  const rejected = frames.filter((f) => f.rejected).length;
   const medianSharp = (() => {
     if (!frames.length) return null;
     const v = frames.map((f) => f.sharpness).sort((a, b) => a - b);
@@ -75,6 +124,13 @@ export function StageStrip({
               <span className="stage-title">{t.stageTitles[st]}</span>
               <span className="stage-tool">{labels[st]}</span>
               {s.seconds != null && <span className="stage-time mono">{fmtSecs(s.seconds)}</span>}
+              <StageButton
+                running={s.status === "running"}
+                blocked={blocked[st]}
+                busy={job.running}
+                onRun={() => onRunStage(st)}
+                onCancel={onCancel}
+              />
             </div>
             <div className="bar">
               <div
@@ -87,7 +143,8 @@ export function StageStrip({
             <div className="metrics">
               {st === "frames" && frames.length > 0 && (
                 <>
-                  <Metric label={tl.selected} value={String(frames.length)} />
+                  <Metric label={tl.selected} value={String(frames.length - rejected)} />
+                  {rejected > 0 && <Metric label={tl.rejected} value={String(rejected)} tone="warn" />}
                   {medianSharp != null && <Metric label={tl.medianSharpness} value={medianSharp.toFixed(0)} />}
                 </>
               )}
@@ -114,6 +171,18 @@ export function StageStrip({
                     value={`${poses.registered}/${poses.total}`}
                     tone={regRatio! >= 0.95 ? "good" : regRatio! >= 0.75 ? "warn" : "bad"}
                   />
+                  {!!poses.inferred && (
+                    <div className="metric" title={tl.inferredTitle}>
+                      <span className="metric-label">{tl.inferred}</span>
+                      <span className="metric-value">{poses.inferred}</span>
+                    </div>
+                  )}
+                  {!!poses.refined && (
+                    <div className="metric" title={tl.refinedTitle}>
+                      <span className="metric-label">{tl.refined}</span>
+                      <span className="metric-value good">{poses.refined}</span>
+                    </div>
+                  )}
                   <Metric label={tl.points} value={fmtCount(poses.points)} />
                   {poses.reprojectionError != null && (
                     <Metric

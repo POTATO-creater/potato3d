@@ -62,6 +62,23 @@
         "VITE_SHARE_ORIGIN": "http://localhost:8787"
       },
       "port": 1430
+    },
+    {
+      "name": "web-bench",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "exec",
+        "vite",
+        "--config",
+        "web/vite.config.ts",
+        "--port",
+        "1441",
+        "--strictPort"
+      ],
+      "env": {
+        "WEB_FS_ANY": "1"
+      },
+      "port": 1441
     }
   ]
 }
