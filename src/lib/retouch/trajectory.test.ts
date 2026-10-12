@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  clipFrames,
   clipLens,
   DEFAULT_CLIP,
   matToQuat,
@@ -89,4 +90,31 @@ test("vista mirada: meio igual ao alvo, pontas em fotos, sem saltos", () => {
   for (let i = 1; i < p.length; i++) assert.ok(angleBetween(p[i - 1].qvec, p[i].qvec) < 5, `salto no frame ${i}`);
   // A mistura passa por fora do sujeito (raio nunca menor que o menor dos dois).
   for (const q of p) assert.ok(Math.hypot(...poseToWorld(q).center) > 2.39);
+});
+
+test("duração em frames: 8n + 1 mais próximo", () => {
+  assert.equal(clipFrames(97 / 24, 24), 97);
+  assert.equal(clipFrames(3.2, 30), 97);
+  assert.equal(clipFrames(8, 30), 241);
+  assert.equal(clipFrames(0.1, 30), 17);
+});
+
+test("volta 360° por baixo: começa e termina na mesma foto, passa por todas", () => {
+  const frames = 241;
+  const plan = presetPath(orbit, lens, { ...DEFAULT_CLIP, frames, center: 10 + orbit.length / 2, span: orbit.length, elevDeg: -25 });
+  const p = plan.poses;
+  assert.equal(p[0].anchor, orbit[10].name);
+  assert.equal(p[frames - 1].anchor, orbit[10].name);
+  assert.ok(Math.abs(elevation(p[frames >> 1]) - (10 - 25)) < 0.5);
+  for (let i = 1; i < p.length; i++) assert.ok(angleBetween(p[i - 1].qvec, p[i].qvec) < 4, `salto no frame ${i}`);
+});
+
+test("onda 360°: desce numa metade e sobe na outra", () => {
+  const frames = 241;
+  const plan = presetPath(orbit, lens, { ...DEFAULT_CLIP, frames, center: orbit.length / 2, span: orbit.length, elevDeg: -20, shape: "wave" });
+  const els = plan.poses.map(elevation);
+  assert.ok(Math.min(...els.slice(0, frames >> 1)) < 10 - 18, "metade de baixo");
+  assert.ok(Math.max(...els.slice(frames >> 1)) > 10 + 18, "metade de cima");
+  assert.ok(Math.abs(els[0] - 10) < 1e-6 && Math.abs(els[frames - 1] - 10) < 1e-6);
+  assert.equal(plan.poses[0].anchor, orbit[0].name);
 });

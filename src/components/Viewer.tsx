@@ -23,6 +23,12 @@ export interface ColmapPose {
   tvec: [number, number, number];
 }
 
+/** Quadro do vídeo de retoque: proporção e campo de visão vertical (rad). */
+export interface FrameGuide {
+  size: [number, number];
+  fovY: number;
+}
+
 /** Acesso do retoque ao viewer: a câmera atual, a trajetória desenhada e o
  *  render fora da tela, nas coordenadas do COLMAP. */
 export interface ViewerHandle {
@@ -36,6 +42,8 @@ export interface ViewerHandle {
   unlockAngle(): void;
   /** Splat carregado na tela. */
   hasSplat(): boolean;
+  /** Quadro do vídeo para a máscara de enquadramento (null tira a opção). */
+  setFrameGuide(guide: FrameGuide | null): void;
   /** Renderiza cada pose fora da tela, com o splat exibido. `onFrame` recebe
    *  RGBA de cima para baixo, com a cor já sem o alpha pré-multiplicado. */
   renderFrames(opts: {
@@ -78,6 +86,10 @@ const SETTLE_FRAMES = 45;
 const ACCENT = 0xff9a4d;
 /** Raio, em px, para acertar um ponto de câmera com o mouse. */
 const PICK_RADIUS = 10;
+/** Campo de visão vertical padrão do viewer, em graus. */
+const BASE_FOV = 50;
+/** Fração máxima da tela que o quadro do enquadramento ocupa. */
+const GUIDE_FILL = 0.86;
 
 export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) {
   const { t, locale } = useI18n();
@@ -90,6 +102,12 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
   const [spin, setSpin] = useState(false);
   const [clampView, setClampView] = useState(true);
   const [hasMesh, setHasMesh] = useState(false);
+  const [guide, setGuide] = useState<FrameGuide | null>(null);
+  const [guideOn, setGuideOn] = useState(false);
+  /** Tamanho em px do quadro na tela, com a máscara ligada. */
+  const [guideBox, setGuideBox] = useState<{ w: number; h: number } | null>(null);
+  const activeGuide = useRef<FrameGuide | null>(null);
+  const fitGuideRef = useRef<() => void>(() => {});
   // Os ouvintes do canvas nascem uma vez; leem o estado atual por aqui.
   const frameRef = useRef(frame);
   frameRef.current = frame;
@@ -130,6 +148,7 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
       renderer.setSize(w, h, false);
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
+      fitGuideRef.current();
       invalidate();
     };
     const ro = new ResizeObserver(resize);
@@ -273,6 +292,37 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
     if (ctx.current) ctx.current.controls.autoRotate = spin;
   }, [spin]);
 
+  // Máscara de enquadramento: escurece o que fica fora do quadro do vídeo de
+  // retoque. A lente do vídeo pode ser mais aberta que a do viewer; nesse caso
+  // o viewer abre o campo de visão até o quadro caber na tela.
+  fitGuideRef.current = () => {
+    const c = ctx.current;
+    const el = host.current;
+    const g = activeGuide.current;
+    if (!c || !el) return;
+    const { clientWidth: w, clientHeight: h } = el;
+    let fov = BASE_FOV;
+    let box: { w: number; h: number } | null = null;
+    if (g && w && h) {
+      const aspect = g.size[0] / g.size[1];
+      const tc = Math.tan(g.fovY / 2);
+      const tv = Math.max(Math.tan(THREE.MathUtils.degToRad(BASE_FOV) / 2), (tc * Math.max(1, aspect / (w / h))) / GUIDE_FILL);
+      fov = THREE.MathUtils.radToDeg(2 * Math.atan(tv));
+      const bh = (h * tc) / tv;
+      box = { w: bh * aspect, h: bh };
+    }
+    if (Math.abs(c.camera.fov - fov) > 1e-6) {
+      c.camera.fov = fov;
+      c.camera.updateProjectionMatrix();
+      c.invalidate();
+    }
+    setGuideBox((cur) => (cur?.w === box?.w && cur?.h === box?.h ? cur : box));
+  };
+  useEffect(() => {
+    activeGuide.current = guideOn && guide ? guide : null;
+    fitGuideRef.current();
+  }, [guide, guideOn]);
+
   // Trava a altura da órbita na faixa que o vídeo filmou (+ folga): fora
   // dela não há dados e o splat mostra buracos e artefatos.
   useEffect(() => {
@@ -400,6 +450,9 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
       hasSplat() {
         return !!ctx.current?.mesh;
       },
+      setFrameGuide(g) {
+        setGuide(g);
+      },
       async renderFrames({ poses, size: [w, h], fy, onFrame, signal }) {
         const c = ctx.current;
         if (!c?.mesh) throw new Error("nenhum splat carregado no viewer");
@@ -525,6 +578,11 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
     <div className="viewer">
       <div className="viewer-canvas" ref={host} />
       {!hasMesh && !loading && <div className="viewer-empty">{placeholder}</div>}
+      {guide && guideBox && (
+        <div className="viewer-guide" style={{ width: guideBox.w, height: guideBox.h }} aria-hidden>
+          <span>{tv.guideLabel(guide.size[0], guide.size[1])}</span>
+        </div>
+      )}
       <div className="viewer-hud">
         {splat && (
           <span className="chip">
@@ -551,6 +609,11 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
         >
           {tv.lockAngle}
         </button>
+        {guide && (
+          <button className={`tool ${guideOn ? "on" : ""}`} onClick={() => setGuideOn((v) => !v)} title={tv.guideTitle}>
+            {tv.guide}
+          </button>
+        )}
         <button className={`tool ${spin ? "on" : ""}`} onClick={() => setSpin((v) => !v)}>
           {tv.spin}
         </button>

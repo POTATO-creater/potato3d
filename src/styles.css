@@ -1073,6 +1073,7 @@ body.resizing canvas {
 .viewer {
   position: absolute;
   inset: 0;
+  overflow: hidden;
   background: radial-gradient(ellipse at 50% 40%, #1a1d22 0%, var(--bg) 70%);
 }
 .viewer-canvas,
@@ -1109,6 +1110,24 @@ body.resizing canvas {
 }
 .placeholder strong {
   color: var(--text);
+}
+/* Máscara de enquadramento do retoque: o quadro do vídeo, o resto escurecido. */
+.viewer-guide {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  outline: 1px solid rgba(127, 211, 255, 0.85);
+  box-shadow: 0 0 0 200vmax rgba(8, 9, 11, 0.62);
+  pointer-events: none;
+}
+.viewer-guide span {
+  position: absolute;
+  left: 6px;
+  top: 6px;
+  font: 500 11px/1 var(--mono);
+  color: rgba(127, 211, 255, 0.95);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
 }
 .viewer-hud {
   position: absolute;
@@ -1871,6 +1890,16 @@ body.resizing canvas {
 .comfy-wf-head .muted {
   flex: none;
 }
+.comfy-wf-sub {
+  margin: 12px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-2);
+}
 .topbar-settings {
   display: inline-flex;
   align-items: center;
@@ -1890,6 +1919,21 @@ body.resizing canvas {
 
 .retouch-intro {
   margin-top: 0;
+}
+.retouch-move {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+.retouch-move > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+.retouch-move .btn-sm {
+  flex: none;
+}
+.retouch-motion {
+  margin-top: 10px;
 }
 .retouch-actions,
 .retouch-row {
@@ -1991,12 +2035,30 @@ body.resizing canvas {
   gap: 6px;
   min-width: 0;
 }
-.retouch-review-videos video {
-  width: 100%;
-  max-height: 62vh;
-  object-fit: contain;
+/* O palco tem fundo xadrez escuro para o cinza do vídeo (fundo do clipe)
+   não se confundir com a área sobrando em volta. */
+.retouch-stage {
+  display: grid;
+  place-items: center;
+  height: 62vh;
+  padding: 10px;
   border-radius: 6px;
-  background: #808080;
+  border: 1px solid var(--border);
+  background: repeating-conic-gradient(#15171a 0% 25%, #1c1f23 0% 50%) 0 0 / 18px 18px;
+  overflow: hidden;
+}
+.retouch-review-videos video {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  min-height: 0;
+  object-fit: contain;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18), 0 6px 24px rgba(0, 0, 0, 0.45);
+}
+.retouch-review-videos.single {
+  grid-template-columns: minmax(0, 1fr);
 }
 .retouch-review-videos figcaption {
   font-size: 12px;

@@ -581,15 +581,26 @@ Depois do treino, o painel **Retoque** melhora ângulos que o vídeo orbital nã
 filmou bem (por baixo, por cima, a vista mirada no 3D). O fluxo:
 
 1. Gera uma trajetória que sai de uma foto real, passa por esses ângulos e
-   volta para uma foto real. Há duas formas: **Desta vista** (a câmera atual
-   do 3D) e os atalhos **Por baixo −30°** / **Por cima +30°**.
+   volta para uma foto real. O movimento sai de um select:
+   - **Desta vista**: passa pela câmera atual do 3D. O botão **Enquadrar** do
+     3D escurece o que fica fora do quadro do vídeo, para mirar.
+   - **Arco por baixo/por cima**: pouco menos de meia volta em volta da foto
+     mais próxima, desviando na altura.
+   - **Volta 360° por baixo/por cima/sobe e desce**: a volta inteira em outra
+     altura, começando e terminando na mesma foto.
+
+   A duração (em segundos, arredondada para 8n + 1 frames) e a inclinação
+   ficam ao lado; a trajetória se refaz quando mudam.
 2. Renderiza o splat nessa trajetória: é o vídeo de referência.
    - O render usa o Spark fora da tela, com a mistura em sRGB igual à da tela
      e à do Brush.
-   - O vídeo sai em MP4 (Mediabunny), em 480×960, com 97 frames.
+   - O vídeo sai em MP4 (Mediabunny), em 480×960, no fps do workflow.
 3. Envia o vídeo ao ComfyUI com um workflow de restauração.
    - Configure em **Integrações**: o endereço do ComfyUI e o `.json` exportado
      com *Export (API)*, com o nó de entrada e o de saída de cada workflow.
+   - Em **Duração do vídeo**, opcional, vai o campo numérico que recebe a
+     duração (em segundos ou frames) e o fps do vídeo de referência. No
+     workflow do LTX, o palpite é o `duration` do Empty Audio, a 30 fps.
    - O progresso chega pelo WebSocket do ComfyUI.
    - O workflow precisa manter o número de frames.
 4. **Aplicar retoque** ajusta o splat a partir dele mesmo, com as fotos mais os

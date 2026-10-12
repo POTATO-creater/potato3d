@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { normalizeUrl, outputFiles, wsUrl } from "./client.ts";
 import { initialProgress, progressFraction, reduceProgress } from "./progress.ts";
-import { checkIO, guessIO, listNodes, parseWorkflow, withInput, WorkflowParseError } from "./workflow.ts";
+import { checkIO, effectiveIO, guessIO, listNodes, parseWorkflow, withInput, WorkflowParseError } from "./workflow.ts";
 
 const ltx = readFileSync(new URL("./fixtures/ltx-restore.json", import.meta.url), "utf8");
 
@@ -23,6 +23,21 @@ test("withInput troca só o campo de entrada, sem mexer no original", () => {
   const out = withInput(g, io, "retoque_abc.mp4");
   assert.equal(out["5001"].inputs.file, "retoque_abc.mp4");
   assert.equal(g["5001"].inputs.file, "Gravando 2026-10-12 173208.mp4");
+});
+
+test("duração: palpite no EmptyAudio (segundos), fps do CreateVideo, e injeção", () => {
+  const g = parseWorkflow(ltx);
+  const io = effectiveIO(g, guessIO(g)!);
+  assert.deepEqual(io.length, { node: "9017", field: "duration", unit: "seconds" });
+  assert.equal(io.fps, 30);
+  assert.deepEqual(checkIO(g, io), []);
+  const out = withInput(g, io, "a.mp4", { frames: 97, fps: 30 });
+  assert.equal(out["9017"].inputs.duration, 3.23);
+  const frames = withInput(g, { ...io, length: { node: "9017", field: "duration", unit: "frames" } }, "a.mp4", { frames: 97, fps: 30 });
+  assert.equal(frames["9017"].inputs.duration, 97);
+  // null = sem campo de duração: nada muda além do arquivo
+  assert.equal(withInput(g, { ...io, length: null }, "a.mp4", { frames: 97, fps: 30 })["9017"].inputs.duration, 4);
+  assert.deepEqual(checkIO(g, { ...io, length: { node: "9018", field: "codec", unit: "seconds" } }), ["lengthField"]);
 });
 
 test("formato do editor e lixo são recusados com o motivo", () => {

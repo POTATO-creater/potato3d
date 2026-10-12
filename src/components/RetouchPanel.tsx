@@ -1,23 +1,55 @@
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { useI18n } from "../i18n";
 import { api, fileUrl, host, type MaskOptions, type RetouchCameras, type RetouchClip, type RetouchApi, type TrainOptions } from "../lib/api";
 import { ComfyClient } from "../lib/comfy/client";
 import { progressFraction, type ComfyProgress } from "../lib/comfy/progress";
 import { loadComfy, workflowsOf } from "../lib/comfy/settings";
-import { withInput } from "../lib/comfy/workflow";
-import { DEFAULT_CLIP, nearestCamera, orbitFrame, presetPath, viewPath, type ClipPlan } from "../lib/retouch/trajectory";
+import { DEFAULT_FPS, effectiveIO, withInput } from "../lib/comfy/workflow";
+import { clipFrames, clipLens, DEFAULT_CLIP, nearestCamera, orbitFrame, presetPath, viewPath, type ClipPlan } from "../lib/retouch/trajectory";
 import { alphaPng, createClipEncoder, videoInfo } from "../lib/retouch/video";
 import { comfyErrorText } from "./ComfySettings";
 import { NumField, Select } from "./fields";
-import type { ViewerHandle } from "./Viewer";
+import type { ColmapPose, ViewerHandle } from "./Viewer";
 
-const FPS = 24;
 const DEFAULT_STEPS = 3000;
 /** Taxa de aprendizado das posições: 10× menor que a do treino do zero. */
 const LR_MEAN = 2e-6;
 const WF_KEY = "splatforge.retouchWorkflow.v1";
+/** Duração e inclinação escolhidas por último. */
+const MOTION_KEY = "splatforge.retouchMotion.v1";
+const DEFAULT_TILT = 30;
+/** Abaixo disso uma volta inteira passa rápido demais para o modelo de vídeo. */
+const ORBIT_MIN_SECONDS = 8;
 
-type Kind = "view" | "below" | "above";
+const KINDS = ["view", "below", "above", "orbitBelow", "orbitAbove", "wave"] as const;
+type Kind = (typeof KINDS)[number];
+/** O que a trajetória guarda do clique: a vista mirada ou a foto do meio. A
+ *  trajetória em si é refeita quando a duração ou a inclinação mudam. */
+interface Draft {
+  kind: Kind;
+  pose: ColmapPose | null;
+  /** Índice da foto mais próxima da vista no momento do clique. */
+  nearest: number;
+}
+
+interface Motion {
+  kind: Kind;
+  seconds: number | null;
+  tilt: number;
+}
+
+function loadMotion(): Motion {
+  try {
+    const raw = JSON.parse(localStorage.getItem(MOTION_KEY) ?? "null") as { kind?: unknown; seconds?: unknown; tilt?: unknown } | null;
+    return {
+      kind: KINDS.includes(raw?.kind as Kind) ? (raw!.kind as Kind) : "view",
+      seconds: typeof raw?.seconds === "number" && raw.seconds > 0 ? raw.seconds : null,
+      tilt: typeof raw?.tilt === "number" && raw.tilt > 0 ? raw.tilt : DEFAULT_TILT,
+    };
+  } catch {
+    return { kind: "view", seconds: null, tilt: DEFAULT_TILT };
+  }
+}
 interface Task {
   /** Clipe em andamento (ou "draft" ao gerar, "apply" no treino). */
   target: string;
@@ -51,7 +83,8 @@ export function RetouchPanel(props: {
   const rt = api.retouch as RetouchApi;
   const [cams, setCams] = useState<RetouchCameras | null>(null);
   const [clips, setClips] = useState<RetouchClip[]>([]);
-  const [draft, setDraft] = useState<{ plan: ClipPlan; kind: Kind } | null>(null);
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const [motion, setMotion] = useState(loadMotion);
   const [task, setTask] = useState<Task | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [applied, setApplied] = useState<{ clips: string[]; appliedAt: number; base: string } | null>(null);
@@ -88,9 +121,32 @@ export function RetouchPanel(props: {
   // Ao sair (projeto trocado, painel some), apaga a trajetória do 3D.
   useEffect(() => () => viewer.current?.showPath(null), [viewer]);
 
+  // Quadro do vídeo para a máscara de enquadramento do viewer.
+  useEffect(() => {
+    const v = viewer.current;
+    if (!v || !cams) return;
+    const { size, intrinsics } = clipLens(cams.lens, DEFAULT_CLIP.longSide);
+    v.setFrameGuide({ size, fovY: 2 * Math.atan(size[1] / 2 / intrinsics.fy) });
+    return () => v.setFrameGuide(null);
+  }, [cams, viewer]);
+
   const restoreWorkflows = workflowsOf(loadComfy(), "restore");
   const workflow = restoreWorkflows.find((w) => w.id === workflowId) ?? restoreWorkflows[0] ?? null;
+  const io = workflow ? effectiveIO(workflow.graph, workflow.io) : null;
+  const fps = io?.fps ?? DEFAULT_FPS;
+  const seconds = motion.seconds ?? Math.round((DEFAULT_CLIP.frames / fps) * 10) / 10;
+  const frames = clipFrames(seconds, fps);
   const busy = !!task || props.disabled;
+
+  const updateMotion = (patch: Partial<Motion>) => {
+    const next = { ...motion, seconds, ...patch };
+    setMotion(next);
+    try {
+      localStorage.setItem(MOTION_KEY, JSON.stringify(next));
+    } catch {
+      /* armazenamento indisponível */
+    }
+  };
 
   const run = async (target: string, fn: (task: Task, progress: (f: number, text: string) => void) => Promise<void>) => {
     const abort = new AbortController();
@@ -108,33 +164,59 @@ export function RetouchPanel(props: {
 
   // ---------------------------------------------------------- trajetória --
 
-  const plan = (kind: Kind) => {
+  const plan = (kind: Kind = motion.kind) => {
     const v = viewer.current;
     if (!cams || !v) return;
     const pose = v.viewPose();
-    const lens = cams.lens;
-    const m = cams.cameras.length;
-    let p: ClipPlan;
-    if (kind === "view") {
-      if (!pose) return;
-      // Um sexto da órbita de ponta a ponta; a vista mirada fica no meio.
-      p = viewPath(cams.cameras, lens, pose, { ...DEFAULT_CLIP, span: Math.max(6, Math.round(m / 6)), sweepDeg: 12 });
-    } else {
-      const center = pose ? nearestCamera(cams.cameras, pose, orbitFrame(cams.cameras).center) : 0;
-      p = presetPath(cams.cameras, lens, { ...DEFAULT_CLIP, center, elevDeg: kind === "below" ? -30 : 30 });
-    }
-    setDraft({ plan: p, kind });
-    v.showPath(p.poses);
+    if (kind === "view" && !pose) return;
+    const nearest = pose ? nearestCamera(cams.cameras, pose, orbitFrame(cams.cameras).center) : 0;
+    setDraft({ kind, pose, nearest });
   };
+
+  // Trajetória do rascunho, refeita a cada mudança de duração ou inclinação.
+  const tilt = motion.tilt;
+  const draftPlan = useMemo((): ClipPlan | null => {
+    if (!draft || !cams || (draft.kind === "view" && !draft.pose)) return null;
+    const { cameras, lens } = cams;
+    const m = cameras.length;
+    const clip = { ...DEFAULT_CLIP, frames };
+    switch (draft.kind) {
+      case "view":
+        // Um sexto da órbita de ponta a ponta; a vista mirada fica no meio.
+        return viewPath(cameras, lens, draft.pose!, { ...clip, span: Math.max(6, Math.round(m / 6)), sweepDeg: 12 });
+      case "below":
+      case "above":
+        // Arco de pouco menos de meia volta em volta da foto mais próxima.
+        return presetPath(cameras, lens, { ...clip, center: draft.nearest, span: Math.round(m * 0.45), elevDeg: draft.kind === "below" ? -tilt : tilt });
+      case "orbitBelow":
+      case "orbitAbove":
+      case "wave":
+        // Volta inteira: começa e termina na foto mais próxima da vista.
+        return presetPath(cameras, lens, {
+          ...clip,
+          center: draft.nearest + m / 2,
+          span: m,
+          elevDeg: draft.kind === "orbitAbove" ? tilt : -tilt,
+          shape: draft.kind === "wave" ? "wave" : "arc",
+        });
+    }
+  }, [draft, cams, frames, tilt]);
+
+  useEffect(() => {
+    if (draftPlan) viewer.current?.showPath(draftPlan.poses);
+  }, [draftPlan, viewer]);
 
   const generate = () =>
     draft &&
+    draftPlan &&
     run("draft", async ({ abort }, progress) => {
       const v = viewer.current!;
-      const { plan: p, kind } = draft;
+      const p = draftPlan;
+      const kind = draft.kind;
+      const clipFps = fps;
       const [w, h] = p.size;
       const n = p.poses.length;
-      const enc = await createClipEncoder(w, h, FPS);
+      const enc = await createClipEncoder(w, h, clipFps);
       const files: Record<string, Blob> = {};
       try {
         await v.renderFrames({
@@ -156,10 +238,10 @@ export function RetouchPanel(props: {
       }
       const clip: RetouchClip = {
         id: `clip-${Date.now().toString(36)}`,
-        label: tr.labels[kind],
+        label: tr.labels[kind](tilt),
         createdAt: Date.now(),
         size: p.size,
-        fps: FPS,
+        fps: clipFps,
         intrinsics: p.intrinsics,
         poses: p.poses,
         reference: null,
@@ -181,6 +263,7 @@ export function RetouchPanel(props: {
 
   const send = (clip: RetouchClip) =>
     workflow &&
+    io &&
     run(clip.id, async ({ abort }, progress) => {
       const settings = loadComfy();
       const client = new ComfyClient(settings.url);
@@ -189,7 +272,7 @@ export function RetouchPanel(props: {
       const name = await client.upload(reference, `gorbit_${clip.id}.mp4`, abort.signal);
       const titles = Object.fromEntries(Object.entries(workflow.graph).map(([id, n]) => [id, n._meta?.title || n.class_type]));
       const files = await client.run(
-        withInput(workflow.graph, workflow.io, name),
+        withInput(workflow.graph, io, name, { frames: clip.poses.length, fps: clip.fps }),
         workflow.io.output.node,
         (p: ComfyProgress) => {
           const text =
@@ -294,28 +377,69 @@ export function RetouchPanel(props: {
       </header>
       <p className="help retouch-intro">{tr.intro}</p>
 
-      <div className="retouch-actions">
-        <button className="btn-sm" disabled={busy || !cams} onClick={() => plan("view")} title={tr.fromViewTitle}>
-          {tr.fromView}
-        </button>
-        <button className="btn-sm" disabled={busy || !cams} onClick={() => plan("below")} title={tr.presetTitle}>
-          {tr.below}
-        </button>
-        <button className="btn-sm" disabled={busy || !cams} onClick={() => plan("above")} title={tr.presetTitle}>
-          {tr.above}
+      <h3 className="retouch-sub">{tr.motion}</h3>
+      <div className="retouch-move">
+        <Select
+          value={motion.kind}
+          aria-label={tr.motion}
+          disabled={busy || !cams}
+          options={KINDS.map((k) => ({ value: k, label: tr.moves[k].label, hint: tr.moves[k].hint }))}
+          onChange={(kind) => {
+            updateMotion({ kind });
+            // Com uma trajetória aberta, troca o movimento mantendo a vista do clique.
+            if (draft) setDraft({ ...draft, kind });
+          }}
+        />
+        <button className="btn-sm" disabled={busy || !cams} onClick={() => plan()} title={tr.plotTitle}>
+          {tr.plot}
         </button>
       </div>
+      <div className="grid2 retouch-motion">
+        <NumField
+          label={tr.duration}
+          hint={tr.durationHint(frames, fps)}
+          value={seconds}
+          min={0.5}
+          max={30}
+          step={0.5}
+          suffix="s"
+          disabled={busy}
+          onChange={(v) => v > 0 && updateMotion({ seconds: v })}
+        />
+        <NumField label={tr.tilt} hint={tr.tiltHint} value={tilt} min={5} max={80} step={5} suffix="°" disabled={busy} onChange={(v) => v > 0 && updateMotion({ tilt: v })} />
+      </div>
+      {restoreWorkflows.length > 1 && (
+        <div className="retouch-field">
+          <span className="field-label">{tr.workflow}</span>
+          <Select
+            value={workflow?.id ?? null}
+            disabled={busy}
+            options={restoreWorkflows.map((w) => ({ value: w.id, label: w.name }))}
+            onChange={(id) => {
+              setWorkflowId(id);
+              try {
+                if (id) localStorage.setItem(WF_KEY, id);
+              } catch {
+                /* armazenamento indisponível */
+              }
+            }}
+          />
+        </div>
+      )}
 
-      {draft && (
+      {draft && draftPlan && (
         <div className="retouch-draft">
           <span className="small">
-            {tr.labels[draft.kind]} · {tr.draft(draft.plan.poses.length, draft.plan.size[0], draft.plan.size[1])}
+            {tr.labels[draft.kind](tilt)} · {tr.draft(draftPlan.poses.length, draftPlan.poses.length / fps, draftPlan.size[0], draftPlan.size[1])}
           </span>
+          {(draft.kind === "orbitBelow" || draft.kind === "orbitAbove" || draft.kind === "wave") && seconds < ORBIT_MIN_SECONDS && (
+            <span className="help warn">{tr.orbitFast(ORBIT_MIN_SECONDS)}</span>
+          )}
           <div className="retouch-row">
             <button className="btn-sm" disabled={busy} onClick={generate}>
               {tr.generate}
             </button>
-            <button className="btn-sm ghost" disabled={busy} onClick={() => viewer.current?.goTo(draft.plan.poses[draft.plan.poses.length >> 1])}>
+            <button className="btn-sm ghost" disabled={busy} onClick={() => viewer.current?.goTo(draftPlan.poses[draftPlan.poses.length >> 1])}>
               {tr.goToMiddle}
             </button>
             <button
@@ -383,23 +507,6 @@ export function RetouchPanel(props: {
         }}
       />
 
-      {restoreWorkflows.length > 1 && (
-        <div className="retouch-field">
-          <span className="field-label">{tr.workflow}</span>
-          <Select
-            value={workflow?.id ?? null}
-            options={restoreWorkflows.map((w) => ({ value: w.id, label: w.name }))}
-            onChange={(id) => {
-              setWorkflowId(id);
-              try {
-                if (id) localStorage.setItem(WF_KEY, id);
-              } catch {
-                /* armazenamento indisponível */
-              }
-            }}
-          />
-        </div>
-      )}
       {!workflow && clips.length > 0 && <p className="help warn">{tr.noWorkflow}</p>}
 
       {clips.length > 0 && (
@@ -444,6 +551,8 @@ function ReviewDialog({ clip, onClose }: { clip: RetouchClip; onClose: () => voi
   const n = clip.poses.length;
   const [frame, setFrame] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [sizes, setSizes] = useState<{ ref?: string; res?: string }>({});
+  const dims = (v: HTMLVideoElement) => `${v.videoWidth}×${v.videoHeight}`;
 
   // Mesmo índice de frame nos dois vídeos (o restaurado pode ter outro fps).
   const seek = useCallback(
@@ -484,15 +593,33 @@ function ReviewDialog({ clip, onClose }: { clip: RetouchClip; onClose: () => voi
             </svg>
           </button>
         </header>
-        <div className="retouch-review-videos">
+        <div className={`retouch-review-videos ${clip.restored ? "" : "single"}`}>
           <figure>
-            <video ref={ref} src={fileUrl(clip.reference!)} muted playsInline preload="auto" onLoadedMetadata={() => seek(frame)} />
-            <figcaption>{tr.referenceLabel}</figcaption>
+            <div className="retouch-stage">
+              <video ref={ref} src={fileUrl(clip.reference!)} style={{ aspectRatio: `${clip.size[0]} / ${clip.size[1]}` }} muted playsInline preload="auto" onLoadedMetadata={(e) => {
+                  const d = dims(e.currentTarget);
+                  seek(frame);
+                  setSizes((z) => ({ ...z, ref: d }));
+                }} />
+            </div>
+            <figcaption>
+              {tr.referenceLabel}
+              {sizes.ref && <span className="mono"> · {sizes.ref}</span>}
+            </figcaption>
           </figure>
           {clip.restored && (
             <figure>
-              <video ref={res} src={fileUrl(clip.restored)} muted playsInline preload="auto" onLoadedMetadata={() => seek(frame)} />
-              <figcaption>{tr.restoredLabel}</figcaption>
+              <div className="retouch-stage">
+                <video ref={res} src={fileUrl(clip.restored)} style={{ aspectRatio: `${clip.size[0]} / ${clip.size[1]}` }} muted playsInline preload="auto" onLoadedMetadata={(e) => {
+                  const d = dims(e.currentTarget);
+                  seek(frame);
+                  setSizes((z) => ({ ...z, res: d }));
+                }} />
+              </div>
+              <figcaption>
+                {tr.restoredLabel}
+                {sizes.res && <span className="mono"> · {sizes.res}</span>}
+              </figcaption>
             </figure>
           )}
         </div>

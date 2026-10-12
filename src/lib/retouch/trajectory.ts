@@ -49,6 +49,13 @@ export interface ClipOptions {
 
 export const DEFAULT_CLIP: ClipOptions = { frames: 97, longSide: 960, hold: 0.12, ramp: 0.23 };
 
+/** Frames de um clipe de `seconds` a `fps`, no 8n + 1 mais próximo (o LTX
+ *  trabalha em blocos de 8 frames mais o primeiro). Mínimo de 17. */
+export function clipFrames(seconds: number, fps: number): number {
+  const n = Math.round((seconds * fps - 1) / 8);
+  return Math.max(2, n) * 8 + 1;
+}
+
 // ---------------------------------------------------------------- álgebra --
 
 const dot = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
@@ -221,8 +228,13 @@ export interface PresetOptions extends ClipOptions {
   center: number;
   /** Elevação máxima em graus em relação às fotos (negativo = abaixo). */
   elevDeg: number;
-  /** Fotos percorridas; padrão (frames-1)/2, metade de uma foto por frame. */
+  /** Fotos percorridas; padrão (frames-1)/2, metade de uma foto por frame.
+   *  Com o número de fotos, a câmera dá a volta inteira e termina na foto
+   *  em que começou. */
   span?: number;
+  /** "arc": desvia `elevDeg` no meio e volta; "wave": numa metade desvia
+   *  `elevDeg`, na outra o oposto (sobe e desce). */
+  shape?: "arc" | "wave";
 }
 
 /** Atalho: percorre a órbita em volta de uma foto subindo ou descendo
@@ -236,11 +248,14 @@ export function presetPath(cams: CameraPose[], lens: Lens, o: PresetOptions): Cl
   for (let i = 0; i < n; i++) {
     const u = i / (n - 1);
     const base = alongOrbit(cams, start + span * u);
-    const w = profile(u, o.hold, o.ramp);
+    const ramp = profile(u, o.hold, o.ramp);
+    // Na onda, o seno corre só no trecho fora das âncoras; a rampa suaviza a saída.
+    const inner = Math.min(1, Math.max(0, (u - o.hold) / (1 - 2 * o.hold)));
+    const w = o.shape === "wave" ? ramp * Math.sin(2 * Math.PI * inner) : ramp;
     let { rot, center } = base;
     const r = sub(center, orbitC);
     const radial = sub(r, scale(up, dot(r, up)));
-    if (w > 0 && norm(radial) > 1e-9) {
+    if (w !== 0 && norm(radial) > 1e-9) {
       // Eixo horizontal: ângulo positivo leva a câmera para cima.
       const R = axisAngle(cross(unit(radial), up), ((o.elevDeg * Math.PI) / 180) * w);
       center = add(orbitC, mulMV(R, r));

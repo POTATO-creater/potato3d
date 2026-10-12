@@ -5,7 +5,8 @@
 // scripts/comfy-mock.mjs) no endereço dado.
 //
 //   node scripts/web-bench/retouch.mjs <url do app> <projeto.gorbit> <workflow.json>
-//        [--comfy http://127.0.0.1:8188] [--camera 27] [--preset below|above|view]
+//        [--comfy http://127.0.0.1:8188] [--camera 27]
+//        [--preset view|below|above|orbitBelow|orbitAbove|wave] [--seconds 3.2] [--tilt 30]
 //        [--steps 3000] [--out splat.ply]
 //
 // Abre o pacote, mira a câmera de índice --camera, cria o clipe do preset,
@@ -29,6 +30,8 @@ if (!url || !gorbit || !workflowPath) {
 const comfy = opt("comfy", "http://127.0.0.1:8188");
 const camera = Number(opt("camera", 0));
 const preset = opt("preset", "below");
+const seconds = opt("seconds", null);
+const tilt = Number(opt("tilt", 30));
 const steps = Number(opt("steps", 3000));
 const out = opt("out", "retouch_splat.ply");
 
@@ -124,7 +127,8 @@ await send("Page.enable");
 await send("Page.navigate", { url: new URL(url).origin });
 await sleep(1000);
 await evaluate(`localStorage.setItem('splatforge.locale.v1', 'pt-BR');
-  localStorage.setItem('splatforge.comfy.v1', ${JSON.stringify(JSON.stringify(comfySettings))});`);
+  localStorage.setItem('splatforge.comfy.v1', ${JSON.stringify(JSON.stringify(comfySettings))});
+  localStorage.setItem('splatforge.retouchMotion.v1', ${JSON.stringify(JSON.stringify({ kind: preset, seconds: seconds && Number(seconds), tilt }))});`);
 await send("Page.navigate", { url });
 await sleep(2500);
 
@@ -136,7 +140,7 @@ await evaluate(`(async () => {
   const dt = new DataTransfer(); dt.items.add(file);
   for (const type of ["dragenter", "dragover", "drop"]) window.dispatchEvent(new DragEvent(type, { dataTransfer: dt, bubbles: true, cancelable: true }));
 })()`);
-await waitFor(`!!${btn("Por baixo")} && !${btn("Por baixo")}.disabled && !!window.__gorbitViewer?.hasSplat()`, "projeto aberto", 300);
+await waitFor(`!!${btn("Traçar trajetória")} && !${btn("Traçar trajetória")}.disabled && !!window.__gorbitViewer?.hasSplat()`, "projeto aberto", 300);
 const projectDir = await evaluate(`document.querySelector('.panel .path')?.textContent`);
 console.log(`[${secs()}s] projeto ${projectDir}`);
 
@@ -149,8 +153,8 @@ await evaluate(`(async () => {
   window.__gorbitViewer.goTo(cams.cameras[${camera}]);
 })()`);
 await sleep(500);
-const label = { below: "Por baixo", above: "Por cima", view: "Desta vista" }[preset];
-await evaluate(`${btn(label)}.click()`);
+// O movimento (--preset) já está escolhido no localStorage.
+await evaluate(`${btn("Traçar trajetória")}.click()`);
 await sleep(300);
 await evaluate(`${btn("Gerar vídeo de referência")}.click()`);
 await waitFor(`!document.querySelector('.retouch-draft') && document.querySelectorAll('.retouch-clip').length > 0`, "vídeo de referência");

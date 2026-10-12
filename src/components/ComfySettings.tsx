@@ -3,8 +3,8 @@ import { useI18n } from "../i18n";
 import type { Messages } from "../i18n/pt-BR";
 import { ComfyClient, ComfyError } from "../lib/comfy/client";
 import { loadComfy, saveComfy, type ComfySettings as Settings, type ComfyWorkflow } from "../lib/comfy/settings";
-import { checkIO, fileFields, guessIO, listNodes, parseWorkflow, WorkflowParseError } from "../lib/comfy/workflow";
-import { Field, Select } from "./fields";
+import { checkIO, effectiveIO, fileFields, guessIO, listNodes, numberFields, parseWorkflow, WorkflowParseError, type LengthParam } from "../lib/comfy/workflow";
+import { Field, NumField, Select } from "./fields";
 
 /** Texto de um erro do ComfyUI para a interface. */
 export function comfyErrorText(t: Messages, e: unknown): string {
@@ -166,7 +166,13 @@ function WorkflowCard({ wf, onChange, onRemove }: { wf: ComfyWorkflow; onChange:
   const nodes = useMemo(() => listNodes(wf.graph), [wf.graph]);
   const inputNode = nodes.find((n) => n.id === wf.io.input.node);
   const fields = inputNode ? fileFields(inputNode) : [];
-  const problems = checkIO(wf.graph, wf.io);
+  // Duração e fps: o que o usuário escolheu ou, se ainda não, o palpite.
+  const io = effectiveIO(wf.graph, wf.io);
+  const problems = checkIO(wf.graph, io);
+  const length = io.length;
+  const lengthNode = length ? nodes.find((n) => n.id === length.node) : undefined;
+  const lengthFields = lengthNode ? numberFields(lengthNode) : [];
+  const setLength = (l: LengthParam | null) => onChange({ io: { ...wf.io, length: l } });
   const label = (n: (typeof nodes)[number]) => `${n.id} · ${n.title}`;
   // Nós com campo de arquivo primeiro; o resto também vale (nós customizados).
   const inputOptions = [...nodes].sort((a, b) => Number(fileFields(b).length > 0) - Number(fileFields(a).length > 0));
@@ -215,6 +221,49 @@ function WorkflowCard({ wf, onChange, onRemove }: { wf: ComfyWorkflow; onChange:
           onChange={(node) => onChange({ io: { ...wf.io, output: { node } } })}
         />
       </Field>
+      <h4 className="comfy-wf-sub">{tc.lengthTitle}</h4>
+      <p className="help">{tc.lengthHelp}</p>
+      <div className="grid2">
+        <Field label={tc.lengthNode}>
+          <Select
+            value={length?.node ?? ""}
+            aria-label={tc.lengthNode}
+            options={[
+              { value: "", label: tc.lengthNone },
+              ...nodes.filter((n) => numberFields(n).length > 0).map((n) => ({ value: n.id, label: label(n), hint: n.classType })),
+            ]}
+            onChange={(node) => {
+              const n = nodes.find((x) => x.id === node);
+              const field = n ? numberFields(n)[0] : undefined;
+              setLength(n && field ? { node, field, unit: length?.unit ?? "seconds" } : null);
+            }}
+          />
+        </Field>
+        <Field label={tc.lengthField}>
+          <Select
+            value={length?.field ?? ""}
+            aria-label={tc.lengthField}
+            disabled={!length}
+            options={lengthFields.map((f) => ({ value: f, label: f, hint: String(lengthNode!.literalInputs.find((i) => i.name === f)?.value) }))}
+            onChange={(field) => length && setLength({ ...length, field })}
+          />
+        </Field>
+      </div>
+      <div className="grid2">
+        <Field label={tc.lengthUnit}>
+          <Select
+            value={length?.unit ?? "seconds"}
+            aria-label={tc.lengthUnit}
+            disabled={!length}
+            options={[
+              { value: "seconds" as const, label: tc.units.seconds },
+              { value: "frames" as const, label: tc.units.frames },
+            ]}
+            onChange={(unit) => length && setLength({ ...length, unit })}
+          />
+        </Field>
+        <NumField label={tc.fps} hint={tc.fpsHint} value={io.fps} min={1} max={120} onChange={(fps) => fps > 0 && onChange({ io: { ...wf.io, fps } })} />
+      </div>
       {problems.map((p) => (
         <p key={p} className="bad small">
           {tc.problems[p]}
