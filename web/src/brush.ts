@@ -96,6 +96,8 @@ function applyOptions(cfg: Record<string, unknown>, o: TrainOptions, masked: boo
   if (o.opacSolidWeight) set["opac-solid-weight"] = o.opacSolidWeight;
   if (o.opacBinaryWeight) set["opac-binary-weight"] = o.opacBinaryWeight;
   if (o.volumeRegWeight) set["volume-reg-weight"] = o.volumeRegWeight;
+  if (o.lrMean != null) set["lr-mean"] = o.lrMean;
+  if (o.growthStopIter != null) set["growth-stop-iter"] = o.growthStopIter;
   if (masked) {
     set["background-color"] = MASKED_BACKGROUND.color;
     set["background-noise-strength"] = MASKED_BACKGROUND.noise;

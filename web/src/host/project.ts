@@ -76,6 +76,13 @@ export async function openProject(root: string): Promise<ProjectState> {
   await publishDir(l.images, IMAGE_EXT);
   await publishDir(l.rejected, IMAGE_EXT);
   if (s.masks) await publishDir(l.masks, /\.png$/i);
+  if (s.retouch) {
+    try {
+      publish(s.retouch.base, await readFile(s.retouch.base));
+    } catch {
+      s.retouch = null;
+    }
+  }
   for (const p of [s.finalPly, s.lastExport?.path])
     if (p) {
       try {

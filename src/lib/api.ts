@@ -151,6 +151,11 @@ export interface TrainOptions {
   opacBinaryWeight?: number;
   /** Peso do tamanho médio das gaussianas, relativo à cena (compactas). */
   volumeRegWeight?: number;
+  /** Taxa de aprendizado inicial das posições; omitido = padrão do Brush
+   *  (2e-5). O ajuste do retoque usa bem menos, para não desmontar o splat. */
+  lrMean?: number;
+  /** Passo em que o crescimento de splats para; omitido = padrão do Brush. */
+  growthStopIter?: number;
 }
 
 export interface Settings {
@@ -356,8 +361,9 @@ export interface RetouchOptions {
   lrMean: number;
   /** Ajustes do treino normal reaproveitados (grau SH, resolução etc.). */
   train: TrainOptions;
-  /** O projeto treinou com recorte: os frames entram com fundo transparente. */
-  masked: boolean;
+  /** Recorte com que o projeto treinou (os frames entram com fundo
+   *  transparente, como no treino); null = sem recorte. */
+  masks: MaskOptions | null;
 }
 
 export type RetouchEvent =
@@ -365,8 +371,16 @@ export type RetouchEvent =
   | { kind: "train"; event: TrainEvent }
   | { kind: "log"; line: string };
 
+/** Câmeras reais do projeto, para montar as trajetórias. */
+export interface RetouchCameras {
+  lens: { width: number; height: number; fx: number; fy: number };
+  /** Em ordem de nome (= ordem dos frames). */
+  cameras: { name: string; qvec: [number, number, number, number]; tvec: [number, number, number] }[];
+}
+
 /** Só no web, por enquanto. */
 export interface RetouchApi {
+  cameras(projectDir: string): Promise<RetouchCameras>;
   listClips(projectDir: string): Promise<RetouchClip[]>;
   /** Grava o clipe e os arquivos dados, por caminho relativo à pasta dele:
    *  `reference.mp4`, `restored.mp4`, `alpha/00000.png`… */
