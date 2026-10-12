@@ -180,15 +180,17 @@ function AppView() {
     async (dir: string) => {
       setProjectDir(dir);
       const project = await api.loadProject(dir);
+      // Frame e splat chegam juntos: o Viewer alinha o splat ao frame vigente
+      // quando ele carrega, e o do projeto anterior não serve.
+      const frame = project.poses ? await api.sceneFrame(dir).catch(() => null) : null;
       dispatch({ type: "load", project });
+      setFrame(frame);
       setLastExport(project.lastExport ?? null);
       setPreviewExport(null);
       setFramesVersion(Date.now());
       setFromStage(project.poses ? "train" : project.frames.length ? "poses" : "frames");
-      if (project.poses) await refreshFrame(dir);
-      else setFrame(null);
     },
-    [refreshFrame],
+    [],
   );
 
   const chooseVideo = useCallback(
