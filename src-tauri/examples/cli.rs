@@ -3,6 +3,8 @@
 //!   cargo run --release --example cli -- config.json
 //!   cargo run --release --example cli -- scene <projeto>   # enquadramento em JSON
 //!   cargo run --release --example cli -- export <projeto> [opcoes.json]
+//!   cargo run --release --example cli -- pack <projeto> <destino.gorbit> [video]
+//!   cargo run --release --example cli -- unpack <pacote.gorbit>
 //!
 //! `config.json` tem o mesmo formato do `JobConfig` enviado pela interface;
 //! `opcoes.json`, o do `ExportOptions` (padrão: .sog sem outras reduções).
@@ -31,6 +33,26 @@ async fn main() -> anyhow::Result<()> {
         };
         let stats = pipeline::export_project(dir, &opts, |f, m| eprintln!("{:>3.0}% {m}", f * 100.0))?;
         println!("{}", serde_json::to_string(&stats)?);
+        return Ok(());
+    }
+    if args.first().map(String::as_str) == Some("pack") {
+        use splatforge_lib::package::{pack, Include, PackRequest, Source};
+        let (Some(dir), Some(dest)) = (args.get(1), args.get(2)) else { panic!("uso: cli pack <projeto> <destino.gorbit> [video]") };
+        let req = PackRequest {
+            project_dir: dir.clone(),
+            dest: dest.clone(),
+            include: Include { masks: true, poses: true, splat: true },
+            source: args.get(3).map(|p| Source::Video { path: p.clone() }),
+            session: None,
+        };
+        let stats = pack(&req, |f| eprint!("\r{:>3.0}%", f * 100.0))?;
+        println!("\n{}", serde_json::to_string(&stats)?);
+        return Ok(());
+    }
+    if args.first().map(String::as_str) == Some("unpack") {
+        let pkg = args.get(1).expect("uso: cli unpack <pacote.gorbit>");
+        let r = splatforge_lib::package::unpack(std::path::Path::new(pkg), |f| eprint!("\r{:>3.0}%", f * 100.0))?;
+        println!("\n{}", serde_json::to_string(&r)?);
         return Ok(());
     }
     let path = args.first().expect("uso: cli <config.json>");

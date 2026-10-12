@@ -96,7 +96,7 @@ impl Layout {
     pub fn new(root: impl Into<PathBuf>) -> Self {
         Self { root: root.into() }
     }
-    fn state_file(&self) -> PathBuf {
+    pub(crate) fn state_file(&self) -> PathBuf {
         self.root.join("project.json")
     }
     fn raw_frames(&self) -> PathBuf {
@@ -112,7 +112,7 @@ impl Layout {
     }
     /// Frames recusados à mão: fora de `dataset/`, para o COLMAP, o recorte
     /// e o Brush não os verem.
-    fn rejected(&self) -> PathBuf {
+    pub(crate) fn rejected(&self) -> PathBuf {
         self.root.join("rejected")
     }
     pub fn model(&self) -> PathBuf {
@@ -137,11 +137,11 @@ impl Layout {
     fn train_out(&self) -> PathBuf {
         self.root.join("training")
     }
-    fn final_ply(&self) -> PathBuf {
+    pub(crate) fn final_ply(&self) -> PathBuf {
         self.root.join("splat.ply")
     }
     /// Exportações otimizadas (.sog/.ply), fora de `dataset/`.
-    fn exports(&self) -> PathBuf {
+    pub(crate) fn exports(&self) -> PathBuf {
         self.root.join("export")
     }
 
@@ -152,7 +152,7 @@ impl Layout {
             .unwrap_or_default()
     }
 
-    fn save(&self, state: &ProjectState) -> Result<()> {
+    pub(crate) fn save(&self, state: &ProjectState) -> Result<()> {
         std::fs::write(self.state_file(), serde_json::to_vec_pretty(state)?)?;
         Ok(())
     }

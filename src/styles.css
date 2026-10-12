@@ -554,6 +554,15 @@ body.resizing canvas {
   gap: 8px;
 }
 
+.package-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+.package-row .btn-sm {
+  flex: 1;
+}
+
 .path {
   font-family: var(--mono);
   font-size: 11.5px;

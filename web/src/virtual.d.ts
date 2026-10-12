@@ -3,3 +3,6 @@ declare module "virtual:ort-wasm-gz" {
   const url: string | null;
   export default url;
 }
+
+/** Versão do app (package.json), definida no web/vite.config.ts. */
+declare const __APP_VERSION__: string;

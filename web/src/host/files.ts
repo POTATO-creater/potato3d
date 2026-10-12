@@ -12,6 +12,8 @@ export const PROJECTS = "/projects";
 
 const videos = new Map<string, { file: File; info?: VideoInfo }>();
 const images = new Map<string, File>();
+/** Pacotes de projeto (.gorbit) abertos nesta aba. */
+const packages = new Map<string, File>();
 const urls = new Map<string, string>();
 
 export const basename = (p: string) => p.split("/").pop() ?? p;
@@ -29,6 +31,18 @@ export function video(path: string) {
   const v = videos.get(path);
   if (!v) throw new Error("O vídeo não está aberto nesta aba: arraste-o para a janela de novo.");
   return v;
+}
+
+export function addPackage(file: File): string {
+  const path = `/packages/${file.name}`;
+  packages.set(path, file);
+  return path;
+}
+
+export function packageFile(path: string): File {
+  const f = packages.get(path);
+  if (!f) throw new Error("O pacote não está aberto nesta aba: arraste-o para a janela de novo.");
+  return f;
 }
 
 /** Imagens de uma pasta (ou soltas, agrupadas sob `name`) para usar como
@@ -147,4 +161,13 @@ export async function readPublished(path: string): Promise<Blob> {
   const url = urls.get(path);
   if (url) return (await fetch(url)).blob();
   return readFile(path);
+}
+
+/** Entrega um arquivo ao usuário como download. */
+export function download(blob: Blob, name: string) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 60_000);
 }

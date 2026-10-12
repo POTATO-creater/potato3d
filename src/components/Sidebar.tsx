@@ -8,6 +8,7 @@ import { ImageSequence } from "./ImageSequence";
 import { MasksPanel } from "./MasksPanel";
 import type { PreviewSource } from "./MaskPreview";
 import { basename, fileManager, type Os } from "../lib/platform";
+import { fmtBytes } from "../lib/format";
 import { useI18n } from "../i18n";
 
 interface Props {
@@ -25,6 +26,11 @@ interface Props {
   projectDir: string | null;
   onPickProject: () => void;
   onRevealProject: () => void;
+  /** Salvar o projeto em .gorbit; ausente quando ainda não há o que salvar. */
+  onSavePackage?: () => void;
+  onOpenPackage: () => void;
+  /** Andamento ou resultado do último salvar/abrir pacote. */
+  packageStatus: PackageStatus | null;
   preset: PresetId | "custom";
   onPreset: (p: PresetId) => void;
   settings: Settings;
@@ -41,6 +47,11 @@ interface Props {
   /** Painel de exportação (só aparece com um splat treinado). */
   exportPanel?: ReactNode;
 }
+
+export type PackageStatus =
+  | { kind: "saving" | "opening"; fraction: number }
+  | { kind: "saved"; name: string; bytes: number }
+  | { kind: "error"; message: string };
 
 const fmtTime = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, "0")}`;
 
@@ -69,6 +80,8 @@ export function Sidebar(p: Props) {
     : p.imageSet
       ? { kind: "image", src: fileUrl(markedImage ?? p.imageSet.paths[0]) }
       : null;
+  const pack = p.packageStatus;
+  const packBusy = pack?.kind === "saving" || pack?.kind === "opening";
   const end = p.trim.end ?? p.video?.duration ?? 0;
   const span = Math.max(0, end - p.trim.start);
 
@@ -202,6 +215,24 @@ export function Sidebar(p: Props) {
           <div className="path" title={p.projectDir ?? ""}>
             {p.projectDir ?? ts.pickVideoFirst}
           </div>
+          <div className="package-row">
+            <button className="btn-sm" onClick={p.onSavePackage} disabled={!p.onSavePackage || packBusy} title={ts.savePackageTitle}>
+              {ts.savePackage}
+            </button>
+            <button className="btn-sm ghost" onClick={p.onOpenPackage} disabled={locked || packBusy} title={ts.openPackageTitle}>
+              {ts.openPackage}
+            </button>
+          </div>
+          {pack && (pack.kind === "saving" || pack.kind === "opening") && (
+            <div className="export-progress">
+              <div className="bar">
+                <div className="bar-fill" style={{ width: `${Math.round(pack.fraction * 100)}%` }} />
+              </div>
+              <span className="help">{pack.kind === "saving" ? ts.packSaving : ts.packOpening}</span>
+            </div>
+          )}
+          {pack?.kind === "saved" && <p className="help">{ts.packSaved(pack.name, fmtBytes(pack.bytes))}</p>}
+          {pack?.kind === "error" && <p className="help export-error">{ts.packError(pack.message)}</p>}
         </section>
 
         <MasksPanel os={p.os} masks={p.masks} onMasks={p.onMasks} locked={locked} preview={previewSource} promptOutside={promptOutside} />
