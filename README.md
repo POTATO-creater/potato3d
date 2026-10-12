@@ -19,8 +19,15 @@ vídeo ──► Frames ─────────► Recorte ─────�
 ```bash
 brew install ffmpeg colmap
 pnpm install
-pnpm setup:tools        # baixa o Brush (sidecar do Tauri) e confere ffmpeg/COLMAP
+pnpm setup:tools        # compila o Brush (sidecar do Tauri) e confere ffmpeg/COLMAP
 ```
+
+O Brush do desktop é o mesmo da versão web: o `setup:tools` (ou
+`pnpm brush:native`) compila o `brush-cli` do commit fixo com os patches de
+`web/brush/`, num toolchain Rust 1.99 lado a lado (~5 min na primeira vez). As
+releases oficiais (0.3.0) não têm as opções de treino que o app usa. Mudou o
+commit ou um patch? O `setup:tools` recompila sozinho (carimbo no `.rev` ao
+lado do binário).
 
 ### Windows (usuário final)
 
@@ -45,7 +52,7 @@ no Windows 11). Para CUDA, um driver NVIDIA recente.
 
 ```powershell
 pnpm install
-pnpm setup:tools        # Brush + COLMAP 4.2.1 + ffmpeg, com SHA-256 conferido
+pnpm setup:tools        # compila o Brush; baixa COLMAP 4.2.1 + ffmpeg, com SHA-256 conferido
 ```
 
 O `setup:tools` escolhe o COLMAP com CUDA se encontrar `nvidia-smi` (use
@@ -94,7 +101,12 @@ câmera só.
 
 Com **"Isolar o sujeito"** ligado, cada frame ganha uma máscara do sujeito e o
 Brush treina com o fundo transparente: o splat sai só com a pessoa ou objeto,
-sem paredes, pessoas ao fundo ou os riscos em volta.
+sem paredes, pessoas ao fundo ou os riscos em volta. Nesse treino o fundo é
+uma cor sorteada a cada passo (0,5 ± 0,5) em vez do preto ± 0,1 do Brush: no
+preto, camadas escuras e semitransparentes fora da silhueta saem quase de
+graça e viram uma silhueta fantasma em volta do sujeito (riscos na perna e
+uma "segunda pele" escura no projeto de teste). Com o fundo variando, a
+camada some e o splat fica ~15% menor, no mesmo tempo de treino.
 
 | Método | Sistema | Como | Medido |
 |---|---|---|---|

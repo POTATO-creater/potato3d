@@ -190,6 +190,7 @@ async function run(cfg: JobConfig, emit: (e: JobEvent) => void, signal: AbortSig
   const ply = await train(
     await dirAt(dataset),
     cfg.train,
+    m.enabled,
     {
       status: (msg) => rep.progress(0, msg),
       dataset: (n, e) => rep.log(`dataset: ${n} vistas de treino${e ? `, ${e} de avaliação` : ""}`),

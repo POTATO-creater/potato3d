@@ -30,15 +30,81 @@ pub struct TrainOptions {
     /// (32,6 dB em 15k passos vs 31,8 dB em 7k, ambos ~9 min).
     #[serde(default = "default_ssim")]
     pub ssim_weight: f32,
-    /// Penaliza splats grandes/alongados. 1e-6 tirou o "azul" e as agulhas
-    /// do topo não filmado de uma cabeça, mas custou 1,3 dB de PSNR.
-    /// `None` = padrão do Brush (1e-8).
+    /// Penalizava splats grandes/alongados no Brush 0.3. O Brush fixado
+    /// (scripts/build-brush-web.mjs) não tem mais essa perda: é ignorada,
+    /// como no web.
     #[serde(default)]
     pub scale_loss_weight: Option<f32>,
+    /// Poda por contribuição negativa e regularização do DeG (web/brush/deg.patch);
+    /// ver `TrainOptions` em src/lib/api.ts. Omitido ou 0 = desligado.
+    #[serde(default)]
+    pub contrib_prune_min_views: Option<u32>,
+    #[serde(default)]
+    pub contrib_prune_ratio: Option<f32>,
+    #[serde(default)]
+    pub contrib_prune_start: Option<f32>,
+    #[serde(default)]
+    pub opac_solid_weight: Option<f32>,
+    #[serde(default)]
+    pub opac_binary_weight: Option<f32>,
+    #[serde(default)]
+    pub volume_reg_weight: Option<f32>,
 }
 
 fn default_ssim() -> f32 {
     0.2
+}
+
+/// Fundo do treino com máscara: cor uniforme sorteada a cada passo
+/// (0,5 ± 0,5). No preto ± 0,1 do Brush, camadas escuras e semitransparentes
+/// fora da silhueta quase não custam nada e viram uma silhueta fantasma em
+/// volta do sujeito; com o fundo variando, qualquer transparência indevida
+/// pesa na perda. Mesmos valores de `MASKED_BACKGROUND` em web/src/brush.ts.
+const MASKED_BACKGROUND: ([f32; 3], f32) = ([0.5, 0.5, 0.5], 0.5);
+
+/// Argumentos de treino do `brush-cli` (sem o dataset e a saída).
+fn train_args(opts: &TrainOptions, masked: bool, export_every: u32) -> Vec<String> {
+    let mut a: Vec<String> = Vec::new();
+    let mut push = |k: &str, v: &[String]| {
+        a.push(k.into());
+        a.extend_from_slice(v);
+    };
+    let s = |v: &dyn ToString| [v.to_string()];
+    push("--total-train-iters", &s(&opts.total_steps));
+    push("--sh-degree", &s(&opts.sh_degree.min(3)));
+    push("--max-splats", &s(&opts.max_splats));
+    push("--max-resolution", &s(&opts.max_resolution));
+    push("--ssim-weight", &s(&opts.ssim_weight.max(0.0)));
+    push("--export-every", &s(&export_every));
+    if opts.eval_split_every > 1 {
+        push("--eval-split-every", &s(&opts.eval_split_every));
+        push("--eval-every", &s(&export_every));
+    }
+    let positive = |v: Option<f32>| v.filter(|w| *w > 0.0);
+    if let Some(n) = opts.contrib_prune_min_views.filter(|n| *n > 0) {
+        push("--contrib-prune-min-views", &s(&n));
+        if let Some(r) = opts.contrib_prune_ratio {
+            push("--contrib-prune-ratio", &s(&r));
+        }
+        if let Some(st) = opts.contrib_prune_start {
+            push("--contrib-prune-start", &s(&st));
+        }
+    }
+    if let Some(w) = positive(opts.opac_solid_weight) {
+        push("--opac-solid-weight", &s(&w));
+    }
+    if let Some(w) = positive(opts.opac_binary_weight) {
+        push("--opac-binary-weight", &s(&w));
+    }
+    if let Some(w) = positive(opts.volume_reg_weight) {
+        push("--volume-reg-weight", &s(&w));
+    }
+    if masked {
+        let (color, noise) = MASKED_BACKGROUND;
+        push("--background-color", &color.map(|c| c.to_string()));
+        push("--background-noise-strength", &s(&noise));
+    }
+    a
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -74,11 +140,13 @@ fn strip_env_logger(line: &str) -> &str {
     line
 }
 
+/// `masked`: as imagens do dataset têm o alpha das máscaras (dataset_alpha).
 pub async fn run(
     brush: &Path,
     dataset: &Path,
     out_dir: &Path,
     opts: &TrainOptions,
+    masked: bool,
     cancel: &CancellationToken,
     mut on_event: impl FnMut(TrainEvent),
     mut on_log: impl FnMut(&str),
@@ -92,21 +160,12 @@ pub async fn run(
     let mut cmd = Command::new(brush);
     cmd.env("RUST_LOG", "brush_process=info,brush_cli=info,brush_train=info")
         .arg(dataset)
-        .args(["--total-steps", &opts.total_steps.to_string()])
-        .args(["--sh-degree", &opts.sh_degree.min(3).to_string()])
-        .args(["--max-splats", &opts.max_splats.to_string()])
-        .args(["--max-resolution", &opts.max_resolution.to_string()])
-        .args(["--ssim-weight", &opts.ssim_weight.max(0.0).to_string()])
-        .args(["--export-every", &export_every.to_string()])
+        .args(train_args(opts, masked, export_every))
         .arg("--export-path")
         .arg(out_dir)
         .args(["--export-name", "splat_{iter}.ply"]);
-    if let Some(w) = opts.scale_loss_weight {
-        cmd.args(["--scale-loss-weight", &format!("{w:e}")]);
-    }
-    if opts.eval_split_every > 1 {
-        cmd.args(["--eval-split-every", &opts.eval_split_every.to_string()])
-            .args(["--eval-every", &export_every.to_string()]);
+    if opts.scale_loss_weight.is_some() {
+        on_log("Opção \"suavizar\" (scale-loss-weight) não existe nesta versão do Brush; ignorada.");
     }
 
     // O Brush preenche `{iter}` com zeros conforme o nº de dígitos do total
@@ -175,6 +234,21 @@ mod tests {
         assert_eq!(parse_refine(strip_env_logger(r)), Some((801, 13799)));
         let e = "Eval iter 1200: PSNR 32.510826, ssim 0.9530626";
         assert_eq!(parse_eval(e), Some((1200, 32.510826, 0.9530626)));
+    }
+
+    #[test]
+    fn masked_training_uses_random_background() {
+        let opts: TrainOptions = serde_json::from_value(serde_json::json!({
+            "totalSteps": 15000, "shDegree": 1, "maxSplats": 2000000, "maxResolution": 1920,
+            "exportEvery": 2500, "evalSplitEvery": 0, "scaleLossWeight": 1e-6, "opacBinaryWeight": 0.01
+        }))
+        .unwrap();
+        let plain = train_args(&opts, false, 2500).join(" ");
+        assert!(plain.starts_with("--total-train-iters 15000 --sh-degree 1"));
+        assert!(plain.contains("--opac-binary-weight 0.01"));
+        assert!(!plain.contains("background") && !plain.contains("scale-loss") && !plain.contains("eval"));
+        let masked = train_args(&opts, true, 2500).join(" ");
+        assert!(masked.ends_with("--background-color 0.5 0.5 0.5 --background-noise-strength 0.5"));
     }
 
     #[test]

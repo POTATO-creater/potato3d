@@ -38,6 +38,14 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # O Brush (sidecar) é compilado do commit fixo + patches do web; o cache
+      # evita recompilar quando nada disso mudou (o `.rev` ao lado do binário
+      # faz o setup:tools pular a compilação).
+      - uses: actions/cache@v4
+        with:
+          path: src-tauri/binaries/brush_app-*
+          key: brush-native-${{ runner.os }}-${{ hashFiles('scripts/build-brush-web.mjs', 'web/brush/*.patch') }}
+
       # Vai dentro do instalador: Brush (sidecar) e, no Windows, DirectML.dll.
       # COLMAP, ffmpeg e o modelo de recorte são baixados pelo app no primeiro uso.
       - run: pnpm setup:tools --only bundle

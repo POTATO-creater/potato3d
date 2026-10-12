@@ -388,6 +388,7 @@ async fn run_inner(
         &train_dataset,
         &layout.train_out(),
         &cfg.train,
+        cfg.masks.enabled,
         cancel,
         |ev| {
             match &ev {

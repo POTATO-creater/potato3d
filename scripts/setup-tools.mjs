@@ -6,7 +6,8 @@
 //   pnpm setup:tools --cpu      (Windows) COLMAP sem CUDA mesmo com GPU NVIDIA
 //   pnpm setup:tools --only bundle   só o que vai dentro do instalador (CI)
 //
-// - Brush (todas as plataformas): sidecar do Tauri em src-tauri/binaries/.
+// - Brush (todas as plataformas): sidecar do Tauri em src-tauri/binaries/,
+//   compilado do código-fonte por scripts/build-brush-web.mjs --native.
 // - Windows: DirectML.dll 1.15.4 (NuGet da Microsoft), usado pelo ONNX
 //   Runtime no recorte; vai junto do .exe no instalador.
 // - Windows: COLMAP (com CUDA se houver GPU NVIDIA) e ffmpeg na pasta de
@@ -16,21 +17,13 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createWriteStream, existsSync } from "node:fs";
-import { chmod, copyFile, mkdir, mkdtemp, readdir, rename, rm, stat } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readdir, rename, rm, stat } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // URLs e SHA-256 fixos: não depende da API do GitHub, cujo limite anônimo
 // (60/h por IP) estoura nos runners compartilhados do CI.
-const BRUSH = {
-  tag: "v0.3.0",
-  assets: {
-    "aarch64-apple-darwin": ["brush-app-aarch64-apple-darwin.tar.xz", 41447012, "65b2631398c839be3c1d4d7160fe2326389dec87830aac0710985e6690a1048c"],
-    "x86_64-pc-windows-msvc": ["brush-app-x86_64-pc-windows-msvc.zip", 158791348, "b68e3e9cf052d51bf3ee30776fa5a364de7f2ba13b58443128ff797bb7bcfcd6"],
-    "x86_64-unknown-linux-gnu": ["brush-app-x86_64-unknown-linux-gnu.tar.xz", 44242224, "4f0f9a8785d1951c62df26aae247c02c5bba32b00f40b06df4e1c9b867399e20"],
-  },
-};
 const COLMAP_ASSETS = {
   cuda: ["colmap-x64-windows-cuda.zip", 414666626, "e9c5cbd84c2ea986d2e970a2473fc2d2e6b34a2cdcf5d3df2765c319a63af881"],
   cpu: ["colmap-x64-windows-nocuda.zip", 127731595, "c493d88cb4a43f21afba42cb55bf786e5434a0420e73db0ba1454c5d8b3686ae"],
@@ -74,13 +67,6 @@ function toolsRoot() {
   if (isWin) return join(process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"), "SplatForge", "tools");
   if (isMac) return join(homedir(), "Library", "Application Support", "SplatForge", "tools");
   return join(process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"), "SplatForge", "tools");
-}
-
-function hostTriple() {
-  const r = spawnSync("rustc", ["-vV"], { encoding: "utf8" });
-  const m = r.stdout?.match(/^host: (.+)$/m);
-  if (!m) throw new Error("rustc não encontrado; instale o Rust (https://rustup.rs).");
-  return m[1].trim();
 }
 
 function has(cmd, argv = ["-version"]) {
@@ -159,25 +145,12 @@ async function withTemp(fn) {
   }
 }
 
-async function setupBrush() {
-  const triple = hostTriple();
-  const ext = isWin ? ".exe" : "";
-  const dest = join(root, "src-tauri", "binaries", `brush_app-${triple}${ext}`);
-  if (existsSync(dest) && !force) return console.log(`✓ Brush já instalado (${dest})`);
-  const asset = BRUSH.assets[triple];
-  if (!asset) throw new Error(`sem binário pronto do Brush para ${triple}; compile a partir do código-fonte`);
-  console.log(`→ Brush ${BRUSH.tag}`);
-  await withTemp(async (tmp) => {
-    const archive = await download(pinned("ArthurBrussee/brush", BRUSH.tag, asset), tmp);
-    extract(archive, tmp);
-    const bin = await findFile(tmp, `brush_app${ext}`);
-    if (!bin) throw new Error("brush_app não encontrado no pacote");
-    await mkdir(dirname(dest), { recursive: true });
-    await copyFile(bin, dest);
-    if (!isWin) await chmod(dest, 0o755);
-    if (isMac) spawnSync("xattr", ["-d", "com.apple.quarantine", dest], { stdio: "ignore" });
-  });
-  console.log(`✓ Brush em ${dest}`);
+// O Brush é compilado do mesmo commit e patches da versão web (as releases
+// não têm as opções de treino que o app usa); recompila só quando mudam.
+function setupBrush() {
+  const script = join(root, "scripts", "build-brush-web.mjs");
+  const r = spawnSync(process.execPath, [script, "--native", ...(force ? [] : ["--if-stale"])], { stdio: "inherit" });
+  if (r.status !== 0) throw new Error("falha ao compilar o Brush");
 }
 
 async function sha256File(path) {
