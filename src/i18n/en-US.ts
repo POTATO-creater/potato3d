@@ -19,6 +19,7 @@ export const enUS: Messages = {
     resizeSidebar: "Drag to resize · double-click restores the default size",
     tabs: { viewer: "3D", frames: "Frames", log: "Log" },
     readyIn: (d) => `Done in ${d}`,
+    github: "Source code on GitHub",
     videoError: (e) => `Couldn't read the video: ${e}`,
     imagesError: (e) => `Couldn't use the images: ${e}`,
     failed: "Failed.",

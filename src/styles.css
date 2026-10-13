@@ -1939,6 +1939,23 @@ body.resizing canvas {
   gap: 6px;
   flex: none;
 }
+.topbar-github {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  padding: 0;
+  flex: none;
+  color: var(--muted);
+}
+.topbar-github:hover {
+  color: var(--text);
+}
+.topbar-github svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+}
 .topbar-settings svg {
   width: 14px;
   height: 14px;

@@ -19,6 +19,7 @@ export const es: Messages = {
     resizeSidebar: "Arrastra para cambiar el tamaño · doble clic vuelve al tamaño estándar",
     tabs: { viewer: "3D", frames: "Frames", log: "Registro" },
     readyIn: (d) => `Listo en ${d}`,
+    github: "Código fuente en GitHub",
     videoError: (e) => `No se pudo leer el video: ${e}`,
     imagesError: (e) => `No se pudieron usar las imágenes: ${e}`,
     failed: "Falló.",
