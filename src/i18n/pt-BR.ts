@@ -25,6 +25,7 @@ export const ptBR = {
     resizeSidebar: "Arraste para redimensionar · duplo clique volta ao tamanho padrão",
     tabs: { viewer: "3D", frames: "Frames", log: "Log" },
     readyIn: (d: string) => `Pronto em ${d}`,
+    github: "Código-fonte no GitHub",
     videoError: (e: string) => `Não foi possível ler o vídeo: ${e}`,
     imagesError: (e: string) => `Não foi possível usar as imagens: ${e}`,
     failed: "Falhou.",

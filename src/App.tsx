@@ -28,6 +28,7 @@ import { StageStrip } from "./components/StageStrip";
 import { FrameLightbox, FramesGrid, LogView } from "./components/FramesGrid";
 import { ExportPanel } from "./components/ExportPanel";
 import { maskMethods } from "./components/MasksPanel";
+import { GitHubLink } from "./components/GitHubLink";
 import { LanguageSelect } from "./components/LanguageSelect";
 import { ComfySettingsButton } from "./components/ComfySettings";
 import { UpdateBanner } from "./components/UpdateBanner";
@@ -659,6 +660,7 @@ function AppView() {
           )}
           {api.retouch && <ComfySettingsButton />}
           <LanguageSelect />
+          <GitHubLink />
         </div>
 
         <UpdateBanner busy={job.running} />
