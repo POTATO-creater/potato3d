@@ -68,6 +68,16 @@ cover well (from below, from above, or the view you aimed at in 3D). The flow:
    - The previous splat is kept: **Undo retouch** goes back to it and **Compare
      with before** shows both.
 
+## Example workflows
+
+`assets/workflows/` has two ComfyUI workflows to start from. Model files are
+not included; download them into your ComfyUI `models/` folders.
+
+| File | Format | What it does |
+|---|---|---|
+| `ltx-2.5-refinement.json` | API (*Export (API)*) | Restoration workflow for **Retouch**: LTX 2.5 with the IC-LoRA decompression guide re-renders the reference video. Import it in **Integrations**; the input node is the `LoadVideo` and the output is the `SaveVideo`. |
+| `minimax-h3-360-orbit.json` | UI (open in ComfyUI) | Generates an orbit video from a single photo with MiniMax-H3 and a 360° orbit LoRA. The result can be dropped into Gausify Orbit as the input video. |
+
 ComfyUI must run with `--enable-cors-header` so the browser can call it. In
 Chrome, the HTTPS page also asks for local network permission to reach
 `http://127.0.0.1`. To develop without a GPU there is a mock ComfyUI:
