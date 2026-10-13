@@ -55,15 +55,15 @@ function loadMasks(): MaskOptions {
   };
   try {
     const raw = localStorage.getItem(MASKS_KEY);
-    // Mescla com o padrão: versões antigas não tinham método nem chroma, e o
-    // despill ficava dentro do chroma.
+    // Merge with the defaults: older versions had no method or chroma, and
+    // despill lived inside chroma.
     if (raw) {
       const { chroma: { despill, ...chroma } = {} as never, ...saved } = JSON.parse(raw);
-      // A marcação do SAM 2.1 é do vídeo da sessão anterior: não serve mais.
+      // The SAM 2.1 marking belongs to the previous session's video: drop it.
       return { ...base, despill: despill ?? base.despill, ...saved, chroma: { ...DEFAULT_CHROMA, ...chroma }, prompt: null };
     }
   } catch {
-    /* armazenamento indisponível */
+    /* storage unavailable */
   }
   return base;
 }
@@ -75,27 +75,27 @@ function loadStored(): { preset: PresetId | "custom"; settings: Settings } {
     const raw = localStorage.getItem(STORE_KEY);
     if (raw) {
       const saved = JSON.parse(raw);
-      // Preset nomeado segue a definição atual (ajustes novos chegam a quem já
-      // o escolheu); só o "personalizado" guarda os valores salvos.
+      // A named preset follows its current definition (new tweaks reach users who
+      // already picked it); only "custom" keeps the saved values.
       const p = PRESETS.find((x) => x.id === saved.preset);
       return p ? { preset: p.id, settings: p.settings } : saved;
     }
   } catch {
-    /* armazenamento indisponível: usa o padrão */
+    /* storage unavailable: use the default */
   }
   return { preset: "balanced", settings: presetById("balanced").settings };
 }
 
-/** Ajustes da interface que vão no pacote do projeto (.gorbit). */
+/** UI settings stored in the project package (.gorbit). */
 interface Session {
   settings: Settings;
   masks: MaskOptions;
   trim: { start: number; end: number | null };
 }
 
-/** Sessão de um pacote, mesclada com os padrões atuais: pode vir de outra
- *  versão do app (com campos a menos) ou do outro app (desktop ↔ web), com um
- *  método de recorte que não existe aqui. */
+/** A package's session merged with current defaults: it may come from another
+ *  app version (with fewer fields) or from the other app (desktop ↔ web), with
+ *  a masking method that does not exist here. */
 function readSession(raw: unknown, current: Session, os: Tools["os"] | undefined): Session | null {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Partial<Session>;
@@ -128,11 +128,11 @@ function matchPreset(s: Settings): PresetId | "custom" {
   return PRESETS.find((p) => JSON.stringify(p.settings) === json)?.id ?? "custom";
 }
 
-/** O recorte por IA tem o que precisa neste sistema? */
+/** Does AI masking have what it needs on this system? */
 function maskToolReady(tools: Tools, m: MaskOptions) {
-  // O SAM 2.1 (só no web) baixa os modelos durante o recorte.
+  // SAM 2.1 (web only) downloads its models during masking.
   if (m.method === "sam2") return tools.os === "web";
-  // No web o outro recorte por IA é o RMBG.
+  // On the web the other AI masker is RMBG.
   if (m.method === "rmbg" || tools.os === "web") return !!tools.rmbgModel;
   if (tools.os !== "windows") return !!tools.masker;
   return m.method === "general" ? !!tools.birefnetModel : !!tools.modnetModel;
@@ -152,7 +152,7 @@ function AppView() {
   const [tools, setTools] = useState<Tools | null>(null);
   const [videoPath, setVideoPath] = useState<string | null>(null);
   const [video, setVideo] = useState<VideoInfo | null>(null);
-  /** Frames já extraídos, no lugar do vídeo. */
+  /** Already-extracted frames, instead of a video. */
   const [imageSet, setImageSet] = useState<ImageSet | null>(null);
   const [sourceError, setSourceError] = useState<{ kind: "video" | "images"; message: string } | null>(null);
   const [trim, setTrim] = useState<{ start: number; end: number | null }>({ start: 0, end: null });
@@ -166,20 +166,20 @@ function AppView() {
   const [tab, setTab] = useState<Tab>("viewer");
   const [job, dispatch] = useReducer(jobReducer, initialJob);
   const [framesVersion, setFramesVersion] = useState(0);
-  /** Frame aberto ao clicar numa câmera do 3D (índice em `job.frames`). */
+  /** Frame opened by clicking a camera in 3D (index into `job.frames`). */
   const [camFrame, setCamFrame] = useState<number | null>(null);
   const [lastExport, setLastExport] = useState<ExportStats | null>(null);
-  /** Mostra a exportação no 3D em vez do splat do treino. */
+  /** Shows the export in 3D instead of the trained splat. */
   const [previewExport, setPreviewExport] = useState<{ version: number } | null>(null);
   const viewerRef = useRef<ViewerHandle>(null);
-  /** Retoque em andamento (usa a GPU: o pipeline espera). */
+  /** Retouch in progress (uses the GPU: the pipeline waits). */
   const [retouchBusy, setRetouchBusy] = useState(false);
-  /** Splat que o retoque pede para mostrar: prévias do ajuste ou o de antes. */
+  /** Splat the retouch asks to show: fine-tuning previews or the previous one. */
   const [retouchSplat, setRetouchSplat] = useState<{ path: string; label: string; iter: number | null; version: number } | null>(null);
   const [pack, setPack] = useState<PackageStatus | null>(null);
   const packBusy = pack?.kind === "saving" || pack?.kind === "opening";
 
-  // Logs ficam num ref e só re-renderizam a cada 250 ms.
+  // Logs live in a ref and only re-render every 250 ms.
   const logs = useRef<string[]>([]);
   const [logLines, setLogLines] = useState<string[]>([]);
   const logTimer = useRef<number | null>(null);
@@ -197,7 +197,7 @@ function AppView() {
   useEffect(() => {
     api.detectTools().then((t) => {
       setTools(t);
-      // Ajustes de layout por sistema (ex.: espaço dos botões da janela no macOS).
+      // Per-OS layout tweaks (e.g. room for the macOS window buttons).
       document.documentElement.dataset.os = t.os;
     });
   }, []);
@@ -206,7 +206,7 @@ function AppView() {
     try {
       localStorage.setItem(STORE_KEY, JSON.stringify({ preset, settings }));
     } catch {
-      /* ignora */
+      /* ignore */
     }
   }, [preset, settings]);
 
@@ -214,7 +214,7 @@ function AppView() {
     try {
       localStorage.setItem(MASKS_KEY, JSON.stringify(maskOpts));
     } catch {
-      /* ignora */
+      /* ignore */
     }
   }, [maskOpts]);
 
@@ -230,8 +230,8 @@ function AppView() {
     async (dir: string) => {
       setProjectDir(dir);
       const project = await api.loadProject(dir);
-      // Frame e splat chegam juntos: o Viewer alinha o splat ao frame vigente
-      // quando ele carrega, e o do projeto anterior não serve.
+      // Frame and splat arrive together: the Viewer aligns the splat to the
+      // current frame when it loads, and the previous project's won't do.
       const frame = project.poses ? await api.sceneFrame(dir).catch(() => null) : null;
       dispatch({ type: "load", project });
       setFrame(frame);
@@ -243,7 +243,7 @@ function AppView() {
     [],
   );
 
-  /** `dir`: projeto já escolhido (pacote aberto); senão o padrão do vídeo. */
+  /** `dir`: project already chosen (opened package); otherwise the video's default. */
   const chooseVideo = useCallback(
     async (path: string, dir?: string) => {
       setVideoPath(path);
@@ -264,7 +264,7 @@ function AppView() {
     [openProject],
   );
 
-  /** Devolve false se nenhuma imagem serviu (a entrada anterior fica). */
+  /** Returns false if no image was usable (the previous input stays). */
   const chooseImages = useCallback(
     async (paths: string[], dir?: string) => {
       setSourceError(null);
@@ -272,7 +272,7 @@ function AppView() {
       try {
         set = await api.probeImages(paths);
       } catch (e) {
-        // Mantém a entrada anterior: nada aqui serve como frame.
+        // Keep the previous input: nothing here is usable as a frame.
         setSourceError({ kind: "images", message: String(e) });
         return false;
       }
@@ -293,8 +293,8 @@ function AppView() {
   const sessionRef = useRef(session);
   sessionRef.current = session;
 
-  /** Projeto salvo em .gorbit: extrai num projeto novo e o abre com a fonte e
-   *  os ajustes de quando foi salvo, como um projeto em cache. */
+  /** Project saved as .gorbit: extracts into a new project and opens it with the
+   *  source and settings it was saved with, like a cached project. */
   const openPackage = useCallback(
     async (path: string) => {
       setPack({ kind: "opening", fraction: 0 });
@@ -302,7 +302,7 @@ function AppView() {
         const r = await api.unpackProject(path, (fraction) => setPack({ kind: "opening", fraction }));
         const restored = r.video ? (await chooseVideo(r.video, r.projectDir), true) : r.images ? await chooseImages(r.images, r.projectDir) : false;
         if (!restored) {
-          // Sem a fonte: as etapas prontas continuam valendo (só os frames não refazem).
+          // No source: finished stages still hold (only frames can't be redone).
           setVideoPath(null);
           setVideo(null);
           setImageSet(null);
@@ -325,7 +325,7 @@ function AppView() {
     [chooseVideo, chooseImages, openProject, tools?.os],
   );
 
-  /** Um pacote, um vídeo, ou então imagens e pastas de frames. */
+  /** A package, a video, or else images and frame folders. */
   const openPaths = useCallback(
     (paths: string[]) => {
       const pkg = paths.find(isPackage);
@@ -337,7 +337,7 @@ function AppView() {
     [chooseVideo, chooseImages, openPackage],
   );
 
-  // Arrastar e soltar um vídeo, imagens, uma pasta ou um pacote em qualquer lugar da janela.
+  // Drag and drop a video, images, a folder or a package anywhere in the window.
   useEffect(
     () =>
       host.onDrop((paths) => {
@@ -355,8 +355,8 @@ function AppView() {
     if (p) openPaths([p]);
   }
 
-  /** Salva o projeto em .gorbit, inclusive no meio de um job: vão só as
-   *  etapas prontas que ele não está refazendo (o reducer já as descartou). */
+  /** Saves the project as .gorbit, even mid-job: only finished stages the job
+   *  is not redoing are included (the reducer has already dropped those). */
   async function savePackage() {
     if (!projectDir || !job.frames.length || packBusy) return;
     const dest = await host.pickPackageDest(projectDir);
@@ -388,7 +388,7 @@ function AppView() {
     }
   }
 
-  /** O vídeo ou a pasta das imagens. */
+  /** The video or the images folder. */
   const sourcePath = videoPath ?? imageSet?.dir ?? null;
 
   async function pickProject() {
@@ -417,16 +417,16 @@ function AppView() {
     }
   }
 
-  /** Roda as etapas de `from` a `to` (a mesma, para rodar só uma). */
+  /** Runs stages `from` through `to` (the same one to run just one). */
   async function run(from: Stage, to: Stage = "train") {
-    // A fonte só é lida na etapa de frames (um pacote pode vir sem ela).
+    // The source is only read by the frames stage (a package may lack it).
     if (!projectDir || (!sourcePath && from === "frames") || packBusy) return;
     const masksForPoses = maskOpts.enabled && maskOpts.forPoses;
     const gone = discardedBy(from, to, masksForPoses);
     if (gone.has("poses")) setFrame(null);
     dispatch({ type: "start", from, to, masksForPoses });
     if (gone.has("train")) {
-      // Um novo treino invalida a exportação (o backend também a esquece).
+      // New training invalidates the export (the backend forgets it too).
       setLastExport(null);
       setPreviewExport(null);
     }
@@ -440,7 +440,7 @@ function AppView() {
           fromStage: from,
           toStage: to,
           frames: { ...settings.frames, trimStart: trim.start, trimEnd: trim.end },
-          // Marcação fora do trecho (o trecho mudou depois) não vale mais.
+          // A marking outside the trim range (changed afterwards) no longer applies.
           masks: promptInTrim(maskOpts.prompt, trim) ? maskOpts : { ...maskOpts, prompt: null },
           poses: settings.poses,
           train: settings.train,
@@ -452,13 +452,13 @@ function AppView() {
     }
   }
 
-  /** Recusa ou aceita de volta frames (menu de contexto da grade). */
+  /** Rejects or restores frames (grid context menu). */
   async function setRejected(names: string[], rejected: boolean) {
     if (!projectDir || job.running || packBusy || !names.length) return;
     try {
       const project = await api.setFramesRejected(projectDir, names, rejected);
       dispatch({ type: "framesEdited", project });
-      // A partida não pode ficar numa etapa cujo pré-requisito deixou de valer.
+      // The start stage can't stay on one whose prerequisite is no longer valid.
       const need: Stage | null = maskOpts.enabled && !project.masks ? "masks" : !project.poses ? "poses" : null;
       if (need && STAGES.indexOf(fromStage) > STAGES.indexOf(need)) setFromStage(need);
     } catch (e) {
@@ -466,13 +466,13 @@ function AppView() {
     }
   }
 
-  // Ao terminar os frames, leva a atenção para o 3D quando o treino começa.
+  // After frames, switch to the 3D view when training starts.
   useEffect(() => {
     if (job.stages.train.status === "running" && tab === "frames") setTab("viewer");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [job.stages.train.status]);
 
-  /** Câmera do COLMAP → frame: o nome da imagem (00012.jpg) é o índice. */
+  /** COLMAP camera → frame: the image name (00012.jpg) is the index. */
   function pickCamera(camera: number) {
     const n = frame?.frameIndices[camera];
     if (n == null) return;
@@ -489,11 +489,11 @@ function AppView() {
   const missing = tools
     ? (
         [
-          // Imagens dispensam a decodificação de vídeo.
+          // Images don't need video decoding.
           { name: "ffmpeg", key: "ffmpeg", ok: (!!tools.ffmpeg && !!tools.ffprobe) || !!imageSet },
           { name: "COLMAP", key: "colmap", ok: !!tools.colmap },
           { name: "Brush", key: "brush", ok: !!tools.brush },
-          // O recorte só é exigido quando ativado.
+          // Masking is only required when enabled.
           {
             name: tools.os === "windows" || maskOpts.method === "rmbg" ? t.app.maskModel : t.app.masker,
             key: "model",
@@ -511,7 +511,7 @@ function AppView() {
     train: !!job.poses && (!maskOpts.enabled || !!job.masks),
   };
 
-  // Ferramenta de que cada etapa precisa (chaves de `missing`).
+  // Tool each stage needs (keys of `missing`).
   const toolStage: Record<(typeof missing)[number]["key"], Stage> = { ffmpeg: "frames", model: "masks", colmap: "poses", brush: "train" };
   const missingFor = (from: Stage, to: Stage) =>
     missing.filter((m) => {
@@ -519,9 +519,9 @@ function AppView() {
       return i >= STAGES.indexOf(from) && i <= STAGES.indexOf(to);
     });
   const hasSource = !!projectDir && (!!video || !!imageSet);
-  /** Só a etapa de frames lê a fonte; as outras usam o que já está no projeto. */
+  /** Only the frames stage reads the source; the others use what's in the project. */
   const startable = (st: Stage) => hasSource || (!!projectDir && st !== "frames" && job.frames.length > 0);
-  /** Por que cada etapa não pode rodar sozinha; null = pode. */
+  /** Why each stage can't run on its own; null = it can. */
   const blocked = Object.fromEntries(
     STAGES.map((st) => {
       const tool = missingFor(st, st)[0];
@@ -568,7 +568,7 @@ function AppView() {
         masks={maskOpts}
         onMasks={(m) => {
           setMaskOpts(m);
-          // Desativar o recorte não deixa "Recorte" selecionado como ponto de partida.
+          // Disabling masking must not leave "Masks" selected as the start stage.
           if (!m.enabled && fromStage === "masks") setFromStage("poses");
         }}
         settings={settings}
@@ -595,7 +595,7 @@ function AppView() {
               lastExport={lastExport}
               onExported={(stats) => {
                 setLastExport(stats);
-                // Mostra o resultado na hora para comparar com o original.
+                // Show the result right away to compare with the original.
                 setPreviewExport({ version: Date.now() });
                 setTab("viewer");
               }}

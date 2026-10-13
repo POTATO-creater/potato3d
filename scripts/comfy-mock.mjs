@@ -1,13 +1,13 @@
 #!/usr/bin/env node
-// ComfyUI de mentira para desenvolver e testar a integração sem GPU: as rotas
-// que o app usa (/system_stats, /upload/image, /prompt, /history, /view,
-// /queue, /interrupt), o WebSocket /ws com o progresso de uma execução e os
-// cabeçalhos CORS do --enable-cors-header.
+// Fake ComfyUI for developing and testing the integration without a GPU: the
+// routes the app uses (/system_stats, /upload/image, /prompt, /history, /view,
+// /queue, /interrupt), the /ws WebSocket with a run's progress, and the CORS
+// headers from --enable-cors-header.
 //
 //   node scripts/comfy-mock.mjs [--port 8188] [--output video.mp4] [--step-ms 120] [--fail]
 //
-// Sem --output, devolve o próprio vídeo enviado (restauração "identidade").
-// --fail faz a execução terminar com execution_error no amostrador.
+// Without --output, returns the uploaded video itself ("identity" restoration).
+// --fail makes the run end with an execution_error in the sampler.
 
 import { createHash, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
@@ -24,9 +24,9 @@ const stepMs = Number(opt("step-ms", 120));
 const outputPath = opt("output", null);
 const fail = args.includes("--fail");
 
-const uploads = new Map(); // nome → Buffer
-const outputs = new Map(); // nome → Buffer
-const history = new Map(); // prompt_id → entrada do /history
+const uploads = new Map(); // name → Buffer
+const outputs = new Map(); // name → Buffer
+const history = new Map(); // prompt_id → /history entry
 const sockets = new Map(); // clientId → socket
 let cancelled = new Set();
 
@@ -48,7 +48,7 @@ const readBody = (req) =>
     req.on("end", () => resolve(Buffer.concat(chunks)));
   });
 
-/** Multipart mínimo: campos de texto e o arquivo "image". */
+/** Minimal multipart: text fields and the "image" file. */
 function parseMultipart(buf, contentType) {
   const boundary = Buffer.from(`--${/boundary=(.+)$/.exec(contentType)[1]}`);
   const fields = {};
@@ -70,12 +70,12 @@ function parseMultipart(buf, contentType) {
   return { fields, file };
 }
 
-// WebSocket: só o necessário para mandar texto ao cliente.
+// WebSocket: just enough to send text to the client.
 function wsFrame(text) {
   const payload = Buffer.from(text);
   const len = payload.length;
   const head = len < 126 ? Buffer.from([0x81, len]) : len < 65536 ? Buffer.from([0x81, 126, len >> 8, len & 255]) : null;
-  if (!head) throw new Error("mensagem grande demais para o mock");
+  if (!head) throw new Error("message too large for the mock");
   return Buffer.concat([head, payload]);
 }
 const emit = (clientId, type, data) => {
@@ -118,7 +118,7 @@ async function execute(promptId, clientId, prompt) {
   }
   const data = outputPath ? readFileSync(outputPath) : uploads.get(inputName);
   if (!data) {
-    const err = { prompt_id: promptId, node_id: loadNode, node_type: "LoadVideo", exception_message: `arquivo de entrada não enviado: ${inputName}` };
+    const err = { prompt_id: promptId, node_id: loadNode, node_type: "LoadVideo", exception_message: `input file not uploaded: ${inputName}` };
     emit(clientId, "execution_error", err);
     history.set(promptId, { outputs: {}, status: { status_str: "error", completed: false, messages: [["execution_error", err]] } });
     return;
@@ -140,16 +140,16 @@ const server = createServer(async (req, res) => {
     return send(res, 200, { system: { comfyui_version: "0.0.0-mock", os: "mock" }, devices: [{ name: "cuda:0 Mock GPU", type: "cuda", vram_total: 24 * 1024 ** 3 }] });
   if (route === "POST /upload/image") {
     const { file } = parseMultipart(await readBody(req), req.headers["content-type"]);
-    if (!file) return send(res, 400, { error: "sem arquivo" });
+    if (!file) return send(res, 400, { error: "no file" });
     uploads.set(file.name, file.data);
     console.log(`upload ${file.name} (${(file.data.length / 1e6).toFixed(1)} MB)`);
     return send(res, 200, { name: file.name, subfolder: "", type: "input" });
   }
   if (route === "POST /prompt") {
     const { prompt, client_id } = JSON.parse((await readBody(req)).toString());
-    if (!prompt || typeof prompt !== "object") return send(res, 400, { error: { message: "prompt inválido" }, node_errors: {} });
+    if (!prompt || typeof prompt !== "object") return send(res, 400, { error: { message: "invalid prompt" }, node_errors: {} });
     const promptId = randomUUID();
-    console.log(`prompt ${promptId} (${Object.keys(prompt).length} nós) de ${client_id}`);
+    console.log(`prompt ${promptId} (${Object.keys(prompt).length} nodes) from ${client_id}`);
     send(res, 200, { prompt_id: promptId, number: 1, node_errors: {} });
     void execute(promptId, client_id, prompt);
     return;
@@ -160,14 +160,14 @@ const server = createServer(async (req, res) => {
   }
   if (route === "GET /view") {
     const data = outputs.get(url.searchParams.get("filename"));
-    return data ? send(res, 200, data, "video/mp4") : send(res, 404, { error: "não encontrado" });
+    return data ? send(res, 200, data, "video/mp4") : send(res, 404, { error: "not found" });
   }
   if (route === "POST /queue" || route === "POST /interrupt") {
     const body = JSON.parse((await readBody(req)).toString() || "{}");
     for (const id of [...(body.delete ?? []), body.prompt_id].filter(Boolean)) cancelled.add(id);
     return send(res, 200, {});
   }
-  send(res, 404, { error: `rota desconhecida: ${route}` });
+  send(res, 404, { error: `unknown route: ${route}` });
 });
 
 server.on("upgrade", (req, socket) => {
@@ -178,12 +178,12 @@ server.on("upgrade", (req, socket) => {
   const clientId = url.searchParams.get("clientId") ?? randomUUID();
   sockets.set(clientId, socket);
   socket.on("data", (buf) => {
-    if ((buf[0] & 0x0f) === 0x8) socket.end(); // close do cliente
+    if ((buf[0] & 0x0f) === 0x8) socket.end(); // client close frame
   });
   socket.on("close", () => sockets.delete(clientId));
   socket.write(wsFrame(JSON.stringify({ type: "status", data: { status: { exec_info: { queue_remaining: 0 } }, sid: clientId } })));
 });
 
 server.listen(port, "127.0.0.1", () =>
-  console.log(`ComfyUI simulado em http://127.0.0.1:${port}${outputPath ? ` · saída: ${outputPath}` : " · saída = entrada"}${fail ? " · falha no amostrador" : ""}`),
+  console.log(`Mock ComfyUI at http://127.0.0.1:${port}${outputPath ? ` · output: ${outputPath}` : " · output = input"}${fail ? " · sampler failure" : ""}`),
 );

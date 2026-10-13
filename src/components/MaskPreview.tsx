@@ -2,11 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { host, type MaskOptions } from "../lib/api";
 import { useI18n } from "../i18n";
 
-/** De onde vem o quadro da prévia. */
+/** Where the preview frame comes from. */
 export type PreviewSource = { kind: "video"; src: string; time: number } | { kind: "image"; src: string };
 
 const HIDDEN_KEY = "splatforge.maskPreview.v1";
-/** Lado maior do quadro da prévia: o SAM e o RMBG trabalham em 1024². */
+/** Long side of the preview frame: SAM and RMBG work at 1024². */
 const MAX_SIDE = 1024;
 
 const fmtTime = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, "0")}`;
@@ -24,13 +24,13 @@ function fit(w: number, h: number) {
   return { resizeWidth: Math.round(w * k), resizeHeight: Math.round(h * k), resizeQuality: "high" as const };
 }
 
-/** Quadro do vídeo num instante, por um <video> próprio (sem mexer no player). */
+/** Video frame at a given time, via a dedicated <video> (leaves the player alone). */
 async function videoFrame(video: HTMLVideoElement, src: string, time: number): Promise<ImageBitmap> {
   if (video.getAttribute("src") !== src) {
     video.src = src;
     await new Promise<void>((ok, fail) => {
       video.onloadeddata = () => ok();
-      video.onerror = () => fail(new Error("vídeo ilegível"));
+      video.onerror = () => fail(new Error("unreadable video"));
     });
   }
   await new Promise<void>((ok) => {
@@ -48,7 +48,7 @@ async function imageFrame(src: string): Promise<ImageBitmap> {
   return bmp;
 }
 
-/** Quadro com o fundo removido (xadrez) e a marcação do SAM 2.1 por cima. */
+/** Frame with the background removed (checkerboard) and the SAM 2.1 marking on top. */
 function draw(canvas: HTMLCanvasElement, frame: ImageBitmap, mask: Uint8Array, masks: MaskOptions) {
   const { width: w, height: h } = frame;
   canvas.width = w;
@@ -76,7 +76,7 @@ function draw(canvas: HTMLCanvasElement, frame: ImageBitmap, mask: Uint8Array, m
   }
 }
 
-/** Prévia do recorte num quadro (só onde o host oferece: o web, por enquanto). */
+/** Mask preview on one frame (only where the host provides it: web, for now). */
 export function MaskPreview({ source, masks, locked }: { source: PreviewSource | null; masks: MaskOptions; locked: boolean }) {
   const { t } = useI18n();
   const tp = t.masks.preview;
@@ -98,11 +98,11 @@ export function MaskPreview({ source, masks, locked }: { source: PreviewSource |
     try {
       localStorage.setItem(HIDDEN_KEY, hidden ? "hidden" : "shown");
     } catch {
-      /* armazenamento indisponível */
+      /* storage unavailable */
     }
   }, [hidden]);
 
-  // Modelo já baixado? Sem ele a prévia só roda quando o usuário pede.
+  // Model already downloaded? Without it the preview only runs when the user asks.
   useEffect(() => {
     if (!previewer) return;
     let live = true;
@@ -113,7 +113,7 @@ export function MaskPreview({ source, masks, locked }: { source: PreviewSource |
     };
   }, [previewer, masks.method]);
 
-  // Quadro: o marcado (ou o início do trecho); espera o instante parar de mudar.
+  // Frame: the marked one (or the trim start); waits for the time to settle.
   useEffect(() => {
     if (!active || !src) return;
     let live = true;
@@ -136,7 +136,7 @@ export function MaskPreview({ source, masks, locked }: { source: PreviewSource |
     };
   }, [active, src, time, tp]);
 
-  // Máscara: a cada mudança de método, marcação ou ajuste (só a mais recente vale).
+  // Mask: on every change of method, marking or setting (only the latest counts).
   const promptJson = JSON.stringify(masks.method === "sam2" ? masks.prompt : null);
   const chromaJson = JSON.stringify(masks.method === "chroma" ? masks.chroma : null);
   useEffect(() => {
@@ -158,7 +158,7 @@ export function MaskPreview({ source, masks, locked }: { source: PreviewSource |
       }
     }, 80);
     return () => clearTimeout(timer);
-    // masks entra pelos campos que mudam o resultado
+    // masks is tracked via the fields that change the result
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, frame, ready, previewer, masks.method, promptJson, chromaJson, tp]);
 

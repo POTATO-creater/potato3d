@@ -1,5 +1,5 @@
-// Geometria de múltiplas vistas: matriz fundamental (RANSAC), decomposição da
-// essencial, triangulação e PnP. Coordenadas "normalizadas" são
+// Multi-view geometry: fundamental matrix (RANSAC), essential matrix
+// decomposition, triangulation and PnP. "Normalized" coordinates are
 // ((u - cx) / f, (v - cy) / f).
 
 import {
@@ -18,11 +18,11 @@ import {
 } from "./linalg";
 
 export interface Pose {
-  R: Mat3; // mundo → câmera
+  R: Mat3; // world → camera
   t: Vec3;
 }
 
-/** PRNG determinístico (mulberry32): RANSAC reprodutível. */
+/** Deterministic PRNG (mulberry32): reproducible RANSAC. */
 export function rng(seed: number) {
   let a = seed >>> 0;
   return () => {
@@ -43,7 +43,7 @@ function sample(n: number, k: number, rand: () => number): number[] {
   return out;
 }
 
-/** Normalização de Hartley: centro na origem, distância média √2. */
+/** Hartley normalization: centroid at the origin, mean distance √2. */
 function hartley(p: Float64Array, n: number): Mat3 {
   let mx = 0, my = 0;
   for (let i = 0; i < n; i++) {
@@ -58,7 +58,7 @@ function hartley(p: Float64Array, n: number): Mat3 {
   return mat3(s, 0, -s * mx, 0, s, -s * my, 0, 0, 1);
 }
 
-/** F (pixels) pelo algoritmo de 8 pontos normalizado, com posto 2. */
+/** F (pixels) via the normalized 8-point algorithm, with rank 2 enforced. */
 function eightPoint(p1: Float64Array, p2: Float64Array, idx: ArrayLike<number>, T1: Mat3, T2: Mat3): Mat3 {
   const m = idx.length;
   const A = new Float64Array(m * 9);
@@ -70,7 +70,7 @@ function eightPoint(p1: Float64Array, p2: Float64Array, idx: ArrayLike<number>, 
   }
   const f = nullVector(A, m, 9);
   let F = Float64Array.from(f) as Mat3;
-  // posto 2: F ← F − (F v₃) v₃ᵀ, com v₃ o menor autovetor de FᵀF
+  // rank 2: F ← F − (F v₃) v₃ᵀ, with v₃ the smallest eigenvector of FᵀF
   const { V } = symEig(mul3(transpose3(F), F), 3);
   const v3: Vec3 = [V[0], V[3], V[6]];
   const Fv = mulVec3(F, v3);
@@ -89,7 +89,7 @@ function sampson(F: Mat3, x1: number, y1: number, x2: number, y2: number) {
   return (e * e) / (a0 * a0 + a1 * a1 + b0 * b0 + b1 * b1 + 1e-30);
 }
 
-/** Matriz fundamental robusta (RANSAC + reajuste nos inliers). Limiar em pixels. */
+/** Robust fundamental matrix (RANSAC + refit on inliers). Threshold in pixels. */
 export function ransacFundamental(
   p1: Float64Array,
   p2: Float64Array,
@@ -120,7 +120,7 @@ export function ransacFundamental(
     }
   }
   if (!best) return null;
-  // reajuste iterativo nos inliers
+  // iterative refit on the inliers
   let F = best;
   for (let k = 0; k < 3; k++) {
     const idx: number[] = [];
@@ -140,7 +140,7 @@ export function ransacFundamental(
   return { F, inliers, count };
 }
 
-/** Ponto 3D a partir de ≥2 observações normalizadas (DLT). */
+/** 3D point from ≥2 normalized observations (DLT). */
 export function triangulate(poses: Pose[], xs: ArrayLike<number>): Vec3 | null {
   const m = poses.length;
   const A = new Float64Array(m * 2 * 4);
@@ -171,8 +171,8 @@ export const center = (p: Pose): Vec3 => {
 };
 
 /**
- * Pose relativa da câmera 2 a partir de F e da focal: as 4 soluções de E e a
- * que deixa mais pontos na frente das duas câmeras.
+ * Relative pose of camera 2 from F and the focal length: the 4 solutions of E,
+ * picking the one with the most points in front of both cameras.
  */
 export function relativePose(
   F: Mat3,
@@ -211,7 +211,7 @@ export function relativePose(
   return best;
 }
 
-/** Ângulo (graus) entre os raios de duas câmeras até X. */
+/** Angle (degrees) between the rays from two cameras to X. */
 export function triAngle(c1: ArrayLike<number>, c2: ArrayLike<number>, X: ArrayLike<number>) {
   const a: Vec3 = [c1[0] - X[0], c1[1] - X[1], c1[2] - X[2]];
   const b: Vec3 = [c2[0] - X[0], c2[1] - X[1], c2[2] - X[2]];
@@ -219,7 +219,7 @@ export function triAngle(c1: ArrayLike<number>, c2: ArrayLike<number>, X: ArrayL
   return (Math.acos(Math.min(1, Math.max(-1, c))) * 180) / Math.PI;
 }
 
-/** Refino Gauss-Newton (Huber) de uma pose a partir de 2D–3D normalizados. */
+/** Gauss-Newton (Huber) pose refinement from normalized 2D–3D correspondences. */
 export function refinePose(
   pose: Pose,
   X: Float64Array,
@@ -240,7 +240,7 @@ export function refinePose(
       const rx = c[0] * iz - x[2 * i], ry = c[1] * iz - x[2 * i + 1];
       const e = Math.hypot(rx, ry);
       const w = e <= huber ? 1 : huber / e;
-      // d(proj)/d(c) e d(c)/d(δr) = −[RX]×, d(c)/d(δt) = I
+      // d(proj)/d(c) and d(c)/d(δr) = −[RX]×, d(c)/d(δt) = I
       const P = [iz, 0, -c[0] * iz * iz, 0, iz, -c[1] * iz * iz];
       const Sx = [0, RX[2], -RX[1], -RX[2], 0, RX[0], RX[1], -RX[0], 0]; // −[RX]×
       const J = new Float64Array(12);
@@ -258,7 +258,7 @@ export function refinePose(
         }
     }
     for (let a = 0; a < 6; a++) H[a * 6 + a] *= 1 + 1e-6;
-    // resolve H δ = −g (6×6 via eliminação)
+    // solve H δ = −g (6×6 via elimination)
     const d = solveDense(H, g.map((v) => -v), 6);
     if (!d) break;
     R = mul3(expSO3([d[0], d[1], d[2]]), R);
@@ -292,7 +292,7 @@ function solveDense(A: Float64Array, b: Float64Array, n: number): Float64Array |
   return y;
 }
 
-/** Pose por DLT de 6 pontos (normalizados), com os pontos 3D recentrados. */
+/** Pose via 6-point DLT (normalized), with the 3D points recentered. */
 function dltPose(X: Float64Array, x: Float64Array, idx: number[]): Pose | null {
   const m = idx.length;
   let cx = 0, cy = 0, cz = 0;
@@ -329,7 +329,7 @@ function dltPose(X: Float64Array, x: Float64Array, idx: number[]): Pose | null {
   const scale = (S[0] + S[1] + S[2]) / 3;
   if (!(scale > 1e-12)) return null;
   const R = nearestRotation(M);
-  // x ~ M (X−c)s + p4 = λ(R X + t), com M = λR/s: λ = scale·s e t = p4/λ − R c
+  // x ~ M (X−c)s + p4 = λ(R X + t), with M = λR/s: λ = scale·s and t = p4/λ − R c
   const Rc = mulVec3(R, [cx, cy, cz]);
   const t: Vec3 = [p4[0] / scale / s - Rc[0], p4[1] / scale / s - Rc[1], p4[2] / scale / s - Rc[2]];
   return { R, t };
@@ -346,9 +346,9 @@ function inliersOf(pose: Pose, X: Float64Array, x: Float64Array, n: number, thr:
 }
 
 /**
- * Registra uma câmera a partir de correspondências 2D–3D (normalizadas).
- * Tenta refinar a pose inicial (vídeo: a do vizinho) e um RANSAC por DLT;
- * fica com a que tiver mais inliers.
+ * Registers a camera from (normalized) 2D–3D correspondences.
+ * Tries refining the initial pose (video: the neighbour's) and a DLT RANSAC;
+ * keeps whichever has more inliers.
  */
 export function solvePnP(
   X: Float64Array,
@@ -381,7 +381,7 @@ export function solvePnP(
   }
   if (!best) return null;
   const b = best as { pose: Pose; inliers: number[] };
-  // refino final nos inliers
+  // final refinement on the inliers
   const Xi = new Float64Array(b.inliers.length * 3), xi = new Float64Array(b.inliers.length * 2);
   b.inliers.forEach((i, k) => {
     Xi.set(X.subarray(3 * i, 3 * i + 3), 3 * k);

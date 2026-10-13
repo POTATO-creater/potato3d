@@ -1,7 +1,7 @@
-// Pacote do projeto (.gorbit) na versão web: o mesmo formato de
-// src-tauri/src/package.rs (ZIP com o layout da pasta do projeto, caminhos do
-// project.json relativos e um manifest.json), lido e gravado com ./zip.ts.
-// A fonte volta só para a memória da aba, como um vídeo solto na janela.
+// Project package (.gorbit) on the web: the same format as
+// src-tauri/src/package.rs (a ZIP with the project folder layout, relative
+// paths in project.json and a manifest.json), read and written with ./zip.ts.
+// The source is restored only into the tab's memory, like a video dropped on the window.
 
 import { PACKAGE_EXT, type PackRequest, type PackStats, type ProjectState, type UnpackedProject } from "../../../src/lib/api";
 import {
@@ -27,7 +27,7 @@ import { entryBlob, readZip, ZipWriter } from "./zip";
 const FORMAT = "gausify-orbit-project";
 const VERSION = 1;
 const MODEL_FILES = ["cameras.bin", "images.bin", "points3D.bin"];
-/** O que um pacote pode trazer; o resto é ignorado (versões futuras). */
+/** What a package may contain; anything else is ignored (future versions). */
 const ALLOWED = ["dataset/images/", "dataset/sparse/0/", "rejected/", "masks/", "export/", "splat.ply"];
 
 type PackedSource = { kind: "video"; file: string } | { kind: "images"; files: string[] };
@@ -41,8 +41,8 @@ interface Manifest {
   session?: unknown;
 }
 
-/** Destinos escolhidos em `pickPackageDest`: um arquivo no disco ou, sem a
- *  File System Access API, um download no fim. */
+/** Destinations chosen in `pickPackageDest`: a file on disk or, without the
+ *  File System Access API, a download at the end. */
 const dests = new Map<string, FileSystemFileHandle | null>();
 
 export async function pickPackageDest(projectDir: string): Promise<string | null> {
@@ -59,7 +59,7 @@ export async function pickPackageDest(projectDir: string): Promise<string | null
       return path;
     } catch (e) {
       if ((e as DOMException).name === "AbortError") return null;
-      // Bloqueado (ex.: iframe): cai no download.
+      // Blocked (e.g. in an iframe): fall back to a download.
     }
   }
   const path = `/downloads/${name}`;
@@ -72,13 +72,13 @@ const compress = (name: string) => /\.(json|bin|ply)$/i.test(name);
 const VIDEO_TYPES: Record<string, string> = { mp4: "video/mp4", m4v: "video/mp4", mov: "video/quicktime", webm: "video/webm", mkv: "video/x-matroska" };
 
 export async function packProject(req: PackRequest, onProgress: (f: number) => void): Promise<PackStats> {
-  if (!dests.has(req.dest)) throw new Error("destino do pacote desconhecido");
+  if (!dests.has(req.dest)) throw new Error("unknown package destination");
   const handle = dests.get(req.dest) ?? null;
   dests.delete(req.dest);
   const l = layout(req.projectDir);
   const { updatedAt: _, ...saved } = await readState(l.root);
   const state: ProjectState = { ...saved };
-  if (!state.frames.length) throw new Error("o projeto ainda não tem frames para salvar");
+  if (!state.frames.length) throw new Error("the project has no frames to save yet");
   const entries: { name: string; blob: Blob }[] = [];
 
   state.frames = [];
@@ -102,7 +102,7 @@ export async function packProject(req: PackRequest, onProgress: (f: number) => v
       if (await exists(`${l.model}/${f}`)) entries.push({ name: `dataset/sparse/0/${f}`, blob: await readFile(`${l.model}/${f}`) });
   } else state.poses = null;
 
-  // O splat depende das poses com que foi treinado.
+  // The splat depends on the poses it was trained with.
   if (poses && req.include.splat && state.finalPly && (await exists(l.finalPly))) {
     entries.push({ name: "splat.ply", blob: await readFile(l.finalPly) });
     state.finalPly = "splat.ply";
@@ -125,7 +125,7 @@ export async function packProject(req: PackRequest, onProgress: (f: number) => v
   let source: PackedSource | null = null;
   const src = req.source;
   if (src?.kind === "video") {
-    // O vídeo só existe na memória da aba; sem ele, o pacote vai sem fonte.
+    // The video only exists in the tab's memory; without it, the package has no source.
     const file = (() => {
       try {
         return video(src.path).file;
@@ -205,22 +205,22 @@ export async function packProject(req: PackRequest, onProgress: (f: number) => v
   return { path: name, bytes, files: entries.length + 2 };
 }
 
-/** Pasta de projeto livre: `<nome>`, `<nome> (2)`… */
+/** A free project folder: `<name>`, `<name> (2)`… */
 async function freeRoot(name: string): Promise<string> {
-  const base = `${PROJECTS}/${name.replace(/[\\/]/g, "_") || "projeto"}`;
+  const base = `${PROJECTS}/${name.replace(/[\\/]/g, "_") || "project"}`;
   if (!(await exists(base))) return base;
   for (let i = 2; ; i++) if (!(await exists(`${base} (${i})`))) return `${base} (${i})`;
 }
 
 function safeRel(rel: string): string {
   const parts = rel.split("/");
-  if (parts.some((p) => !p || p === "." || p === ".." || /[\\:]/.test(p))) throw new Error(`caminho inválido no pacote: ${rel}`);
+  if (parts.some((p) => !p || p === "." || p === ".." || /[\\:]/.test(p))) throw new Error(`invalid path in package: ${rel}`);
   return rel;
 }
 
 export async function unpackProject(path: string, onProgress: (f: number) => void): Promise<UnpackedProject> {
   const file = packageFile(path);
-  const notPackage = () => new Error("o arquivo não é um pacote do Gausify Orbit");
+  const notPackage = () => new Error("the file is not a Gausify Orbit package");
   const entries = await readZip(file).catch(() => {
     throw notPackage();
   });
@@ -232,7 +232,7 @@ export async function unpackProject(path: string, onProgress: (f: number) => voi
   const manifest = await json<Manifest>("manifest.json");
   if (manifest.format !== FORMAT) throw notPackage();
   if (manifest.version > VERSION)
-    throw new Error(`o pacote foi salvo por uma versão mais nova do Gausify Orbit (${manifest.app}); recarregue a página para atualizar`);
+    throw new Error(`the package was saved by a newer version of Gausify Orbit (${manifest.app}); reload the page to update`);
   const state: ProjectState = { ...(await json<ProjectState>("project.json")) };
 
   const root = await freeRoot(stem(file.name));
@@ -250,7 +250,7 @@ export async function unpackProject(path: string, onProgress: (f: number) => voi
       onProgress((done / total) * 0.99);
     }
 
-    // Caminhos relativos do pacote → caminhos deste projeto.
+    // Relative package paths → this project's paths.
     const abs = (rel: string) => `${root}/${safeRel(rel)}`;
     state.frames = state.frames.map((f) => ({ ...f, path: abs(f.path) }));
     if (state.masks && (await exists(l.masks))) state.masksDir = l.masks;
@@ -266,10 +266,10 @@ export async function unpackProject(path: string, onProgress: (f: number) => voi
       state.lastExport = null;
     }
 
-    // A fonte fica na memória da aba, como se tivesse sido solta na janela.
+    // The source stays in the tab's memory, as if it had been dropped on the window.
     const asFile = async (rel: string, type = "") => {
       const e = entries.get(safeRel(rel));
-      if (!e) throw new Error(`pacote sem ${rel}`);
+      if (!e) throw new Error(`package is missing ${rel}`);
       return new File([await entryBlob(file, e)], basename(rel), { type });
     };
     let videoPath: string | null = null;

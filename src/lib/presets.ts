@@ -2,24 +2,24 @@ import type { Settings } from "./api";
 
 export type PresetId = "preview" | "balanced" | "quality";
 
-/** Nome e descrição de cada preset ficam no catálogo (`t.presets`). */
+/** Each preset's name and description live in the catalog (`t.presets`). */
 export interface Preset {
   id: PresetId;
   settings: Settings;
 }
 
-// Calibrado para Apple Silicon com 16 GB de memória unificada (COLMAP na CPU,
-// Brush via Metal). Em GPUs NVIDIA o SSIM deve pesar bem menos, mas isso
-// ainda não foi medido.
+// Calibrated for Apple Silicon with 16 GB of unified memory (COLMAP on CPU,
+// Brush via Metal). On NVIDIA GPUs SSIM should cost much less, but that has
+// not been measured yet.
 //
-// Treino medido num vídeo real de IA (107 frames 960×1280, M4): sem SSIM o
-// passo é ~3× mais barato e, no mesmo tempo, rende PSNR maior.
-//   sem SSIM  5k → 29,7 dB (~3 min) · 15k → 32,6 dB (8,6 min)
-//   com SSIM  7k → 31,8 dB (9,3 min) · 20k → 33,2 dB (~28 min)
+// Training measured on a real AI-generated video (107 frames 960×1280, M4):
+// without SSIM a step is ~3× cheaper and, in the same time, gives higher PSNR.
+//   no SSIM    5k → 29.7 dB (~3 min) · 15k → 32.6 dB (8.6 min)
+//   with SSIM  7k → 31.8 dB (9.3 min) · 20k → 33.2 dB (~28 min)
 //
-// opacBinaryWeight (só no Brush do web) fica de fora: no mesmo vídeo, com
-// máscara, 0,01 levou as gaussianas semitransparentes de 71% para 14% e tirou
-// a névoa sob o queixo, mas endureceu as bordas — a base pareceu melhor.
+// opacBinaryWeight (web Brush only) is left out: on the same video, with
+// masks, 0.01 took semi-transparent Gaussians from 71% to 14% and removed
+// the haze under the chin, but hardened the edges; the baseline looked better.
 export const PRESETS: Preset[] = [
   {
     id: "preview",

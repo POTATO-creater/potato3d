@@ -1,16 +1,16 @@
-// SAM 2.1 tiny (Meta, Apache-2.0) para vídeo, no ONNX Runtime Web: um prompt
-// (caixa e/ou pontos) em um frame e a máscara do mesmo objeto propagada pelos
-// outros, com a memória do modelo (máscaras consistentes entre frames, que o
-// RMBG, frame a frame, não garante).
+// SAM 2.1 tiny (Meta, Apache-2.0) for video, on ONNX Runtime Web: a prompt
+// (box and/or points) on one frame, and the mask of the same object propagated
+// through the others using the model's memory (masks consistent across frames,
+// which per-frame RMBG doesn't guarantee).
 //
-// Os quatro grafos vêm de jax-image-tools/sam21-tiny-video-onnx (export do
-// Sam2VideoModel do Transformers) ou, em GPUs com shader-f16, da versão fp16
-// dele que publicamos (scripts/sam2-export/export_fp16.py: metade do tamanho,
-// ~1,5× mais rápida, mesmas máscaras). O banco de memória não é grafo: fica aqui,
-// espelhando _prepare_memory_conditioned_features e companhia do Transformers
-// 4.57, com os três parâmetros que ele usa fora dos grafos em sam2-params.bin
-// (no_memory_embedding, memory_temporal_positional_encoding e a projeção da
-// codificação temporal dos ponteiros, extraídos de facebook/sam2.1-hiera-tiny).
+// The four graphs come from jax-image-tools/sam21-tiny-video-onnx (an export of
+// Transformers' Sam2VideoModel) or, on GPUs with shader-f16, from the fp16
+// version of it that we published (scripts/sam2-export/export_fp16.py: half the
+// size, ~1.5× faster, same masks). The memory bank is not a graph: it lives here,
+// mirroring _prepare_memory_conditioned_features and friends from Transformers
+// 4.57, with the three parameters it uses outside the graphs in sam2-params.bin
+// (no_memory_embedding, memory_temporal_positional_encoding and the object
+// pointer temporal-encoding projection, extracted from facebook/sam2.1-hiera-tiny).
 
 import type { InferenceSession, Tensor } from "onnxruntime-web/webgpu";
 import {
@@ -35,7 +35,7 @@ import { cachedModel, loadModel, loadOrt, type ModelFile, type Ort } from "./seg
 
 async function loadParams(): Promise<Params> {
   const res = await fetch(new URL("./sam2-params.bin", import.meta.url));
-  if (!res.ok) throw new Error(`SAM 2.1: parâmetros (${res.status})`);
+  if (!res.ok) throw new Error(`SAM 2.1: parameters (${res.status})`);
   return parseParams(await res.arrayBuffer());
 }
 
@@ -51,7 +51,7 @@ const file = (repo: string, prefix: string, name: string, sha256: string, bytes:
 
 export type Sam2Variant = "fp16" | "fp32";
 
-/** Os quatro grafos de cada variante, na ordem: encoder, decoder, atenção e encoder de memória. */
+/** The four graphs of each variant, in order: encoder, decoder, attention and memory encoder. */
 export const SAM2_VARIANTS: Record<Sam2Variant, ModelFile[]> = {
   fp32: [
     file(FP32_REPO, "sam21-tiny", "vision_encoder", "98311f41182f40c57cac2522180fff34b53931ce981412ddd8643ec27fb830e3", 109_497_134),
@@ -69,7 +69,7 @@ export const SAM2_VARIANTS: Record<Sam2Variant, ModelFile[]> = {
 const bytesOf = (v: Sam2Variant) => SAM2_VARIANTS[v].reduce((n, f) => n + f.bytes, 0);
 
 let variant: Promise<Sam2Variant> | null = null;
-/** fp16 onde a GPU tem shader-f16 (o ORT Web usa sozinho); senão os grafos fp32. */
+/** fp16 where the GPU has shader-f16 (ORT Web uses it on its own); otherwise the fp32 graphs. */
 export function sam2Variant(): Promise<Sam2Variant> {
   variant ??= (async () => {
     try {
@@ -84,16 +84,16 @@ export function sam2Variant(): Promise<Sam2Variant> {
 
 export const SAM2_LICENSE = "SAM 2.1 (Meta), Apache-2.0";
 
-/** O que um frame deixa no banco de memória. */
+/** What a frame leaves in the memory bank. */
 interface Memory {
-  feat: Float32Array; // (4096, 1, 64), arredondado a bf16 como no Transformers
+  feat: Float32Array; // (4096, 1, 64), rounded to bf16 as in Transformers
   pointer: Float32Array; // (256)
 }
 
 export interface Sam2Frame {
-  /** Logits da máscara em 256² (> 0 = objeto). */
+  /** Mask logits at 256² (> 0 = object). */
   logits: Float32Array;
-  /** > 0: o objeto aparece no frame. */
+  /** > 0: the object appears in the frame. */
   objectScore: number;
 }
 
@@ -101,8 +101,8 @@ type Session = InferenceSession;
 type Outputs = Record<string, "gpu-buffer">;
 
 const gpu = (names: string[]): Outputs => Object.fromEntries(names.map((n) => [n, "gpu-buffer" as const]));
-// Saídas que só passam de um grafo para outro ficam na GPU: o encoder
-// devolve ~90 MB de codificação posicional por frame que nunca é lida.
+// Outputs that only pass from one graph to another stay on the GPU: the encoder
+// returns ~90 MB of positional encoding per frame that is never read.
 const OUTPUTS = [
   gpu(["feats0", "feats1", "feats2", "pos0", "pos1", "pos2"]),
   gpu(["high_res_masks"]),
@@ -110,14 +110,14 @@ const OUTPUTS = [
   gpu(["memory_pos_enc"]),
 ];
 
-/** Os quatro grafos da variante desta GPU já estão no cache? */
+/** Are the four graphs of this GPU's variant already cached? */
 export async function sam2Cached(): Promise<boolean> {
   const files = SAM2_VARIANTS[await sam2Variant()];
   return (await Promise.all(files.map((f) => cachedModel(f)))).every(Boolean);
 }
 
-/** Os quatro grafos (do cache ou baixados); o encoder fp32 sai já corrigido
- *  (o fp16 foi gerado sem o If que pede a correção). */
+/** The four graphs (cached or downloaded); the fp32 encoder comes out already
+ *  patched (the fp16 one was generated without the If that needs the fix). */
 async function loadSam2(v: Sam2Variant, onProgress: (done: number, total: number) => void): Promise<ArrayBuffer[]> {
   const files = SAM2_VARIANTS[v];
   const done = files.map(() => 0);
@@ -133,14 +133,14 @@ async function loadSam2(v: Sam2Variant, onProgress: (done: number, total: number
   return models;
 }
 
-/** Sessões dos grafos pedidos (índices dos quatro): WebGPU, ou WASM se não der. */
+/** Sessions for the requested graphs (indices into the four): WebGPU, or WASM as fallback. */
 async function openSessions(
   ort: Ort,
   models: ArrayBuffer[],
   which: number[],
   v: Sam2Variant,
 ): Promise<{ s: Session[]; backend: string }> {
-  // Uma de cada vez: o ONNX Runtime Web recusa duas sessões WebGPU sendo criadas juntas.
+  // One at a time: ONNX Runtime Web refuses two WebGPU sessions being created concurrently.
   const open = async (ep: "webgpu" | "wasm") => {
     const s: Session[] = [];
     for (const i of which)
@@ -155,7 +155,7 @@ async function openSessions(
   try {
     return { s: await open("webgpu"), backend: `SAM 2.1 · WebGPU${v === "fp16" ? " fp16" : ""}` };
   } catch (e) {
-    console.warn("WebGPU indisponível para o SAM 2.1, usando WASM", e);
+    console.warn("WebGPU unavailable for SAM 2.1, using WASM", e);
     return { s: await open("wasm"), backend: "SAM 2.1 · WASM" };
   }
 }
@@ -173,7 +173,7 @@ function frameTensor(ort: Ort, frame: ImageBitmap | OffscreenCanvas): Tensor {
   return new ort.Tensor("float32", out, [1, 3, SIZE, SIZE]);
 }
 
-/** feats2 + no_memory_embedding: o frame condicionante não usa memória. */
+/** feats2 + no_memory_embedding: the conditioning frame uses no memory. */
 function withoutMemory(ort: Ort, feats2: Float32Array, p: Params): Tensor {
   const f = new Float32Array(feats2.length);
   for (let ch = 0; ch < HIDDEN; ch++)
@@ -181,7 +181,7 @@ function withoutMemory(ort: Ort, feats2: Float32Array, p: Params): Tensor {
   return new ort.Tensor("float32", f, [1, HIDDEN, 64, 64]);
 }
 
-/** Caixa (labels 2 e 3) e pontos em coordenadas da entrada de 1024². */
+/** Box (labels 2 and 3) and points in 1024² input coordinates. */
 function promptTensors(ort: Ort, prompt: Sam2Prompt, w: number, h: number): [Tensor, Tensor] {
   const pts: number[] = [], lab: number[] = [];
   const sx = SIZE / w, sy = SIZE / h;
@@ -194,7 +194,7 @@ function promptTensors(ort: Ort, prompt: Sam2Prompt, w: number, h: number): [Ten
     pts.push(p.x * sx, p.y * sy);
     lab.push(p.label);
   }
-  if (!lab.length) throw new Error("SAM 2.1: prompt vazio");
+  if (!lab.length) throw new Error("SAM 2.1: empty prompt");
   return [
     new ort.Tensor("float32", new Float32Array(pts), [1, 1, lab.length, 2]),
     new ort.Tensor("int32", new Int32Array(lab), [1, 1, lab.length]),
@@ -202,8 +202,8 @@ function promptTensors(ort: Ort, prompt: Sam2Prompt, w: number, h: number): [Ten
 }
 
 /**
- * Prévia de um frame só (o recorte que o prompt daria no frame marcado). O
- * encoder roda uma vez por frame; cada mudança no prompt roda só o decoder.
+ * Single-frame preview (the cutout the prompt would produce on the marked frame).
+ * The encoder runs once per frame; each prompt change only reruns the decoder.
  */
 export class Sam2Preview {
   private ort: Ort;
@@ -219,7 +219,7 @@ export class Sam2Preview {
     this.params = params;
   }
 
-  /** Baixa os quatro grafos se preciso (o recorte vai usá-los), abre dois. */
+  /** Downloads the four graphs if needed (the cutout step will use them), opens two. */
   static async create(onProgress: (done: number, total: number) => void): Promise<Sam2Preview> {
     const v = await sam2Variant();
     const models = await loadSam2(v, onProgress);
@@ -227,7 +227,7 @@ export class Sam2Preview {
     return new Sam2Preview(ort, (await openSessions(ort, models, [0, 1], v)).s, params);
   }
 
-  /** Logits 256² do prompt no frame; `key` identifica o frame (cache do encoder). */
+  /** 256² logits for the prompt on the frame; `key` identifies the frame (encoder cache). */
   async mask(key: string, image: ImageBitmap, w: number, h: number, prompt: Sam2Prompt): Promise<Float32Array> {
     if (this.key !== key || !this.feats) {
       this.dropFeats();
@@ -279,9 +279,9 @@ export class Sam2Tracker {
 
   private cond = new Map<number, Memory>();
   private nonCond = new Map<number, Memory>();
-  private memPos: Float32Array | null = null; // codificação espacial das memórias: só depende da posição
-  private visionPos: Float32Array | null = null; // idem, das features do frame (seq)
-  /** Frames do vídeo (limita os ponteiros, como num_total_frames no Transformers). */
+  private memPos: Float32Array | null = null; // spatial encoding of the memories: depends only on position
+  private visionPos: Float32Array | null = null; // same, for the frame features (seq)
+  /** Video frame count (caps the pointers, like num_total_frames in Transformers). */
   private numFrames: number;
 
   private constructor(ort: Ort, s: Session[], params: Params, backend: string, numFrames: number) {
@@ -292,7 +292,7 @@ export class Sam2Tracker {
     this.numFrames = numFrames;
   }
 
-  /** `v`: variante dos grafos (padrão: a da GPU). */
+  /** `v`: graph variant (default: the GPU's). */
   static async create(
     numFrames: number,
     onProgress: (done: number, total: number) => void,
@@ -310,9 +310,9 @@ export class Sam2Tracker {
   }
 
   /**
-   * Segmenta o frame `idx` (de tamanho w×h). Com `prompt`, o frame vira um
-   * frame condicionante (sem memória, como um primeiro clique); sem prompt,
-   * usa a memória dos frames já vistos. `reverse`: propagando para trás.
+   * Segments frame `idx` (size w×h). With `prompt`, the frame becomes a
+   * conditioning frame (no memory, like a first click); without a prompt it
+   * uses the memory of frames already seen. `reverse`: propagating backwards.
    */
   async frame(
     idx: number,
@@ -322,7 +322,7 @@ export class Sam2Tracker {
     prompt?: Sam2Prompt,
     reverse = false,
   ): Promise<Sam2Frame> {
-    if (!prompt && !this.cond.size) throw new Error("SAM 2.1: o primeiro frame precisa de um prompt");
+    if (!prompt && !this.cond.size) throw new Error("SAM 2.1: the first frame needs a prompt");
     const px = frameTensor(this.ort, image);
     const vis = await this.vision.run({ pixel_values: px });
     px.dispose();
@@ -376,12 +376,12 @@ export class Sam2Tracker {
     return { logits: new Float32Array(logits), objectScore };
   }
 
-  /** Features do frame condicionadas pela memória (memory_attention). */
+  /** Frame features conditioned on memory (memory_attention). */
   private async conditioned(idx: number, feats2: Float32Array, reverse: boolean): Promise<Float32Array> {
     const { tpos } = this.params;
     const blocks: Memory[] = [];
     const blockTpos: Float32Array[] = [];
-    // Frames condicionantes (todos), com a codificação temporal de deslocamento 0 (a última).
+    // Conditioning frames (all of them), with the offset-0 temporal encoding (the last one).
     for (const m of this.cond.values()) {
       blocks.push(m);
       blockTpos.push(tpos[NUM_MASKMEM - 1]);
@@ -403,7 +403,7 @@ export class Sam2Tracker {
         for (let c = 0; c < MEM; c++) spatialPos[(b * TOKENS + t) * MEM + c] = memPos[t * MEM + c] + tp[c];
     });
 
-    // Ponteiros: frames condicionantes até o atual, depois os rastreados mais recentes.
+    // Pointers: conditioning frames up to the current one, then the most recent tracked ones.
     const maxPtrs = Math.min(this.numFrames, MAX_POINTERS);
     const sign = reverse ? -1 : 1;
     const ptrs: { diff: number; m: Memory }[] = [];
@@ -414,7 +414,7 @@ export class Sam2Tracker {
       const m = this.nonCond.get(t);
       if (m) ptrs.push({ diff: d, m });
     }
-    const split = HIDDEN / MEM; // cada ponteiro de 256 vira 4 tokens de 64
+    const split = HIDDEN / MEM; // each 256-d pointer becomes 4 tokens of 64
     const pointer = new Float32Array(ptrs.length * HIDDEN);
     const pointerPos = new Float32Array(ptrs.length * HIDDEN);
     ptrs.forEach(({ diff, m }, i) => {
@@ -438,8 +438,8 @@ export class Sam2Tracker {
     return out; // (1, 1, 4096, 256) = seq
   }
 
-  /** Mantém só as memórias que ainda podem ser usadas: as dos últimos frames
-   *  e as vizinhas dos condicionantes (a volta para trás parte deles). */
+  /** Keeps only memories that can still be used: those of the latest frames
+   *  and those near the conditioning frames (the backward pass starts there). */
   private prune(idx: number, reverse: boolean) {
     for (const t of this.nonCond.keys()) {
       const recent = reverse ? t - idx < MAX_POINTERS && t >= idx : idx - t < MAX_POINTERS && t <= idx;

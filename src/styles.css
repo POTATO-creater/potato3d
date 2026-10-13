@@ -44,8 +44,8 @@ body {
   overflow: hidden;
 }
 
-/* Barras de rolagem finas, no tom do tema. Só `::-webkit-scrollbar`: com
-   `scrollbar-color` definido, o Chromium ignora estas regras. */
+/* Thin scrollbars in the theme's tone. Only `::-webkit-scrollbar`: with
+   `scrollbar-color` set, Chromium ignores these rules. */
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
@@ -101,7 +101,7 @@ button:disabled {
   height: 100vh;
 }
 
-/* Alça na borda da barra lateral: arrasta a largura (SidebarResizer.tsx) */
+/* Handle on the sidebar edge: drags its width (SidebarResizer.tsx) */
 .sidebar-resize {
   position: absolute;
   top: 0;
@@ -150,12 +150,12 @@ body.resizing canvas {
   display: flex;
   align-items: center;
   gap: 9px;
-  padding-left: 86px; /* espaço para os semáforos da janela no macOS */
+  padding-left: 86px; /* room for the macOS window traffic lights */
   font-weight: 650;
   letter-spacing: 0.01em;
   border-bottom: 1px solid var(--border);
 }
-/* Fora do macOS a janela tem barra de título própria (no web, a do navegador). */
+/* Outside macOS the window has its own title bar (on the web, the browser's). */
 :root[data-os="windows"] .brand,
 :root[data-os="linux"] .brand,
 :root[data-os="web"] .brand {
@@ -222,7 +222,7 @@ body.resizing canvas {
   color: var(--accent);
 }
 
-/* ---------- vídeo ---------- */
+/* ---------- video ---------- */
 
 .dropzone {
   width: 100%;
@@ -435,7 +435,7 @@ body.resizing canvas {
   background: transparent;
 }
 
-/* ---------- exportação ---------- */
+/* ---------- export ---------- */
 
 .small {
   font-size: 11px;
@@ -473,7 +473,7 @@ body.resizing canvas {
   background: var(--accent-soft);
 }
 
-/* ---------- compartilhar ---------- */
+/* ---------- share ---------- */
 
 .export-share {
   width: 100%;
@@ -572,7 +572,7 @@ body.resizing canvas {
   -webkit-user-select: text;
 }
 
-/* ---------- presets e campos ---------- */
+/* ---------- presets and fields ---------- */
 
 .presets {
   display: flex;
@@ -672,7 +672,7 @@ body.resizing canvas {
   outline: none;
   border-color: var(--accent);
 }
-/* Select próprio (fields.tsx): botão com a aparência do .input e menu flutuante. */
+/* Custom Select (fields.tsx): a button styled like .input plus a floating menu. */
 .input.select {
   display: flex;
   align-items: center;
@@ -811,9 +811,9 @@ body.resizing canvas {
 }
 
 .toggle {
-  /* Contém o checkbox escondido: sem isso ele escapa da barra lateral
-     rolável e, ao ganhar foco no clique (Chromium/WebView2), rola a página
-     inteira para alcançá-lo, deslocando toda a interface. */
+  /* Contains the hidden checkbox: without this it escapes the scrolling
+     sidebar and, when it gets focus on click (Chromium/WebView2), scrolls the
+     whole page to reach it, shifting the entire UI. */
   position: relative;
   display: flex;
   align-items: flex-start;
@@ -868,7 +868,7 @@ body.resizing canvas {
   font-size: 12px;
 }
 
-/* ---------- rodapé de execução ---------- */
+/* ---------- run footer ---------- */
 
 .run {
   flex: none;
@@ -895,7 +895,7 @@ body.resizing canvas {
   box-shadow: inset 0 0 0 1px var(--bad);
 }
 
-/* ---------- área principal ---------- */
+/* ---------- main area ---------- */
 
 .main {
   display: flex;
@@ -1013,7 +1013,7 @@ body.resizing canvas {
   text-align: center;
 }
 
-/* ---------- primeiro uso ---------- */
+/* ---------- first run ---------- */
 
 .setup {
   margin: 10px 16px 0;
@@ -1090,7 +1090,7 @@ body.resizing canvas {
   -webkit-user-select: text;
 }
 
-/* ---------- visualizador ---------- */
+/* ---------- viewer ---------- */
 
 .viewer {
   position: absolute;
@@ -1133,7 +1133,7 @@ body.resizing canvas {
 .placeholder strong {
   color: var(--text);
 }
-/* Máscara de enquadramento do retoque: o quadro do vídeo, o resto escurecido. */
+/* Retouch framing mask: the video frame, with the rest darkened. */
 .viewer-guide {
   position: absolute;
   left: 50%;
@@ -1210,7 +1210,7 @@ body.resizing canvas {
   }
 }
 
-/* ---------- etapas ---------- */
+/* ---------- stages ---------- */
 
 .stages {
   flex: none;
@@ -1235,7 +1235,7 @@ body.resizing canvas {
   gap: 8px;
 }
 .stage-title {
-  /* Só encolhe depois que o rótulo da ferramenta sumiu. */
+  /* Only shrinks after the tool label is gone. */
   flex-shrink: 0.001;
   min-width: 0;
   font-weight: 600;
@@ -1243,7 +1243,7 @@ body.resizing canvas {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* Em janela estreita, o rótulo da ferramenta some antes do título. */
+/* In a narrow window, the tool label disappears before the title. */
 .stage-tool {
   flex-shrink: 100;
   min-width: 0;
@@ -1260,7 +1260,7 @@ body.resizing canvas {
   color: var(--text-2);
   white-space: nowrap;
 }
-/* ▶ de cada etapa: roda só ela. */
+/* Each stage's ▶: runs just that stage. */
 .stage-run {
   flex: none;
   display: grid;
@@ -1434,7 +1434,7 @@ body.resizing canvas {
 .thumb:hover {
   border-color: var(--border-strong);
 }
-/* Xadrez atrás do recorte, como em editores de imagem. */
+/* Checkerboard behind the mask, as in image editors. */
 .thumb.cut,
 .lightbox.cut img {
   background: repeating-conic-gradient(#2a2d33 0 25%, #1f2226 0 50%) 0 0 / 16px 16px;
@@ -1448,7 +1448,7 @@ body.resizing canvas {
 .thumb.menu-open {
   border-color: var(--accent);
 }
-/* Recusado: fora do dataset, mas ainda visível para aceitar de volta. */
+/* Rejected: out of the dataset, but still visible so it can be restored. */
 .thumb.rejected img {
   opacity: 0.35;
   filter: grayscale(1);
@@ -1610,7 +1610,7 @@ body.resizing canvas {
   -webkit-user-select: text;
 }
 
-/* ---------- recorte ---------- */
+/* ---------- masks ---------- */
 
 .masks-body {
   display: flex;
@@ -1660,7 +1660,7 @@ body.resizing canvas {
   inset: 0;
   pointer-events: none;
 }
-/* Cor detectada automaticamente: o valor é só o último usado. */
+/* Auto-detected color: the value is just the last one used. */
 .swatch.auto span {
   opacity: 0.35;
 }
@@ -1705,13 +1705,13 @@ body.resizing canvas {
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
 }
 
-/* Marcação do sujeito para o SAM 2.1, sobre o vídeo */
+/* Subject marking for SAM 2.1, over the video */
 .prompt-layer {
   position: absolute;
   overflow: visible;
   pointer-events: none;
 }
-/* Marcando: mira com um sinal de mais (adiciona ponto ou caixa) */
+/* Marking: crosshair with a plus sign (adds a point or box) */
 .prompt-layer.editing {
   pointer-events: auto;
   cursor:
@@ -1740,7 +1740,7 @@ body.resizing canvas {
   margin-top: 4px;
 }
 
-/* Prévia do recorte (MaskPreview.tsx): fundo removido em xadrez */
+/* Mask preview (MaskPreview.tsx): removed background as checkerboard */
 .mask-preview {
   display: flex;
   flex-direction: column;
@@ -1782,7 +1782,7 @@ body.resizing canvas {
 .help.error {
   color: var(--bad);
 }
-/* Shift: mira com um sinal de menos (apaga um ponto ou a caixa) */
+/* Shift: crosshair with a minus sign (erases a point or the box) */
 .prompt-layer.erasing {
   cursor:
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28'%3E%3Cg stroke-linecap='round'%3E%3Cpath d='M10 3v14M3 10h14' stroke='%23000' stroke-width='3.5'/%3E%3Cpath d='M10 3v14M3 10h14' stroke='%23fff' stroke-width='1.5'/%3E%3C/g%3E%3Ccircle cx='21' cy='21' r='6' fill='%23ff6b6b' stroke='%23000' stroke-width='1'/%3E%3Cpath d='M18 21h6' stroke='%23fff' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E")
@@ -1803,7 +1803,7 @@ body.resizing canvas {
   pointer-events: none;
 }
 
-/* ---------- diálogo (integrações) ---------- */
+/* ---------- dialog (integrations) ---------- */
 
 .modal {
   position: fixed;
@@ -1948,7 +1948,7 @@ body.resizing canvas {
   stroke-linecap: round;
 }
 
-/* ---------- retoque ---------- */
+/* ---------- retouch ---------- */
 
 .retouch-intro {
   margin-top: 0;
@@ -2091,8 +2091,8 @@ body.resizing canvas {
   gap: 6px;
   min-width: 0;
 }
-/* O palco tem fundo xadrez escuro para o cinza do vídeo (fundo do clipe)
-   não se confundir com a área sobrando em volta. */
+/* The stage has a dark checkerboard so the video's gray (clip background)
+   isn't confused with the leftover area around it. */
 .retouch-stage {
   display: grid;
   place-items: center;

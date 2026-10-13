@@ -7,46 +7,46 @@ import { polarRange } from "../lib/share";
 import { useI18n } from "../i18n";
 
 interface Props {
-  /** `label` substitui o rótulo padrão (ex.: arquivo exportado); `url`, o
-   *  endereço derivado de `path` (ex.: blob gerado no navegador). */
+  /** `label` overrides the default label (e.g. exported file); `url`, the
+   *  address derived from `path` (e.g. a blob generated in the browser). */
   splat: { path: string; iter: number | null; version: number; label?: string; url?: string } | null;
   frame: SceneFrame | null;
   placeholder?: React.ReactNode;
-  /** Clique num ponto da trajetória: índice da câmera em `frame.cameras`. */
+  /** Click on a trajectory point: camera index in `frame.cameras`. */
   onPickCamera?: (camera: number) => void;
   ref?: Ref<ViewerHandle>;
 }
 
-/** Pose em convenção COLMAP (mundo → câmera). */
+/** Pose in COLMAP convention (world → camera). */
 export interface ColmapPose {
   qvec: [number, number, number, number];
   tvec: [number, number, number];
 }
 
-/** Quadro do vídeo de retoque: proporção e campo de visão vertical (rad). */
+/** Retouch video frame: aspect and vertical field of view (rad). */
 export interface FrameGuide {
   size: [number, number];
   fovY: number;
 }
 
-/** Acesso do retoque ao viewer: a câmera atual, a trajetória desenhada e o
- *  render fora da tela, nas coordenadas do COLMAP. */
+/** Retouch access to the viewer: the current camera, the drawn trajectory
+ *  and offscreen rendering, in COLMAP coordinates. */
 export interface ViewerHandle {
-  /** Câmera atual; null antes do enquadramento. */
+  /** Current camera; null before framing. */
   viewPose(): ColmapPose | null;
-  /** Desenha uma trajetória de retoque (null apaga). Com `frame` (tamanho e
-   *  focal vertical do vídeo), desenha também a câmera em alguns pontos. */
+  /** Draws a retouch trajectory (null clears it). With `frame` (video size and
+   *  vertical focal length), also draws the camera at a few points. */
   showPath(poses: ColmapPose[] | null, frame?: { size: [number, number]; fy: number }): void;
-  /** Leva a câmera a uma pose, olhando para o centro da órbita. */
+  /** Moves the camera to a pose, looking at the orbit center. */
   goTo(pose: ColmapPose): void;
-  /** Solta a trava de ângulo (mirar por baixo ou por cima da filmagem). */
+  /** Releases the angle lock (aim below or above the filmed range). */
   unlockAngle(): void;
-  /** Splat carregado na tela. */
+  /** A splat is loaded on screen. */
   hasSplat(): boolean;
-  /** Quadro do vídeo para a máscara de enquadramento (null tira a opção). */
+  /** Video frame for the framing mask (null removes the option). */
   setFrameGuide(guide: FrameGuide | null): void;
-  /** Renderiza cada pose fora da tela, com o splat exibido. `onFrame` recebe
-   *  RGBA de cima para baixo, com a cor já sem o alpha pré-multiplicado. */
+  /** Renders each pose offscreen with the displayed splat. `onFrame` gets
+   *  top-down RGBA with the color already un-premultiplied. */
   renderFrames(opts: {
     poses: ColmapPose[];
     size: [number, number];
@@ -61,35 +61,35 @@ interface Ctx {
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
   controls: OrbitControls;
-  /** Recebe a transformação COLMAP → mundo (centro na origem, "up" em +Y). */
+  /** Holds the COLMAP → world transform (center at origin, "up" on +Y). */
   root: THREE.Group;
-  /** A mesma transformação, mas a das poses com que o splat exibido foi
-   *  treinado: ao refazer as poses, o splat antigo continua na tela até o
-   *  primeiro snapshot do treino novo e não pode herdar o alinhamento novo
-   *  (nem a falta dele, que o deixaria de cabeça para baixo). */
+  /** The same transform, but from the poses the displayed splat was trained
+   *  with: when poses are redone, the old splat stays on screen until the
+   *  new training's first snapshot and must not inherit the new alignment
+   *  (nor its absence, which would leave it upside down). */
   splatRoot: THREE.Group;
-  /** `splatRoot` já tem o alinhamento do splat exibido. */
+  /** `splatRoot` already has the displayed splat's alignment. */
   splatAligned: boolean;
   mesh: SplatMesh | null;
   path: THREE.Object3D | null;
-  /** Destaque do ponto sob o cursor (filho de `path`). */
+  /** Highlight of the point under the cursor (child of `path`). */
   hover: THREE.Points | null;
-  /** Trajetória de retoque (filha de `root`). */
+  /** Retouch trajectory (child of `root`). */
   retouchPath: THREE.Object3D | null;
-  /** Pede alguns quadros de renderização (a cena só redesenha quando muda). */
+  /** Requests a few render frames (the scene only redraws on change). */
   invalidate: () => void;
 }
 
-// Quadros extras após cada mudança: cobrem o amortecimento da órbita e a
-// ordenação assíncrona dos splats no Spark.
+// Extra frames after each change: cover orbit damping and Spark's async
+// splat sorting.
 const SETTLE_FRAMES = 45;
 
 const ACCENT = 0xff9a4d;
-/** Raio, em px, para acertar um ponto de câmera com o mouse. */
+/** Radius, in px, for hitting a camera point with the mouse. */
 const PICK_RADIUS = 10;
-/** Campo de visão vertical padrão do viewer, em graus. */
+/** Default viewer vertical field of view, in degrees. */
 const BASE_FOV = 50;
-/** Fração máxima da tela que o quadro do enquadramento ocupa. */
+/** Maximum fraction of the screen the framing box takes. */
 const GUIDE_FILL = 0.86;
 
 export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) {
@@ -105,17 +105,17 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
   const [hasMesh, setHasMesh] = useState(false);
   const [guide, setGuide] = useState<FrameGuide | null>(null);
   const [guideOn, setGuideOn] = useState(false);
-  /** Tamanho em px do quadro na tela, com a máscara ligada. */
+  /** On-screen size in px of the frame box, with the mask on. */
   const [guideBox, setGuideBox] = useState<{ w: number; h: number } | null>(null);
   const activeGuide = useRef<FrameGuide | null>(null);
   const fitGuideRef = useRef<() => void>(() => {});
-  // Os ouvintes do canvas nascem uma vez; leem o estado atual por aqui.
+  // Canvas listeners are created once; they read current state through these.
   const frameRef = useRef(frame);
   frameRef.current = frame;
   const pickRef = useRef(onPickCamera);
   pickRef.current = onPickCamera;
 
-  // Cena, renderer e loop: criados uma vez.
+  // Scene, renderer and loop: created once.
   useEffect(() => {
     const el = host.current!;
     const renderer = new THREE.WebGLRenderer({ antialias: false, alpha: true });
@@ -136,8 +136,8 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
     controls.dampingFactor = 0.08;
     controls.autoRotateSpeed = 1.2;
 
-    // Renderizar só sob demanda libera a GPU para o treino do Brush, que
-    // roda em paralelo e disputa o mesmo chip.
+    // Rendering only on demand frees the GPU for Brush training, which runs
+    // in parallel on the same chip.
     let dirty = SETTLE_FRAMES;
     const invalidate = () => {
       dirty = SETTLE_FRAMES;
@@ -166,7 +166,7 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
 
     ctx.current = { renderer, scene, camera, controls, root, splatRoot, splatAligned: false, mesh: null, path: null, hover: null, retouchPath: null, invalidate };
 
-    // Ponto de câmera mais próximo do cursor, em pixels da tela.
+    // Camera point closest to the cursor, in screen pixels.
     const v = new THREE.Vector3();
     const pick = (e: PointerEvent) => {
       const c = ctx.current;
@@ -192,8 +192,8 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
     let hovered = -1;
     const setHover = (i: number) => {
       const c = ctx.current;
-      // Ao trocar de trajetória o destaque novo nasce oculto: refaz mesmo
-      // que o índice seja o mesmo.
+      // After a trajectory change the new highlight starts hidden: redo it even
+      // if the index is the same.
       if (i === hovered && (i < 0 || c?.hover?.visible)) return;
       hovered = i;
       const f = frameRef.current;
@@ -203,7 +203,7 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
       if (i >= 0 && f) c.hover.position.set(...f.cameras[i]);
       invalidate();
     };
-    // Clique = soltar quase no mesmo lugar; arrastar continua girando a órbita.
+    // Click = release near the same spot; dragging still orbits.
     let down: { x: number; y: number } | null = null;
     const onDown = (e: PointerEvent) => {
       down = e.button === 0 ? { x: e.clientX, y: e.clientY } : null;
@@ -237,7 +237,7 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
     };
   }, []);
 
-  // Enquadramento a partir das câmeras do COLMAP.
+  // Framing from the COLMAP cameras.
   useEffect(() => {
     const c = ctx.current;
     if (!c) return;
@@ -253,8 +253,8 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
     const pts = frame.cameras.map((p) => new THREE.Vector3(...p));
     const group = new THREE.Group();
     if (pts.length > 1) {
-      // Liga só frames vizinhos: um salto de índice é um trecho que o COLMAP
-      // não conseguiu registrar e deve aparecer como buraco na trajetória.
+      // Only connect adjacent frames: an index jump is a stretch COLMAP could
+      // not register and should show up as a gap in the trajectory.
       const segs: THREE.Vector3[] = [];
       for (let i = 1; i < pts.length; i++) {
         if (frame.frameIndices[i] - frame.frameIndices[i - 1] === 1) segs.push(pts[i - 1], pts[i]);
@@ -293,9 +293,9 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
     if (ctx.current) ctx.current.controls.autoRotate = spin;
   }, [spin]);
 
-  // Máscara de enquadramento: escurece o que fica fora do quadro do vídeo de
-  // retoque. A lente do vídeo pode ser mais aberta que a do viewer; nesse caso
-  // o viewer abre o campo de visão até o quadro caber na tela.
+  // Framing mask: darkens whatever is outside the retouch video frame. The
+  // video lens may be wider than the viewer's; then the viewer widens its
+  // field of view until the frame fits on screen.
   fitGuideRef.current = () => {
     const c = ctx.current;
     const el = host.current;
@@ -324,8 +324,8 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
     fitGuideRef.current();
   }, [guide, guideOn]);
 
-  // Trava a altura da órbita na faixa que o vídeo filmou (+ folga): fora
-  // dela não há dados e o splat mostra buracos e artefatos.
+  // Clamp orbit elevation to the range the video covered (+ margin): outside
+  // it there is no data and the splat shows holes and artifacts.
   useEffect(() => {
     const c = ctx.current;
     if (!c) return;
@@ -336,8 +336,8 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
     c.invalidate();
   }, [clampView, frame]);
 
-  // Carrega o .ply (snapshot ou final). Troca sem piscar: o anterior só sai
-  // quando o novo terminou de carregar.
+  // Loads the .ply (snapshot or final). Swaps without flicker: the previous
+  // one is removed only once the new one has loaded.
   useEffect(() => {
     const c = ctx.current;
     if (!c) return;
@@ -368,7 +368,7 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
           c.splatRoot.remove(prev);
           prev.dispose();
         }
-        // Splat novo: nasce com o alinhamento das poses atuais.
+        // New splat: starts with the current poses' alignment.
         alignSplat(frameRef.current);
         c.splatRoot.add(mesh);
         c.invalidate();
@@ -393,7 +393,7 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
         if (!c || !frameRef.current) return null;
         c.root.updateMatrixWorld(true);
         c.camera.updateMatrixWorld(true);
-        // câmera three (olha −Z, +Y em cima) → câmera COLMAP (olha +Z, +Y embaixo)
+        // three camera (looks −Z, +Y up) → COLMAP camera (looks +Z, +Y down)
         const c2w = c.root.matrixWorld.clone().invert().multiply(c.camera.matrixWorld).multiply(FLIP_YZ);
         return colmapFromC2W(c2w);
       },
@@ -411,7 +411,7 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
         if (poses?.length) {
           const pts = poses.map((p) => centerOf(p));
           const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), pathMaterial(RETOUCH, 0.95));
-          // Marcas a cada ~8% do clipe: mostram o ritmo e o sentido da câmera.
+          // Ticks every ~8% of the clip: show the camera's pace and direction.
           const step = Math.max(1, Math.round(pts.length / 12));
           const ticks = new THREE.Points(
             new THREE.BufferGeometry().setFromPoints(pts.filter((_, i) => i % step === 0)),
@@ -419,12 +419,12 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
           );
           const end = new THREE.Points(new THREE.BufferGeometry().setFromPoints([pts[pts.length - 1]]), pathMaterial(RETOUCH, 1, 9));
           const mid = new THREE.Points(new THREE.BufferGeometry().setFromPoints([pts[pts.length >> 1]]), pathMaterial(0xffffff, 1, 10));
-          // O início por último, por cima do fim (nas voltas os dois coincidem).
+          // Start last, on top of the end (they coincide on full loops).
           const start = new THREE.Points(new THREE.BufferGeometry().setFromPoints([pts[0]]), pathMaterial(PATH_START, 1, 11));
           const g = new THREE.Group();
           g.add(line, ticks, end, mid, start);
-          // Câmeras nas marcas (e no início e no meio): pirâmide com a base no
-          // formato do quadro e um triângulo no lado de cima da imagem.
+          // Cameras at the ticks (and at start and middle): a pyramid whose base is
+          // the frame shape, with a triangle on the image's top side.
           if (frame) {
             const depth = (frameRef.current?.radius ?? 1) * 0.07;
             const marks = poses.map((_, i) => i).filter((i) => i % step === 0 && i !== 0 && i !== poses.length >> 1);
@@ -444,8 +444,8 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
       goTo(pose) {
         const c = ctx.current;
         if (!c) return;
-        // A pose pode estar fora da faixa filmada: solta a trava antes de mover
-        // (o efeito do estado só roda depois, e o update() já limitaria).
+        // The pose may be outside the filmed range: release the lock before moving
+        // (the state effect only runs later, and update() would already clamp).
         setClampView(false);
         c.controls.minPolarAngle = 0;
         c.controls.maxPolarAngle = Math.PI;
@@ -470,10 +470,10 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
       },
       async renderFrames({ poses, size: [w, h], fy, onFrame, signal }) {
         const c = ctx.current;
-        if (!c?.mesh) throw new Error("nenhum splat carregado no viewer");
+        if (!c?.mesh) throw new Error("no splat loaded in the viewer");
         const f = frameRef.current;
-        // Alvo RGBA8 sem codificação sRGB: os valores lidos são os que o
-        // shader escreveu (ver o render abaixo).
+        // RGBA8 target without sRGB encoding: values read back are exactly what
+        // the shader wrote (see the render below).
         const spark = new SparkRenderer({ renderer: c.renderer, target: { width: w, height: h, colorSpace: THREE.NoColorSpace }, minSortIntervalMs: 0 });
         const cam = new THREE.PerspectiveCamera(THREE.MathUtils.radToDeg(2 * Math.atan(h / 2 / fy)), w / h, 0.01, 1000);
         if (f) {
@@ -482,7 +482,7 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
         }
         cam.updateProjectionMatrix();
         cam.matrixAutoUpdate = false;
-        // As linhas de câmera e da trajetória não podem sair no vídeo.
+        // Camera and trajectory lines must not show up in the video.
         const hidden = [c.path, c.retouchPath].filter((o): o is THREE.Object3D => !!o && o.visible);
         hidden.forEach((o) => (o.visible = false));
         const row = w * 4;
@@ -490,22 +490,22 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
         try {
           c.root.updateMatrixWorld(true);
           for (let i = 0; i < poses.length; i++) {
-            if (signal?.aborted) throw new DOMException("cancelado", "AbortError");
+            if (signal?.aborted) throw new DOMException("cancelled", "AbortError");
             cam.matrix.copy(c.root.matrixWorld).multiply(c2wFromColmap(poses[i])).multiply(FLIP_YZ);
             cam.matrixWorld.copy(cam.matrix);
             cam.matrixWorldInverse.copy(cam.matrix).invert();
-            // A ordenação dos splats é assíncrona: espera a desta pose.
+            // Splat sorting is async: wait for this pose's sort.
             await spark.update({ scene: c.scene, camera: cam });
             while (spark.sorting || spark.sortDirty) {
               await new Promise((r) => setTimeout(r, 2));
               if (spark.sortDirty && !spark.sorting) await spark.update({ scene: c.scene, camera: cam });
             }
-            // Num render target o Spark converte as cores para linear e mistura
-            // os splats em espaço linear (encodeLinear, decidido pelo espaço de
-            // trabalho do three). Na tela, e no Brush que treinou o splat, a
-            // mistura é em sRGB; em linear os escuros desbotam e os claros
-            // achatam. Durante o render (síncrono), o espaço de trabalho vira
-            // sRGB e o Spark escreve as cores como na tela.
+            // In a render target Spark converts colors to linear and blends splats
+            // in linear space (encodeLinear, driven by three's working color
+            // space). On screen, and in Brush which trained the splat, blending
+            // is in sRGB; in linear, darks wash out and highlights flatten.
+            // During the (synchronous) render the working space is switched to
+            // sRGB so Spark writes colors as on screen.
             const working = THREE.ColorManagement.workingColorSpace;
             THREE.ColorManagement.workingColorSpace = THREE.SRGBColorSpace;
             try {
@@ -514,7 +514,7 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
               THREE.ColorManagement.workingColorSpace = working;
             }
             const px = await spark.readTarget();
-            // WebGL lê de baixo para cima; o vídeo quer de cima para baixo.
+            // WebGL reads bottom-up; the video wants top-down.
             for (let y = 0; y < h; y++) out.set(px.subarray((h - 1 - y) * row, (h - y) * row), y * row);
             if (spark.premultipliedAlpha) {
               for (let k = 0; k < out.length; k += 4) {
@@ -535,7 +535,7 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
         }
       },
       };
-      // Para os testes automatizados (scripts/web-bench/retouch.mjs).
+      // For automated tests (scripts/web-bench/retouch.mjs).
       if (import.meta.env.DEV) (window as unknown as { __gorbitViewer?: ViewerHandle }).__gorbitViewer = handle;
       return handle;
     },
@@ -543,7 +543,7 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
     [],
   );
 
-  /** Alinha o splat a `frame`; sem frame, fica à espera do próximo. */
+  /** Aligns the splat to `frame`; with no frame, waits for the next one. */
   function alignSplat(frame: SceneFrame | null) {
     const c = ctx.current!;
     alignTo(c.splatRoot, frame);
@@ -561,8 +561,8 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
     c.camera.position.copy(center).add(new THREE.Vector3(0, size * 0.25, size * 0.9));
   }
 
-  /** Volta para o ponto de vista do primeiro frame do vídeo, enquadrando o
-   *  centro como a filmagem (ou um pouco recuado, sem a lente do vídeo). */
+  /** Returns to the viewpoint of the video's first frame, framing the center
+   *  like the footage (or slightly pulled back, without the video lens). */
   function resetView() {
     const c = ctx.current;
     if (!c) return;
@@ -570,8 +570,8 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
     if (frame && frame.cameras.length) {
       c.root.updateMatrixWorld(true);
       const first = new THREE.Vector3(...frame.cameras[0]).applyMatrix4(c.root.matrixWorld);
-      // A lente daqui é fixa (50°); a do vídeo pode ser bem mais fechada
-      // (teleobjetiva). Aproxima até o quadro do vídeo caber justo na tela.
+      // The viewer lens is fixed (50°); the video's may be much narrower
+      // (telephoto). Move in until the video frame fits the screen snugly.
       let k = 1.35;
       if (frame.lens) {
         const v = Math.tan(THREE.MathUtils.degToRad(c.camera.fov) / 2);
@@ -641,13 +641,13 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
 }
 
 const RETOUCH = 0x7fd3ff;
-/** Início da trajetória de retoque. */
+/** Start of the retouch trajectory. */
 const PATH_START = 0x6fe3a1;
 
-/** Material da trajetória de retoque: desenhada por cima do splat (que não
- *  escreve profundidade), mas apagada no trecho que passa atrás do centro da
- *  órbita (a origem do mundo). Sem isso uma volta em torno do sujeito, vista
- *  quase de lado, parece uma diagonal cruzando o corpo. `size` > 0: pontos. */
+/** Retouch trajectory material: drawn over the splat (which writes no
+ *  depth), but faded where it passes behind the orbit center (the world
+ *  origin). Without this a loop around the subject, seen almost edge-on,
+ *  looks like a diagonal crossing the body. `size` > 0: points. */
 function pathMaterial(color: number, opacity: number, size = 0) {
   return new THREE.ShaderMaterial({
     uniforms: { uColor: { value: new THREE.Color(color) }, uOpacity: { value: opacity }, uSize: { value: size } },
@@ -675,10 +675,10 @@ function pathMaterial(color: number, opacity: number, size = 0) {
     depthWrite: false,
   });
 }
-/** Troca entre os eixos de câmera do three (+Y em cima, olha −Z) e do COLMAP. */
+/** Converts between three camera axes (+Y up, looks −Z) and COLMAP's. */
 const FLIP_YZ = new THREE.Matrix4().makeScale(1, -1, -1);
 
-/** Câmera → mundo (COLMAP) de uma pose mundo → câmera. */
+/** Camera → world (COLMAP) from a world → camera pose. */
 function c2wFromColmap({ qvec: [w, x, y, z], tvec }: ColmapPose) {
   const r = new THREE.Matrix4().makeRotationFromQuaternion(new THREE.Quaternion(x, y, z, w));
   const t = new THREE.Matrix4().makeTranslation(tvec[0], tvec[1], tvec[2]);
@@ -687,9 +687,9 @@ function c2wFromColmap({ qvec: [w, x, y, z], tvec }: ColmapPose) {
 
 const centerOf = (p: ColmapPose) => new THREE.Vector3().setFromMatrixPosition(c2wFromColmap(p));
 
-/** Segmentos (pares de pontos) de uma câmera desenhada: pirâmide da posição
- *  até o quadro a `depth` à frente, o quadro e um triângulo no lado de cima da
- *  imagem. Coordenadas do COLMAP (+Z à frente, +Y para baixo). */
+/** Segments (point pairs) of a drawn camera: a pyramid from the position to
+ *  the frame at `depth` ahead, the frame itself and a triangle on the image's
+ *  top side. COLMAP coordinates (+Z forward, +Y down). */
 function frustumSegments(p: ColmapPose, frame: { size: [number, number]; fy: number }, depth: number): THREE.Vector3[] {
   const c2w = c2wFromColmap(p);
   const hh = (depth * frame.size[1]) / 2 / frame.fy;
@@ -709,7 +709,7 @@ function colmapFromC2W(c2w: THREE.Matrix4): ColmapPose {
   return { qvec: [q.w * sign, q.x * sign, q.y * sign, q.z * sign], tvec: [t.x, t.y, t.z] };
 }
 
-/** Transformação COLMAP → mundo: centro na origem, "up" em +Y. */
+/** COLMAP → world transform: center at origin, "up" on +Y. */
 function alignTo(group: THREE.Group, frame: SceneFrame | null) {
   if (!frame) {
     group.position.set(0, 0, 0);

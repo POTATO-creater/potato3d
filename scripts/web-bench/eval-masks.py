@@ -1,7 +1,7 @@
-# Compara as máscaras de um projeto (headless.mjs video --out) com as
-# verdadeiras do synth-orbit.py --green: IoU (máscara ≥ 128) e erro médio.
+# Compares a project's masks (headless.mjs video --out) with the ground truth
+# from synth-orbit.py --green: IoU (mask ≥ 128) and mean error.
 #
-#   python3 scripts/web-bench/eval-masks.py <masks_gt> <projeto> <fps>
+#   python3 scripts/web-bench/eval-masks.py <masks_gt> <project> <fps>
 import json, sys
 import numpy as np
 from PIL import Image
@@ -18,4 +18,4 @@ for f in json.load(open(f"{proj}/frames.json")):
     ious.append((a & b).sum() / max((a | b).sum(), 1))
     maes.append(np.abs(m - g).mean())
 ious = np.array(ious)
-print(f"{len(ious)} máscaras: IoU médio {ious.mean():.4f} (mín {ious.min():.4f}), erro médio {np.mean(maes) * 100:.2f}%")
+print(f"{len(ious)} masks: mean IoU {ious.mean():.4f} (min {ious.min():.4f}), mean error {np.mean(maes) * 100:.2f}%")

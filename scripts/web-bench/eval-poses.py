@@ -1,11 +1,11 @@
-# Compara um modelo COLMAP binário com as poses verdadeiras do synth-orbit.py:
-# alinha os centros das câmeras por Sim(3) (Umeyama) e mede o erro de posição
-# (em % do raio da órbita), o de rotação e o da focal.
+# Compares a binary COLMAP model with the ground-truth poses from synth-orbit.py:
+# aligns camera centers with Sim(3) (Umeyama) and measures position error
+# (in % of the orbit radius), rotation error and focal error.
 #
-#   python3 scripts/web-bench/eval-poses.py <gt.json> <pasta com cameras.bin e images.bin> [frames.json fps]
+#   python3 scripts/web-bench/eval-poses.py <gt.json> <folder with cameras.bin and images.bin> [frames.json fps]
 #
-# Com frames.json (do `headless.mjs video --out`) e o fps do vídeo, cada frame
-# extraído é comparado com o frame verdadeiro do mesmo instante.
+# With frames.json (from `headless.mjs video --out`) and the video fps, each
+# extracted frame is compared with the ground-truth frame at the same timestamp.
 import json, struct, sys
 import numpy as np
 
@@ -64,10 +64,10 @@ pos_err = np.linalg.norm(Ca - Cg, axis=1) / radius * 100
 rot_err = []
 for n in names:
     Rg = np.array(G[n]["R"])
-    Re = est[n][0] @ Rs.T  # mundo alinhado -> câmera
+    Re = est[n][0] @ Rs.T  # aligned world -> camera
     c = (np.trace(Rg.T @ Re) - 1) / 2
     rot_err.append(np.degrees(np.arccos(np.clip(c, -1, 1))))
 rot_err = np.array(rot_err)
-print(f"registradas {len(names)}/{len(gt['poses'])}  focal {params[0]:.1f} (verdadeira {gt['focal']:.1f}, erro {100 * (params[0] / gt['focal'] - 1):+.2f}%)")
-print(f"posição: mediana {np.median(pos_err):.3f}%  máx {pos_err.max():.3f}% do raio")
-print(f"rotação: mediana {np.median(rot_err):.3f}°  máx {rot_err.max():.3f}°")
+print(f"registered {len(names)}/{len(gt['poses'])}  focal {params[0]:.1f} (true {gt['focal']:.1f}, error {100 * (params[0] / gt['focal'] - 1):+.2f}%)")
+print(f"position: median {np.median(pos_err):.3f}%  max {pos_err.max():.3f}% of radius")
+print(f"rotation: median {np.median(rot_err):.3f}°  max {rot_err.max():.3f}°")

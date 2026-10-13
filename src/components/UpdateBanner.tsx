@@ -2,8 +2,8 @@ import { useEffect, useState } from "react";
 import { host } from "../lib/api";
 import { useI18n } from "../i18n";
 
-/** Versão web: oferece trocar para a versão nova já baixada. Recarregar no
- *  meio de um processamento perderia o trabalho, então o botão espera. */
+/** Web version: offers to switch to the already-downloaded new version.
+ *  Reloading mid-job would lose the work, so the button waits. */
 export function UpdateBanner({ busy }: { busy: boolean }) {
   const { t } = useI18n();
   const [available, setAvailable] = useState(false);

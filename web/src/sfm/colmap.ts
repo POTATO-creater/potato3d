@@ -1,5 +1,5 @@
-// Grava o modelo no formato binário do COLMAP (cameras/images/points3D.bin),
-// que o Brush e o resto do Gausify Orbit leem.
+// Writes the model in COLMAP's binary format (cameras/images/points3D.bin),
+// which Brush and the rest of Gausify Orbit read.
 
 import { quatFromMat } from "./linalg";
 import type { SfmModel } from "./reconstruct";
@@ -59,7 +59,7 @@ class Writer {
   }
 }
 
-/** `xy[i]`: keypoints da imagem i (pixels), para os points2D. */
+/** `xy[i]`: keypoints of image i (pixels), for the points2D. */
 export function colmapFiles(model: SfmModel, names: string[], xy: Float32Array[]): Record<string, Blob> {
   const cams = new Writer();
   cams.u64(1);
@@ -71,7 +71,7 @@ export function colmapFiles(model: SfmModel, names: string[], xy: Float32Array[]
   cams.f64(model.cx);
   cams.f64(model.cy);
 
-  // observações por imagem, para os points2D
+  // observations per image, for the points2D
   const perImage = new Map<number, { feat: number; pt: number }[]>();
   model.points.forEach((p, pi) => {
     for (const [i, k] of p.obs) {
@@ -127,8 +127,8 @@ export async function writeModel(dir: FileSystemDirectoryHandle, files: Record<s
   }
 }
 
-/** Cópia do images.bin com os nomes das imagens trocados (ex.: .jpg → .png
- *  do dataset com transparência); o resto do registro fica igual. */
+/** Copy of images.bin with the image names replaced (e.g. .jpg → .png of the
+ *  dataset with transparency); the rest of each record is unchanged. */
 export function renameImages(imagesBin: ArrayBuffer, rename: (name: string) => string): Blob {
   const v = new DataView(imagesBin);
   const bytes = new Uint8Array(imagesBin);

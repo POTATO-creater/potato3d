@@ -1,37 +1,37 @@
-// Decimação: reduz a quantidade de gaussianas fundindo as *parecidas*. Port
-// de src-tauri/src/export/decimate.rs (que veio do sharp-decimate.ts do
-// WebGaussian, no esquema geracional por pares do splat-transform): a cada
-// geração, cada splat acha os vizinhos mais baratos de fundir (hash espacial →
-// vizinhos mais próximos → custo da aresta), grupos disjuntos (pares, fechados
-// em cadeia até 4 membros) são casados gulosamente em ordem de custo e cada
-// grupo vira uma gaussiana por casamento de momentos.
+// Decimation: reduces the Gaussian count by merging *similar* ones. Port of
+// src-tauri/src/export/decimate.rs (which came from WebGaussian's
+// sharp-decimate.ts, following splat-transform's generational pairwise scheme):
+// each generation, every splat finds its cheapest neighbors to merge (spatial
+// hash → nearest neighbors → edge cost), disjoint groups (pairs, chain-closed
+// up to 4 members) are matched greedily in cost order, and each group becomes
+// one Gaussian via moment matching.
 //
-// - Custo geométrico = aumento de entropia da fusão (½·logdet(Σm) − Σ pₖ·½·logdetₖ).
-// - Custo de cor = |Δf_dc|².
-// - Pesos e opacidade pela "tinta" (opacidade × área do elipsoide), que a
-//   fusão conserva: tirar a média das opacidades abriria buracos.
-// - As bandas SH também são fundidas, pela média ponderada pela tinta.
+// - Geometric cost = entropy increase of the merge (½·logdet(Σm) − Σ pₖ·½·logdetₖ).
+// - Color cost = |Δf_dc|².
+// - Weights and opacity follow "ink" (opacity × ellipsoid area), which merging
+//   conserves: averaging opacities would open holes.
+// - SH bands are merged too, by ink-weighted average.
 
 import { restLen, type Splats } from "./splats.ts";
 
-/** Abaixo disso a decimação não compensa a perda. */
+/** Below this, decimation isn't worth the loss. */
 const MIN_COUNT = 10_000;
 const EPS_COV = 1e-8;
 const COLOR_COST_SCALE = 1;
-/** Vizinhos mais próximos avaliados por splat. */
+/** Nearest neighbors evaluated per splat. */
 const NEIGHBOR_SCAN_CAP = 4;
-/** Melhores candidatos mantidos por splat para o casamento. */
+/** Best candidates kept per splat for matching. */
 const CANDIDATES = 2;
 const SELECT_BUCKETS = 1024;
-/** Tamanho máximo do grupo: pares primeiro, depois fechamento em cadeia. */
+/** Max group size: pairs first, then chain closure. */
 const GROUP_CAPS = [3, 4];
 const MAX_GENERATIONS = 24;
 const MAX_GRID_RESOLUTION = 1024;
-/** Entradas lidas por célula vizinha (limita células patológicas). */
+/** Entries read per neighboring cell (caps pathological cells). */
 const PER_CELL_CAP = 32;
 const NONE = 0xffffffff;
 
-/** Área do elipsoide (aproximação de Knud Thomsen, p ≈ 1,6075). */
+/** Ellipsoid area (Knud Thomsen's approximation, p ≈ 1.6075). */
 function ellipsoidArea(sx: number, sy: number, sz: number) {
   const P = 1.6075;
   const a = (sx * sy) ** P, b = (sx * sz) ** P, c = (sy * sz) ** P;
@@ -40,23 +40,23 @@ function ellipsoidArea(sx: number, sy: number, sz: number) {
 
 const sigmoid = (x: number) => 1 / (1 + Math.exp(-x));
 
-/** Conjunto de trabalho de uma geração, em valores lineares. */
+/** Working set of one generation, in linear values. */
 class Work {
   n = 0;
   readonly rl: number;
   pos: Float32Array;
-  /** σ por eixo (linear) */
+  /** σ per axis (linear) */
   scale: Float32Array;
-  /** (w, x, y, z) normalizado */
+  /** normalized (w, x, y, z) */
   rot: Float32Array;
-  /** opacidade linear (0–1) */
+  /** linear opacity (0–1) */
   opacity: Float32Array;
   dc: Float32Array;
   rest: Float32Array;
-  /** Covariância no mundo, simétrica: xx, yy, zz, xy, xz, yz. */
+  /** World-space covariance, symmetric: xx, yy, zz, xy, xz, yz. */
   cov: Float64Array;
   logdet: Float64Array;
-  /** opacidade × área */
+  /** opacity × area */
   ink: Float64Array;
 
   constructor(capacity: number, rl: number) {
@@ -86,7 +86,7 @@ class Work {
     return w;
   }
 
-  /** Acrescenta um splat calculando covariância, logdet e tinta. */
+  /** Appends a splat, computing covariance, logdet and ink. */
   push(
     pos: ArrayLike<number>, po: number,
     scale: ArrayLike<number>, rot: ArrayLike<number>, opacity: number,
@@ -151,15 +151,15 @@ class Work {
   }
 }
 
-/** Funde gaussianas parecidas até restar ~`1 − reduction` delas. `reduction`
- *  vai de 0 a 0,9; zero (ou entrada pequena) devolve null. */
+/** Merges similar Gaussians until ~`1 − reduction` of them remain. `reduction`
+ *  ranges from 0 to 0.9; zero (or a small input) returns null. */
 export function decimate(input: Splats, reduction: number, progress: (f: number) => void): Splats | null {
   reduction = Math.min(Math.max(reduction, 0), 0.9);
   if (reduction <= 0 || input.count < MIN_COUNT) return null;
   const target = Math.max(Math.round(input.count * (1 - reduction)), 1);
   let work = Work.fromSplats(input);
   const toRemove = work.n - target;
-  // Uma geração travada (sem vizinhos ao alcance) amplia a busca.
+  // A stalled generation (no neighbors in reach) widens the search.
   let reach = 1;
   for (let generation = 0; generation < MAX_GENERATIONS && work.n > target; ) {
     const next = runGeneration(work, target, reach);
@@ -182,11 +182,11 @@ function runGeneration(work: Work, target: number, reach: number): Work | null {
 }
 
 // ---------------------------------------------------------------------------
-// Candidatos: hash espacial → vizinhos mais próximos → custo da aresta.
+// Candidates: spatial hash → nearest neighbors → edge cost.
 // ---------------------------------------------------------------------------
 
-/** Hash de Fibonacci da chave da célula (cabe em 30 bits): os bits altos do
- *  produto, quantos a tabela usar. */
+/** Fibonacci hash of the cell key (fits in 30 bits): the high bits of the
+ *  product, as many as the table uses. */
 const hashSlot = (key: number, shift: number, mask: number) => (Math.imul(key, 0x9e3779b1) >>> shift) & mask;
 
 class Grid {
@@ -275,9 +275,9 @@ function buildCandidates(work: Work, reach: number) {
     }
   const ext = [0, 1, 2].map((a) => Math.max(max[a] - min[a], 1e-9));
 
-  // Célula com ocupação média baixa: o custo da varredura de 27 células é
-  // ocupação × 27 por splat. Superfícies ocupam bem menos células do que o
-  // palpite volumétrico supõe, daí as correções pela ocupação real.
+  // Keep mean cell occupancy low: the 27-cell scan costs occupancy × 27 per
+  // splat. Surfaces fill far fewer cells than the volumetric guess assumes,
+  // hence the corrections based on actual occupancy.
   const minCell = Math.max(...ext) / MAX_GRID_RESOLUTION;
   let cell = Math.max(Math.cbrt((ext[0] * ext[1] * ext[2]) / n) * 2 * reach, minCell);
   let grid = new Grid(work, min, max, cell);
@@ -317,10 +317,10 @@ function buildCandidates(work: Work, reach: number) {
   return { cost, idx };
 }
 
-/** Insere `(v, j)` numa lista curta ordenada por `v`, descartando o pior. */
+/** Inserts `(v, j)` into a short list sorted by `v`, dropping the worst. */
 function insertSorted(vals: Float64Array, ids: Uint32Array, base: number, len: number, v: number, j: number) {
   const last = base + len - 1;
-  // NaN também fica de fora.
+  // NaN is rejected too.
   if (!(v < vals[last])) return;
   let k = last;
   while (k > base && vals[k - 1] > v) {
@@ -332,7 +332,7 @@ function insertSorted(vals: Float64Array, ids: Uint32Array, base: number, len: n
   ids[k] = j;
 }
 
-/** Custo de fundir (i, j): aumento de entropia + |Δdc|². */
+/** Cost of merging (i, j): entropy increase + |Δdc|². */
 function edgeCost(w: Work, i: number, j: number) {
   const wi = w.ink[i], wj = w.ink[j];
   const pi = wi / (wi + wj), pj = 1 - pi;
@@ -355,13 +355,13 @@ function edgeCost(w: Work, i: number, j: number) {
 }
 
 // ---------------------------------------------------------------------------
-// Seleção: casamento guloso disjunto em ordem de custo + fechamento em cadeia.
+// Selection: greedy disjoint matching in cost order + chain closure.
 // ---------------------------------------------------------------------------
 
 interface Selection {
-  /** Grupo de cada splat, ou NONE para os que sobrevivem. */
+  /** Group of each splat, or NONE for survivors. */
   groupOf: Uint32Array;
-  /** Membros por grupo (CSR). */
+  /** Members per group (CSR). */
   offsets: Uint32Array;
   members: Uint32Array;
   removed: number;
@@ -379,7 +379,7 @@ function selectMerges(n: number, cost: Float64Array, idx: Uint32Array, needed: n
   const span = hi > lo ? hi - lo : 1;
   const bucket = (c: number) => Math.min(Math.floor(((c - lo) / span) * SELECT_BUCKETS), SELECT_BUCKETS - 1);
 
-  // Ordenação por contagem das entradas finitas, por faixa de custo.
+  // Counting sort of the finite entries, by cost bucket.
   const counts = new Uint32Array(SELECT_BUCKETS + 1);
   for (const c of cost) if (Number.isFinite(c)) counts[bucket(c) + 1]++;
   for (let b = 0; b < SELECT_BUCKETS; b++) counts[b + 1] += counts[b];
@@ -389,7 +389,7 @@ function selectMerges(n: number, cost: Float64Array, idx: Uint32Array, needed: n
 
   const pairs: number[] = [];
   let removed = 0;
-  // Passada principal: casa pontas livres, do mais barato para o mais caro.
+  // Main pass: match free endpoints, cheapest first.
   for (const e of order) {
     if (removed >= needed) break;
     const j = idx[e], i = Math.floor(e / CANDIDATES);
@@ -399,8 +399,8 @@ function selectMerges(n: number, cost: Float64Array, idx: Uint32Array, needed: n
     removed++;
   }
 
-  // Fechamento em cadeia: splats ainda livres entram no grupo de um
-  // candidato, para alvos altos fecharem em menos gerações.
+  // Chain closure: still-free splats join a candidate's group, so high
+  // targets converge in fewer generations.
   const groups = pairs.length / 2;
   const size = new Uint32Array(groups).fill(2);
   const joins: number[] = [];
@@ -433,7 +433,7 @@ function selectMerges(n: number, cost: Float64Array, idx: Uint32Array, needed: n
 }
 
 // ---------------------------------------------------------------------------
-// Fusão: casamento de momentos n-ário que conserva a tinta.
+// Merge: ink-conserving n-ary moment matching.
 // ---------------------------------------------------------------------------
 
 function applyMerges(w: Work, sel: Selection): Work {
@@ -481,17 +481,17 @@ function mergeGroup(w: Work, members: Uint32Array, out: Work, rest: Float64Array
   const sc = ev.map((v) => Math.sqrt(Math.max(v, 1e-12)));
   const q = quatFromMatrix(vecs);
 
-  // Opacidade que conserva a tinta: a tinta do grupo espalhada pela área do
-  // splat fundido, limitada a 1.
+  // Ink-conserving opacity: the group's ink spread over the merged splat's
+  // area, capped at 1.
   const area = Math.max(ellipsoidArea(sc[0], sc[1], sc[2]), 1e-30);
   out.push(m, 0, sc, q, Math.min(total / area, 1), dc, 0, rest, 0);
 }
 
 // ---------------------------------------------------------------------------
-// Álgebra 3×3 (linha maior), igual ao Rust.
+// 3×3 algebra (row-major), same as the Rust code.
 // ---------------------------------------------------------------------------
 
-/** Matriz de rotação a partir de (w, x, y, z) normalizado. */
+/** Rotation matrix from a normalized (w, x, y, z). */
 export function quatToMatrix(w: number, x: number, y: number, z: number): number[] {
   return [
     w * w + x * x - y * y - z * z, 2 * (x * y - w * z), 2 * (x * z + w * y),
@@ -500,8 +500,8 @@ export function quatToMatrix(w: number, x: number, y: number, z: number): number
   ];
 }
 
-/** Jacobi no lugar: a diagonal de `m` vira os autovalores; as colunas do
- *  retorno são os autovetores. */
+/** In-place Jacobi: the diagonal of `m` becomes the eigenvalues; the columns
+ *  of the result are the eigenvectors. */
 function jacobiEigen(m: number[]): number[] {
   const v = [1, 0, 0, 0, 1, 0, 0, 0, 1];
   for (let it = 0; it < 8; it++) {
@@ -546,7 +546,7 @@ function sortEigenDesc(ev: number[], v: number[]) {
   }
 }
 
-/** Inverte uma coluna se preciso para a base ser rotação própria (det = +1). */
+/** Flips a column if needed so the basis is a proper rotation (det = +1). */
 function ensureProperRotation(r: number[]) {
   const det = r[0] * (r[4] * r[8] - r[5] * r[7]) - r[1] * (r[3] * r[8] - r[5] * r[6]) + r[2] * (r[3] * r[7] - r[4] * r[6]);
   if (det < 0) {

@@ -1,5 +1,5 @@
-// Versão web: o mesmo App do desktop (src/), com o host que roda o pipeline
-// no navegador no lugar dos comandos do Tauri.
+// Web version: the same App as the desktop (src/), with a host that runs the
+// pipeline in the browser instead of Tauri commands.
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "../../src/App";

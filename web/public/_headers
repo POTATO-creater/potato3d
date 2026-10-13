@@ -1,18 +1,18 @@
-# Cabeçalhos da versão web no Cloudflare Workers (wrangler.jsonc). Lido no
-# deploy e nunca servido; o service worker também o deixa de fora do cache.
+# Headers for the web version on Cloudflare Workers (wrangler.jsonc). Read at
+# deploy time and never served; the service worker also leaves it out of the cache.
 #
-# `Referrer-Policy: same-origin` não envia o Referer para outros domínios: o
-# Hugging Face responde 404 (sem CORS) quando o Referer é um *.workers.dev, e
-# o download do modelo RMBG morreria com "Failed to fetch". O segment.ts também
-# pede `no-referrer` no próprio fetch.
+# `Referrer-Policy: same-origin` doesn't send the Referer to other origins:
+# Hugging Face answers 404 (no CORS) when the Referer is a *.workers.dev, and
+# the RMBG model download would die with "Failed to fetch". segment.ts also
+# asks for `no-referrer` on its own fetch.
 /*
   Referrer-Policy: same-origin
 
-# Os arquivos de /assets têm hash no nome: podem ficar em cache para sempre.
+# Files under /assets have a hash in their name: they can be cached forever.
 /assets/*
   Cache-Control: public, max-age=31536000, immutable
 
-# O navegador já ignora o cache HTTP ao procurar versão nova do service worker,
-# mas proxies no caminho não sabem disso.
+# Browsers already bypass the HTTP cache when checking for a new service worker,
+# but proxies along the way don't know that.
 /sw.js
   Cache-Control: no-cache

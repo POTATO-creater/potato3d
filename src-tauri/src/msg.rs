@@ -1,6 +1,6 @@
-//! Mensagens de progresso traduzíveis. A interface procura `key` no catálogo
-//! do idioma escolhido (`src/i18n/`) e preenche o texto com `args`; um
-//! argumento pode ser outra `Msg`.
+//! Translatable progress messages. The UI looks up `key` in the catalog for
+//! the selected language (`src/i18n/`) and fills the text with `args`; an
+//! argument can itself be another `Msg`.
 
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -12,8 +12,8 @@ pub struct Msg {
     pub args: Map<String, Value>,
 }
 
-/// `msg!("poses.matching", pairs = n)`: a chave tem que existir em todos os
-/// catálogos de `src/i18n/`.
+/// `msg!("poses.matching", pairs = n)`: the key must exist in every catalog
+/// under `src/i18n/`.
 #[macro_export]
 macro_rules! msg {
     ($key:literal $(, $name:ident = $val:expr)* $(,)?) => {{
@@ -24,7 +24,7 @@ macro_rules! msg {
     }};
 }
 
-/// Forma crua para a CLI e os logs: `poses.matching {"pairs":120}`.
+/// Raw form for the CLI and logs: `poses.matching {"pairs":120}`.
 impl std::fmt::Display for Msg {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if self.args.is_empty() {
@@ -37,7 +37,7 @@ impl std::fmt::Display for Msg {
 
 #[cfg(test)]
 mod tests {
-    /// Formato lido por `formatMsg` em src/i18n.
+    /// Format read by `formatMsg` in src/i18n.
     #[test]
     fn serializes_key_and_nested_args() {
         let m = crate::msg!("poses.retry", step = crate::msg!("poses.matching", pairs = 12));

@@ -1,5 +1,5 @@
-// Catálogos e escolha do idioma, sem React: também usados pela página do
-// link compartilhado (web/src/share/).
+// Catalogs and language selection, without React: also used by the shared
+// link page (web/src/share/).
 
 import { ptBR, type Args, type Messages } from "./pt-BR";
 import { enUS } from "./en-US";
@@ -13,13 +13,13 @@ export const LOCALES = Object.keys(CATALOGS) as Locale[];
 
 export const LOCALE_KEY = "splatforge.locale.v1";
 
-/** Idioma salvo ou, na primeira vez, o do sistema (inglês se não houver). */
+/** Saved language or, the first time, the system's (English if none matches). */
 export function initialLocale(): Locale {
   try {
     const saved = localStorage.getItem(LOCALE_KEY);
     if (saved && saved in CATALOGS) return saved as Locale;
   } catch {
-    /* armazenamento indisponível */
+    /* storage unavailable */
   }
   for (const lang of navigator.languages ?? [navigator.language]) {
     const l = lang.toLowerCase();

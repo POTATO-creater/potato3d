@@ -1,9 +1,9 @@
-// O mesmo caso do teste erode_shrinks_one_pixel do masks.rs.  pnpm test:web
+// Same case as the erode_shrinks_one_pixel test in masks.rs.  pnpm test:web
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { erode } from "./erode.ts";
 
-test("erosão: encolhe 1 px, sem encolher na borda da imagem", () => {
+test("erosion: shrinks 1 px, but not at the image border", () => {
   const w = 10, h = 8;
   const m = new Uint8Array(w * h);
   for (let y = 2; y < 6; y++) for (let x = 2; x < 6; x++) m[y * w + x] = 255;

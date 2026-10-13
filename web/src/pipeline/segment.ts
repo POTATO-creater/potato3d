@@ -1,6 +1,7 @@
-// Recorte por IA no navegador: RMBG-1.4 no ONNX Runtime Web (WebGPU, com WASM
-// de reserva), com o mesmo pré/pós-processamento de src-tauri/src/masks.rs. Os modelos vêm dos mesmos endereços fixados do
-// instalador, com SHA-256 conferido, e ficam em cache no OPFS.
+// In-browser AI cutout: RMBG-1.4 on ONNX Runtime Web (WebGPU, with WASM as
+// fallback), with the same pre/post-processing as src-tauri/src/masks.rs. Models
+// come from the same pinned URLs as the installer, SHA-256 checked, and are
+// cached in OPFS.
 
 export type ModelId = "rmbg";
 
@@ -22,18 +23,18 @@ export const MODELS: Record<ModelId, ModelSpec> = {
     url: "https://huggingface.co/briaai/RMBG-1.4/resolve/2ceba5a5efaec153162aedea169f76caf9b46cf8/onnx/model.onnx",
     sha256: "8cafcf770b06757c4eaced21b1a88e57fd2b66de01b8045f35f01535ba742e0f",
     bytes: 176_153_355,
-    license: "BRIA RMBG-1.4, uso não comercial",
+    license: "BRIA RMBG-1.4, non-commercial use",
     mean: [0.5, 0.5, 0.5],
     std: [1, 1, 1],
   },
 };
 
-/** Tamanho de entrada: 1024² (achatado, sem manter a proporção). */
+/** Input size: 1024² (squashed, aspect ratio not preserved). */
 export function inputSize(_id: ModelId, _w: number, _h: number): [number, number] {
   return [1024, 1024];
 }
 
-/** RGBA (já no tamanho de entrada) → NCHW normalizado. */
+/** RGBA (already at input size) → normalized NCHW. */
 export function preprocess(rgba: Uint8ClampedArray, iw: number, ih: number, spec: ModelSpec): Float32Array {
   const plane = iw * ih;
   const out = new Float32Array(3 * plane);
@@ -42,10 +43,10 @@ export function preprocess(rgba: Uint8ClampedArray, iw: number, ih: number, spec
   return out;
 }
 
-/** Saída do modelo → u8 no tamanho de entrada. */
+/** Model output → u8 at input size. */
 export function postprocess(_id: ModelId, out: Float32Array): Uint8Array {
   const m = new Uint8Array(out.length);
-  // estica entre mínimo e máximo, a menos que o quadro seja quase constante
+  // min–max stretch, unless the frame is nearly constant
   let lo = Infinity, hi = -Infinity;
   for (const v of out) {
     if (v < lo) lo = v;
@@ -63,10 +64,10 @@ async function sha256(buf: ArrayBuffer) {
 
 const modelsDir = async () => (await navigator.storage.getDirectory()).getDirectoryHandle("models", { create: true });
 
-/** Um arquivo de modelo baixado de um endereço fixo, com SHA-256 conferido. */
+/** A model file downloaded from a pinned URL, SHA-256 checked. */
 export type ModelFile = Pick<ModelSpec, "label" | "file" | "url" | "sha256" | "bytes">;
 
-/** O arquivo já está no cache do OPFS (com o tamanho certo)? */
+/** Is the file already in the OPFS cache (with the right size)? */
 export async function cachedModel(spec: ModelFile): Promise<File | null> {
   try {
     const file = await (await (await modelsDir()).getFileHandle(spec.file)).getFile();
@@ -76,36 +77,36 @@ export async function cachedModel(spec: ModelFile): Promise<File | null> {
   }
 }
 
-/** Baixa o arquivo para o cache, conferindo tamanho e SHA-256. */
+/** Downloads the file into the cache, checking size and SHA-256. */
 export async function downloadModel(
   spec: ModelFile,
   onProgress: (done: number, total: number) => void,
   signal?: AbortSignal,
 ): Promise<ArrayBuffer> {
-  // Sem Referer: o Hugging Face responde 404 (sem CORS) quando ele é um
-  // *.workers.dev, onde a versão web é publicada.
+  // No Referer: Hugging Face answers 404 (without CORS) when it is a
+  // *.workers.dev origin, where the web version is deployed.
   const res = await fetch(spec.url, { signal, referrerPolicy: "no-referrer" });
-  if (!res.ok || !res.body) throw new Error(`${spec.label}: download falhou (${res.status})`);
+  if (!res.ok || !res.body) throw new Error(`${spec.label}: download failed (${res.status})`);
   const buf = new Uint8Array(spec.bytes);
   const reader = res.body.getReader();
   let n = 0;
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
-    if (n + value.length > buf.length) throw new Error(`${spec.label}: arquivo maior que o esperado`);
+    if (n + value.length > buf.length) throw new Error(`${spec.label}: file larger than expected`);
     buf.set(value, n);
     n += value.length;
     onProgress(n, spec.bytes);
   }
-  if (n !== spec.bytes) throw new Error(`${spec.label}: tamanho ${n}, esperado ${spec.bytes}`);
-  if ((await sha256(buf.buffer)) !== spec.sha256) throw new Error(`${spec.label}: SHA-256 não confere`);
+  if (n !== spec.bytes) throw new Error(`${spec.label}: size ${n}, expected ${spec.bytes}`);
+  if ((await sha256(buf.buffer)) !== spec.sha256) throw new Error(`${spec.label}: SHA-256 mismatch`);
   const w = await (await (await modelsDir()).getFileHandle(spec.file, { create: true })).createWritable();
   await w.write(buf);
   await w.close();
   return buf.buffer;
 }
 
-/** Arquivo do cache, ou baixado na hora. */
+/** File from the cache, or downloaded on the spot. */
 export async function loadModel(spec: ModelFile, onProgress: (done: number, total: number) => void): Promise<ArrayBuffer> {
   const file = await cachedModel(spec);
   return file ? file.arrayBuffer() : downloadModel(spec, onProgress);
@@ -113,8 +114,8 @@ export async function loadModel(spec: ModelFile, onProgress: (done: number, tota
 
 export type Ort = typeof import("onnxruntime-web/webgpu");
 
-/** O .wasm do ONNX Runtime publicado gzipado (web/ort-wasm-plugin.ts). Se o
- *  servidor já tiver descompactado (Content-Encoding), usa como veio. */
+/** The ONNX Runtime .wasm, deployed gzipped (web/ort-wasm-plugin.ts). If the
+ *  server already decompressed it (Content-Encoding), use it as is. */
 async function ortWasmBinary(url: string): Promise<ArrayBuffer> {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`ONNX Runtime: ${url} (${res.status})`);
@@ -124,10 +125,10 @@ async function ortWasmBinary(url: string): Promise<ArrayBuffer> {
   return new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer();
 }
 
-/** ONNX Runtime Web pronto para criar sessões. */
+/** ONNX Runtime Web, ready to create sessions. */
 export async function loadOrt(): Promise<Ort> {
   const ort = await import("onnxruntime-web/webgpu");
-  // Import dinâmico: os testes (Node) importam este arquivo e não resolvem módulos virtuais do Vite.
+  // Dynamic import: the (Node) tests import this file and can't resolve Vite virtual modules.
   const { default: ortWasmGz } = await import("virtual:ort-wasm-gz");
   if (ortWasmGz) ort.env.wasm.wasmBinary ??= await ortWasmBinary(ortWasmGz);
   return ort;
@@ -154,13 +155,13 @@ export class Segmenter {
       const s = await ort.InferenceSession.create(model, { ...opts, executionProviders: ["webgpu"] });
       return new Segmenter(ort, s, id, `${MODELS[id].label} · WebGPU`);
     } catch (e) {
-      console.warn("WebGPU indisponível para o modelo, usando WASM", e);
+      console.warn("WebGPU unavailable for the model, using WASM", e);
       const s = await ort.InferenceSession.create(model, { ...opts, executionProviders: ["wasm"] });
       return new Segmenter(ort, s, id, `${MODELS[id].label} · WASM`);
     }
   }
 
-  /** Máscara (255 = sujeito) no tamanho do frame. */
+  /** Mask (255 = subject) at frame size. */
   async mask(frame: ImageBitmap | OffscreenCanvas, w: number, h: number): Promise<Uint8Array> {
     const [iw, ih] = inputSize(this.id, w, h);
     const c = new OffscreenCanvas(iw, ih);
@@ -183,7 +184,7 @@ export class Segmenter {
   }
 }
 
-/** Redimensiona uma máscara u8 com o filtro do navegador. */
+/** Resizes a u8 mask with the browser's filter. */
 export function resizeMask(m: Uint8Array, w: number, h: number, W: number, H: number): Uint8Array {
   if (w === W && h === H) return m;
   const src = new OffscreenCanvas(w, h);

@@ -1,9 +1,9 @@
-//! Localiza os binários externos em macOS, Windows e Linux.
+//! Locates the external binaries on macOS, Windows and Linux.
 //!
-//! Apps GUI não herdam o PATH do shell (no macOS) nem veem alterações de
-//! PATH feitas depois do login (no Windows), então além do PATH procuramos
-//! nos lugares onde os instaladores comuns colocam os executáveis, e na
-//! pasta de ferramentas do próprio app (preenchida por `pnpm setup:tools`).
+//! GUI apps don't inherit the shell's PATH (on macOS) nor see PATH changes
+//! made after login (on Windows), so besides PATH we look where the common
+//! installers put executables, and in the app's own tools folder (filled by
+//! `pnpm setup:tools`).
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -16,15 +16,15 @@ pub struct Tools {
     pub ffmpeg: Option<PathBuf>,
     pub ffprobe: Option<PathBuf>,
     pub colmap: Option<PathBuf>,
-    /// COLMAP compilado com CUDA: extração, matching e bundle adjustment na GPU.
+    /// COLMAP built with CUDA: extraction, matching and bundle adjustment on the GPU.
     pub colmap_cuda: bool,
     pub brush: Option<PathBuf>,
-    /// macOS: recortador Vision (sidecar `splatforge_mask`).
+    /// macOS: Vision-based masker (sidecar `splatforge_mask`).
     pub masker: Option<PathBuf>,
-    /// Windows: modelos de recorte baixados pelo instalador de ferramentas.
+    /// Windows: masking models downloaded by the tools installer.
     pub birefnet_model: Option<PathBuf>,
     pub modnet_model: Option<PathBuf>,
-    /// Windows e macOS (Apple Silicon): RMBG-1.4, baixado sob demanda.
+    /// Windows and macOS (Apple Silicon): RMBG-1.4, downloaded on demand.
     pub rmbg_model: Option<PathBuf>,
     /// "macos" | "windows" | "linux"
     pub os: &'static str,
@@ -50,24 +50,24 @@ impl Tools {
 
     pub fn require(path: &Option<PathBuf>, name: &str, hint: &str) -> anyhow::Result<PathBuf> {
         path.clone()
-            .ok_or_else(|| anyhow::anyhow!("{name} não encontrado. {hint}"))
+            .ok_or_else(|| anyhow::anyhow!("{name} not found. {hint}"))
     }
 }
 
-/// Como instalar cada ferramenta neste sistema (mensagens de erro).
+/// How to install each tool on this system (for error messages).
 pub fn install_hint(tool: &str) -> &'static str {
     match (std::env::consts::OS, tool) {
-        ("macos", "ffmpeg") => "Instale com: brew install ffmpeg",
-        ("macos", "colmap") => "Instale com: brew install colmap",
-        (_, "brush") => "Rode `pnpm setup:tools` para baixar o Brush.",
-        ("windows" | "macos", "model") => "Use \"Instalar ferramentas\" no app para baixar o modelo de recorte.",
-        ("windows", _) => "Rode `pnpm setup:tools` para baixar as ferramentas.",
-        (_, "ffmpeg") => "Instale o ffmpeg pelo gerenciador de pacotes do sistema.",
-        _ => "Instale o COLMAP 4.x (https://colmap.github.io).",
+        ("macos", "ffmpeg") => "Install with: brew install ffmpeg",
+        ("macos", "colmap") => "Install with: brew install colmap",
+        (_, "brush") => "Run `pnpm setup:tools` to download Brush.",
+        ("windows" | "macos", "model") => "Use \"Install tools\" in the app to download the masking model.",
+        ("windows", _) => "Run `pnpm setup:tools` to download the tools.",
+        (_, "ffmpeg") => "Install ffmpeg with your system package manager.",
+        _ => "Install COLMAP 4.x (https://colmap.github.io).",
     }
 }
 
-/// Pasta onde `pnpm setup:tools` instala as ferramentas baixadas.
+/// Folder where `pnpm setup:tools` installs the downloaded tools.
 pub fn tools_root() -> Option<PathBuf> {
     let base = if cfg!(windows) {
         std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
@@ -85,10 +85,10 @@ pub const BIREFNET_FILE: &str = "birefnet_lite.onnx";
 pub const MODNET_FILE: &str = "modnet.onnx";
 pub const RMBG_FILE: &str = "rmbg14.onnx";
 
-/// Este build traz o ONNX Runtime (Windows; macOS em Apple Silicon).
+/// This build ships ONNX Runtime (Windows; macOS on Apple Silicon).
 pub const ONNX_AVAILABLE: bool = cfg!(any(windows, all(target_os = "macos", target_arch = "aarch64")));
 
-/// Onde o instalador grava os modelos de recorte.
+/// Where the installer saves the masking models.
 pub fn models_dir() -> Option<PathBuf> {
     tools_root().map(|r| r.join("models"))
 }
@@ -160,7 +160,7 @@ fn find(name: &str, env_override: &str) -> Option<PathBuf> {
         .find(|p| is_executable(p))
 }
 
-/// Sidecars (`externalBin`) ficam junto do executável do app, em dev e no bundle.
+/// Sidecars (`externalBin`) sit next to the app executable, both in dev and in the bundle.
 fn find_sidecar(name: &str, env_override: &str) -> Option<PathBuf> {
     if let Some(p) = std::env::var_os(env_override).map(PathBuf::from) {
         if is_executable(&p) {
@@ -176,7 +176,7 @@ fn find_sidecar(name: &str, env_override: &str) -> Option<PathBuf> {
     find(name, env_override)
 }
 
-/// A primeira linha de `colmap help` diz "with CUDA" ou "without GPU support".
+/// The first line of `colmap help` says "with CUDA" or "without GPU support".
 fn colmap_has_cuda(colmap: &Path) -> bool {
     let mut cmd = std::process::Command::new(colmap);
     cmd.arg("help").stdin(Stdio::null());

@@ -1,20 +1,19 @@
 #!/usr/bin/env node
-// Roda o SAM 2.1 da versão web (web/src/pipeline/sam2.ts) num Chrome headless
-// sobre uma pasta de frames, mede o tempo por frame e grava os logits (256²,
-// float32) de cada frame, para comparar com a propagação do Transformers.
-// Precisa do `pnpm web:dev` rodando com `WEB_FS_ANY=1`.
+// Runs the web version's SAM 2.1 (web/src/pipeline/sam2.ts) in headless Chrome
+// over a folder of frames, measures time per frame and writes each frame's
+// logits (256², float32), for comparison with Transformers' propagation.
+// Requires `pnpm web:dev` running with `WEB_FS_ANY=1`.
 //
-//   node scripts/web-bench/sam2.mjs <frames> <saida> --box x0,y0,x1,y1 [--at K] [--models <pasta>] [--n N] [--masks]
+//   node scripts/web-bench/sam2.mjs <frames> <output> --box x0,y0,x1,y1 [--at K] [--models <folder>] [--n N] [--masks]
 //
-// --at: frame do prompt (padrão 0); propaga para a frente e depois para trás,
-// como o recorte do app. --rmbg: grava as máscaras do RMBG-1.4 (frame a frame)
-// em vez do SAM, para comparar.
-// --models: pasta com os quatro .onnx (copiados para o OPFS antes, para não
-// baixar os modelos a cada perfil novo do Chrome). --variant fp16|fp32: que
-// grafos usar (padrão: os da GPU, fp16 com shader-f16); --models precisa ser
-// da mesma variante. --masks: também grava as
-// máscaras PNG do tamanho do frame. --url: dev server (padrão
-// http://localhost:1440).
+// --at: prompt frame (default 0); propagates forward then backward, like the
+// app's masking. --rmbg: writes RMBG-1.4 masks (frame by frame) instead of SAM,
+// for comparison.
+// --models: folder with the four .onnx files (copied into OPFS first, so the
+// models aren't downloaded for every fresh Chrome profile). --variant fp16|fp32:
+// which graphs to use (default: the GPU's, fp16 with shader-f16); --models must
+// be the same variant. --masks: also writes frame-sized PNG masks. --url: dev
+// server (default http://localhost:1440).
 
 import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
@@ -29,7 +28,7 @@ const opt = (name, def) => {
 const box = opt("box")?.split(",").map(Number);
 const rmbg = rest.includes("--rmbg");
 if (!framesDir || !outDir || (box?.length !== 4 && !rmbg)) {
-  console.error("uso: sam2.mjs <frames> <saida> --box x0,y0,x1,y1 [--models <pasta>] [--n N] [--masks]");
+  console.error("usage: sam2.mjs <frames> <output> --box x0,y0,x1,y1 [--models <folder>] [--n N] [--masks]");
   process.exit(2);
 }
 const base = opt("url", "http://localhost:1440");
@@ -56,8 +55,8 @@ const chrome = spawn(
   ],
   { stdio: "ignore" },
 );
-// Cada execução cria um perfil (com cópias dos modelos no OPFS): apaga ao sair,
-// senão eles acumulam gigabytes no disco.
+// Each run creates a profile (with copies of the models in OPFS): delete it on
+// exit, otherwise they pile up gigabytes on disk.
 process.on("exit", () => {
   chrome.kill("SIGKILL");
   try {
@@ -73,7 +72,7 @@ for (let i = 0; i < 100 && !target; i++) {
     target = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).find((t) => t.type === "page");
   } catch {}
 }
-if (!target) throw new Error("Chrome não abriu a porta de depuração");
+if (!target) throw new Error("Chrome did not open the debugging port");
 const ws = new WebSocket(target.webSocketDebuggerUrl);
 await new Promise((r) => (ws.onopen = r));
 let nextId = 0;
@@ -96,12 +95,12 @@ const send = (method, params = {}) =>
   });
 const evaluate = async (expression) => {
   const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
-  if (r.result?.exceptionDetails) throw new Error(r.result.exceptionDetails.exception?.description ?? "erro na página");
+  if (r.result?.exceptionDetails) throw new Error(r.result.exceptionDetails.exception?.description ?? "page error");
   return r.result?.result?.value;
 };
 await send("Runtime.enable");
 await send("Page.enable");
-// Uma página do mesmo servidor só para ter a origem (OPFS, import dos módulos).
+// Any page from the same server, just to get the origin (OPFS, module imports).
 await send("Page.navigate", { url: `${base}/share.html` });
 await sleep(1500);
 
@@ -149,7 +148,7 @@ await evaluate(`(async () => {
   window.sam2 = await import('/src/pipeline/sam2-math.ts');
   window.png = await import('/src/pipeline/png.ts');
 })()`);
-console.log(`${await evaluate("tracker.backend")}: sessões em ${((Date.now() - t0) / 1000).toFixed(1)} s`);
+console.log(`${await evaluate("tracker.backend")}: sessions in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
 
 const at = Number(opt("at", 0));
 const order = [...frames.keys()].slice(at).concat([...frames.keys()].slice(0, at).reverse());
@@ -176,10 +175,10 @@ for (const i of order) {
   const stem = frames[i].replace(/\.[^.]+$/, "");
   writeFileSync(join(outDir, `${stem}.f32`), Buffer.from(r.logits, "base64"));
   if (r.mask) writeFileSync(join(outDir, `${stem}.png`), Buffer.from(r.mask, "base64"));
-  console.log(`${stem}: ${r.ms.toFixed(0)} ms, objeto ${r.score.toFixed(2)}`);
+  console.log(`${stem}: ${r.ms.toFixed(0)} ms, object ${r.score.toFixed(2)}`);
 }
 const steady = times.slice(2);
 console.log(
-  `${frames.length} frames; média ${(steady.reduce((a, b) => a + b, 0) / Math.max(steady.length, 1)).toFixed(0)} ms/frame (sem os 2 primeiros)`,
+  `${frames.length} frames; mean ${(steady.reduce((a, b) => a + b, 0) / Math.max(steady.length, 1)).toFixed(0)} ms/frame (excluding the first 2)`,
 );
 process.exit(0);

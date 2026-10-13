@@ -1,7 +1,7 @@
-// Matching por força bruta de descritores binários (AKAZE, 486 bits em 16
-// u32) num compute shader WebGPU: para cada descritor de A, o melhor e o
-// segundo melhor de B por distância de Hamming. Os pares são processados em
-// lotes e nos dois sentidos, para o teste de razão e a checagem mútua.
+// Brute-force matching of binary descriptors (AKAZE, 486 bits in 16 u32) in a
+// WebGPU compute shader: for each descriptor in A, the best and second-best in
+// B by Hamming distance. Pairs are processed in batches and in both
+// directions, for the ratio test and the mutual check.
 
 const WGSL = /* wgsl */ `
 struct Job { offA: u32, nA: u32, offB: u32, nB: u32, out: u32, _p0: u32, _p1: u32, _p2: u32 }
@@ -48,7 +48,7 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
 export interface PairMatches {
   a: number;
   b: number;
-  /** Índices de feature em A e B, casados nos dois sentidos. */
+  /** Feature indices in A and B, matched in both directions. */
   ia: Uint32Array;
   ib: Uint32Array;
 }
@@ -61,7 +61,7 @@ export class HammingMatcher {
 
   static async create(): Promise<HammingMatcher> {
     const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
-    if (!adapter) throw new Error("Sem adaptador WebGPU.");
+    if (!adapter) throw new Error("No WebGPU adapter.");
     const device = await adapter.requestDevice({
       requiredLimits: {
         maxStorageBufferBindingSize: adapter.limits.maxStorageBufferBindingSize,
@@ -74,8 +74,8 @@ export class HammingMatcher {
   }
 
   /**
-   * Casa os pares pedidos. `ratio`: teste de Lowe; `maxDist`: distância de
-   * Hamming máxima (de 486 bits).
+   * Matches the requested pairs. `ratio`: Lowe's test; `maxDist`: maximum
+   * Hamming distance (out of 486 bits).
    */
   async match(
     descs: Uint32Array[],
@@ -100,7 +100,7 @@ export class HammingMatcher {
     const out: PairMatches[] = [];
     for (let s = 0; s < pairs.length; s += batch) {
       const chunk = pairs.slice(s, s + batch);
-      // dois jobs por par: A→B e B→A
+      // two jobs per pair: A→B and B→A
       const jobs = new Uint32Array(chunk.length * 2 * 8);
       let outLen = 0;
       const outOff: number[] = [];
@@ -147,7 +147,7 @@ export class HammingMatcher {
           const packed = res[ab + 2 * i + 1];
           const best = packed & 0xffff, second = packed >>> 16;
           if (best > maxDist || best > ratio * second) continue;
-          if (res[ba + 2 * j] !== i) continue; // mútuo
+          if (res[ba + 2 * j] !== i) continue; // mutual
           ia.push(i);
           ib.push(j);
         }

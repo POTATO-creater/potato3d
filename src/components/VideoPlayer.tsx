@@ -11,15 +11,15 @@ interface Trim {
 
 interface Props {
   src: string;
-  /** Duração do ffprobe, usada até o vídeo carregar os metadados. */
+  /** Duration from ffprobe, used until the video loads its metadata. */
   duration: number;
   fps: number;
   trim: Trim;
   onTrim: (t: Trim) => void;
-  /** Bloqueia a edição do trecho (o vídeo continua navegável). */
+  /** Locks trim editing (the video stays navigable). */
   locked?: boolean;
   videoRef: RefObject<HTMLVideoElement | null>;
-  /** Marcação do sujeito (SAM 2.1); com `onPrompt`, o player ganha o modo de marcar. */
+  /** Subject marking (SAM 2.1); with `onPrompt`, the player gets a marking mode. */
   prompt?: SubjectPrompt | null;
   onPrompt?: (p: SubjectPrompt | null) => void;
 }
@@ -65,7 +65,7 @@ function Svg({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** Player compacto com linha do tempo que mostra e edita o trecho usado. */
+/** Compact player with a timeline that shows and edits the trim range. */
 export function VideoPlayer({ src, duration: probed, fps, trim, onTrim, locked, videoRef, prompt, onPrompt }: Props) {
   const { t } = useI18n();
   const tp = t.player;
@@ -78,16 +78,16 @@ export function VideoPlayer({ src, duration: probed, fps, trim, onTrim, locked, 
   const [marking, setMarking] = useState(false);
   const [aspect, setAspect] = useState(16 / 9);
   const end = trim.end ?? duration;
-  // Só se marca dentro do trecho: fora dele não há frame para a marcação.
+  // Marking only inside the trim range: outside it there's no frame to mark.
   const inTrim = time >= trim.start - 0.02 && time <= end + 0.02;
   const editing = marking && !!onPrompt && inTrim;
-  // A marcação vale para um frame: aparece nele (e enquanto se marca).
+  // A marking belongs to one frame: shown on it (and while marking).
   const promptHere = !!prompt && Math.abs(time - (prompt.time ?? 0)) < 1.5 / (fps || 30);
   const pct = (t: number) => `${(clamp(t / (duration || 1), 0, 1) * 100).toFixed(3)}%`;
 
   useEffect(() => setDuration(probed), [probed, src]);
 
-  // Playhead suave (timeupdate só dispara ~4x/s) e repetição do trecho.
+  // Smooth playhead (timeupdate only fires ~4x/s) and trim looping.
   useEffect(() => {
     if (!playing) return;
     let raf = 0;
@@ -188,7 +188,7 @@ export function VideoPlayer({ src, duration: probed, fps, trim, onTrim, locked, 
             editing={editing}
             onChange={(m) => {
               const t = videoRef.current?.currentTime ?? time;
-              // Marcação em outro frame recomeça do zero.
+              // Marking on another frame starts from scratch.
               const base: SubjectPrompt = promptHere && prompt ? prompt : { time: t, box: null, points: [] };
               onPrompt!(withMarks(base, m));
             }}
@@ -235,7 +235,7 @@ export function VideoPlayer({ src, duration: probed, fps, trim, onTrim, locked, 
             className={`pbtn ${marking ? "on" : ""}`}
             onClick={() => {
               videoRef.current?.pause();
-              // Fora do trecho, leva ao início dele para marcar.
+              // Outside the trim range, jump to its start to mark.
               if (!inTrim) {
                 seek(trim.start);
                 setMarking(true);

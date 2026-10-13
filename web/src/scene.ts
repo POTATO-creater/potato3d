@@ -1,5 +1,5 @@
-// Port de src-tauri/src/scene.rs: lê o modelo binário do COLMAP do OPFS
-// para enquadrar o visualizador e resumir as poses.
+// Port of src-tauri/src/scene.rs: reads the binary COLMAP model from OPFS to
+// frame the viewer and summarize the poses.
 
 import type { ModelStats, SceneFrame } from "../../src/lib/api";
 
@@ -36,7 +36,7 @@ class Bin {
   }
 }
 
-/** Rotação mundo→câmera a partir do quatérnio (w, x, y, z) do COLMAP. */
+/** World→camera rotation from COLMAP's (w, x, y, z) quaternion. */
 function rotation([w, x, y, z]: number[]) {
   return [
     [1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)],
@@ -51,11 +51,11 @@ function median(v: number[]) {
   return v[v.length >> 1];
 }
 
-/** Modelos de câmera do COLMAP com uma focal só (f, cx, cy, …); os demais
- *  começam com fx, fy. */
+/** COLMAP camera models with a single focal length (f, cx, cy, …); the rest
+ *  start with fx, fy. */
 const SINGLE_FOCAL = new Set([0, 2, 3, 8, 9]);
 
-/** Lente da primeira câmera do cameras.bin. */
+/** Lens of the first camera in cameras.bin. */
 export function readLens(camerasBin: ArrayBuffer): SceneFrame["lens"] {
   const r = new Bin(camerasBin);
   if (!r.u64()) return undefined;
@@ -68,7 +68,7 @@ export function readLens(camerasBin: ArrayBuffer): SceneFrame["lens"] {
   return { fovY: 2 * Math.atan(h / 2 / fy), aspect: w / h };
 }
 
-/** Largura, altura e focais da primeira câmera do cameras.bin. */
+/** Width, height and focal lengths of the first camera in cameras.bin. */
 export function readIntrinsics(camerasBin: ArrayBuffer): { width: number; height: number; fx: number; fy: number } | null {
   const r = new Bin(camerasBin);
   if (!r.u64()) return null;
@@ -79,7 +79,7 @@ export function readIntrinsics(camerasBin: ArrayBuffer): { width: number; height
   return { width, height, fx: f0, fy: SINGLE_FOCAL.has(model) ? f0 : f1 };
 }
 
-/** Poses do images.bin (mundo → câmera), em ordem de nome. */
+/** Poses from images.bin (world → camera), in name order. */
 export function readPoses(imagesBin: ArrayBuffer): { name: string; qvec: [number, number, number, number]; tvec: [number, number, number] }[] {
   const r = new Bin(imagesBin);
   const n = r.u64();
@@ -97,7 +97,7 @@ export function readPoses(imagesBin: ArrayBuffer): { name: string; qvec: [number
 }
 
 export function readFrame(imagesBin: ArrayBuffer, pointsBin: ArrayBuffer | null): SceneFrame | null {
-  // images.bin: centro = -Rᵀt; "para cima" da câmera COLMAP = -Y → Rᵀ(0,-1,0).
+  // images.bin: center = -Rᵀt; COLMAP camera "up" = -Y → Rᵀ(0,-1,0).
   const r = new Bin(imagesBin);
   const n = r.u64();
   const cams: { name: string; c: [number, number, number] }[] = [];
@@ -118,7 +118,7 @@ export function readFrame(imagesBin: ArrayBuffer, pointsBin: ArrayBuffer | null)
   }
   if (!cams.length) return null;
   cams.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-  // O Gausify Orbit grava os frames como 00000.jpg, 00001.jpg, …
+  // Gausify Orbit writes frames as 00000.jpg, 00001.jpg, …
   const frameIndices = cams.map(({ name }, i) => {
     const stem = name.split("/").pop()!.replace(/\.[^.]+$/, "");
     return /^\d+$/.test(stem) ? Number(stem) : i;
@@ -126,7 +126,7 @@ export function readFrame(imagesBin: ArrayBuffer, pointsBin: ArrayBuffer | null)
   const cameras = cams.map((c) => c.c);
   const len = Math.max(Math.hypot(up[0], up[1], up[2]), 1e-9);
 
-  // points3D.bin: só as coordenadas importam.
+  // points3D.bin: only the coordinates matter.
   const xs: number[] = [];
   const ys: number[] = [];
   const zs: number[] = [];
@@ -138,7 +138,7 @@ export function readFrame(imagesBin: ArrayBuffer, pointsBin: ArrayBuffer | null)
       xs.push(p.f64());
       ys.push(p.f64());
       zs.push(p.f64());
-      p.skip(3 + 8); // rgb, erro
+      p.skip(3 + 8); // rgb, error
       p.skip(p.u64() * 8);
     }
   }
@@ -150,7 +150,7 @@ export function readFrame(imagesBin: ArrayBuffer, pointsBin: ArrayBuffer | null)
   return { center, up: [up[0] / len, up[1] / len, up[2] / len], radius, cameras, frameIndices };
 }
 
-/** Resumo de um modelo pronto (ex.: dataset importado). */
+/** Summary of a ready-made model (e.g. an imported dataset). */
 export function modelStats(imagesBin: ArrayBuffer, pointsBin: ArrayBuffer | null, total: number, mapper: string): ModelStats {
   const registered = Number(new DataView(imagesBin).getBigUint64(0, true));
   let points = 0, err = 0;

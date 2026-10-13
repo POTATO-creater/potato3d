@@ -1,6 +1,6 @@
-// ZIP do pacote do projeto (.gorbit): ida e volta, e compatibilidade com
-// leitores e gravadores de fora (Python zipfile, como o crate `zip` do
-// desktop).  pnpm test:web
+// Project package ZIP (.gorbit): round trip, and compatibility with external
+// readers and writers (Python zipfile, standing in for the desktop's `zip`
+// crate).  pnpm test:web
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -31,18 +31,18 @@ const python = (() => {
   }
 })();
 
-test("crc32 do ZIP", () => {
+test("ZIP crc32", () => {
   assert.equal(crc32(new TextEncoder().encode("123456789")), 0xcbf43926);
   const a = bytes(1000, 7);
   assert.equal(crc32(a.subarray(300), crc32(a.subarray(0, 300))), crc32(a));
 });
 
-test("ida e volta: STORE vira fatia, DEFLATE descompacta", async () => {
+test("round trip: STORE becomes a slice, DEFLATE decompresses", async () => {
   const files = {
     "manifest.json": { data: new TextEncoder().encode(JSON.stringify({ ação: "ç" })), deflate: true },
     "dataset/images/00001.jpg": { data: bytes(200_000, 13), deflate: false },
     "dataset/sparse/0/points3D.bin": { data: new Uint8Array(300_000).fill(9), deflate: true },
-    "vazio.bin": { data: new Uint8Array(0), deflate: true },
+    "empty.bin": { data: new Uint8Array(0), deflate: true },
   };
   const blob = await build(files);
   const entries = await readZip(blob);
@@ -52,11 +52,11 @@ test("ida e volta: STORE vira fatia, DEFLATE descompacta", async () => {
     assert.equal(e.size, f.data.length);
     assert.deepEqual(new Uint8Array(await (await entryBlob(blob, e)).arrayBuffer()), f.data);
   }
-  // Compactado de verdade.
+  // Actually compressed.
   assert.ok(entries.get("dataset/sparse/0/points3D.bin")!.csize < 10_000);
 });
 
-test("gravado aqui, lido pelo Python (CRC e tamanhos)", { skip: !python && "sem python3" }, async () => {
+test("written here, read by Python (CRC and sizes)", { skip: !python && "no python3" }, async () => {
   const dir = mkdtempSync(join(tmpdir(), "gorbit-"));
   const path = join(dir, "a.gorbit");
   const img = bytes(70_000, 5);
@@ -76,7 +76,7 @@ test("gravado aqui, lido pelo Python (CRC e tamanhos)", { skip: !python && "sem 
   assert.equal(sha, createHash("sha1").update(img).digest("hex"));
 });
 
-test("gravado pelo Python, lido aqui (com e sem compressão)", { skip: !python && "sem python3" }, async () => {
+test("written by Python, read here (with and without compression)", { skip: !python && "no python3" }, async () => {
   const dir = mkdtempSync(join(tmpdir(), "gorbit-"));
   const path = join(dir, "b.gorbit");
   execFileSync("python3", [

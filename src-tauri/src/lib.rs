@@ -45,8 +45,8 @@ async fn probe_video(path: String) -> CmdResult<frames::VideoInfo> {
     frames::probe(&ffprobe, &PathBuf::from(path)).await.map_err(|e| format!("{e:#}"))
 }
 
-/// Imagens soltas e pastas de frames → lista ordenada (pode varrer uma pasta
-/// grande num disco lento, então fora da thread principal).
+/// Loose images and frame folders → sorted list (may scan a large folder on a
+/// slow disk, so it runs off the main thread).
 #[tauri::command]
 async fn probe_images(paths: Vec<String>) -> CmdResult<frames::ImageSetInfo> {
     let paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
@@ -87,8 +87,8 @@ struct ExportProgress {
     message: msg::Msg,
 }
 
-/// Roda fora do runtime assíncrono: é CPU pura (rayon) e leva de décimos de
-/// segundo a ~15 s (SOG com SH grau 3 e 1M de gaussianas).
+/// Runs outside the async runtime: it is pure CPU work (rayon) and takes from
+/// tenths of a second to ~15 s (SOG with SH degree 3 and 1M gaussians).
 #[tauri::command]
 async fn export_splat(
     project_dir: String,
@@ -97,15 +97,15 @@ async fn export_splat(
     state: State<'_, AppState>,
 ) -> CmdResult<export::ExportStats> {
     if state.job.lock().unwrap().as_ref().is_some_and(|t| !t.is_cancelled()) {
-        return Err("espere o processamento terminar para exportar".into());
+        return Err("wait for processing to finish before exporting".into());
     }
     if state.exporting.swap(true, std::sync::atomic::Ordering::SeqCst) {
-        return Err("já existe uma exportação em andamento".into());
+        return Err("an export is already in progress".into());
     }
     let result = tauri::async_runtime::spawn_blocking(move || {
         let mut last = std::time::Instant::now() - std::time::Duration::from_secs(1);
         pipeline::export_project(&project_dir, &options, |fraction, message| {
-            // ~15 atualizações por segundo bastam para a barra.
+            // ~15 updates per second are enough for the progress bar.
             if last.elapsed().as_millis() >= 66 || fraction >= 1.0 {
                 last = std::time::Instant::now();
                 let _ = on_progress.send(ExportProgress { fraction, message: message.clone() });
@@ -117,8 +117,8 @@ async fn export_splat(
     result.map_err(err)?.map_err(|e| format!("{e:#}"))
 }
 
-/// Pode rodar com um job em andamento: a interface só pede as etapas que
-/// ele não está reescrevendo.
+/// May run while a job is in progress: the UI only asks for the stages it is
+/// not rewriting.
 #[tauri::command]
 async fn pack_project(request: package::PackRequest, on_progress: Channel<f32>) -> CmdResult<package::PackStats> {
     tauri::async_runtime::spawn_blocking(move || package::pack(&request, throttled(on_progress)))
@@ -135,7 +135,7 @@ async fn unpack_project(path: String, on_progress: Channel<f32>) -> CmdResult<pa
         .map_err(|e| format!("{e:#}"))
 }
 
-/// ~15 atualizações por segundo bastam para a barra.
+/// ~15 updates per second are enough for the progress bar.
 fn throttled(channel: Channel<f32>) -> impl FnMut(f32) {
     let mut last = std::time::Instant::now() - std::time::Duration::from_secs(1);
     move |fraction| {
@@ -150,10 +150,10 @@ fn throttled(channel: Channel<f32>) -> impl FnMut(f32) {
 fn start_job(config: JobConfig, on_event: Channel<JobEvent>, state: State<'_, AppState>) -> CmdResult<()> {
     let mut job = state.job.lock().unwrap();
     if job.as_ref().is_some_and(|t| !t.is_cancelled()) {
-        return Err("já existe um processamento em andamento".into());
+        return Err("processing is already in progress".into());
     }
     if state.exporting.load(std::sync::atomic::Ordering::SeqCst) {
-        return Err("espere a exportação terminar".into());
+        return Err("wait for the export to finish".into());
     }
     let token = CancellationToken::new();
     *job = Some(token.clone());
@@ -163,7 +163,7 @@ fn start_job(config: JobConfig, on_event: Channel<JobEvent>, state: State<'_, Ap
     });
     tauri::async_runtime::spawn(async move {
         pipeline::run(config, tools, emit, token.clone()).await;
-        // Marca como encerrado para liberar um novo job.
+        // Mark as finished so a new job can start.
         token.cancel();
     });
     Ok(())
@@ -181,13 +181,13 @@ async fn install_plan(rmbg: bool) -> CmdResult<installer::Plan> {
     installer::plan(rmbg).await.map_err(|e| format!("{e:#}"))
 }
 
-/// O plano é recalculado aqui (URLs e hashes nunca vêm da interface).
+/// The plan is recomputed here (URLs and hashes never come from the UI).
 #[tauri::command]
 async fn install_tools(rmbg: bool, on_event: Channel<installer::InstallEvent>, state: State<'_, AppState>) -> CmdResult<()> {
     let plan = installer::plan(rmbg).await.map_err(|e| format!("{e:#}"))?;
     let mut slot = state.install.lock().unwrap();
     if slot.as_ref().is_some_and(|t| !t.is_cancelled()) {
-        return Err("a instalação já está em andamento".into());
+        return Err("installation is already in progress".into());
     }
     let token = CancellationToken::new();
     *slot = Some(token.clone());

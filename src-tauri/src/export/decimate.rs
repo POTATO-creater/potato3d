@@ -1,46 +1,45 @@
-//! Decimação: reduz a quantidade de gaussianas fundindo as *parecidas*.
+//! Decimation: reduces the gaussian count by merging *similar* ones.
 //!
-//! Port do `sharp-decimate.ts` do WebGaussian, que segue o esquema geracional
-//! por pares do splat-transform (PlayCanvas, MIT): a cada geração, cada splat
-//! acha os vizinhos mais baratos de fundir (hash espacial → vizinhos mais
-//! próximos → custo da aresta), grupos disjuntos (pares, fechados em cadeia
-//! até 4 membros) são casados gulosamente em ordem de custo e cada grupo vira
-//! uma gaussiana por casamento de momentos. Repete até chegar ao alvo.
+//! Port of WebGaussian's `sharp-decimate.ts`, which follows splat-transform's
+//! generational pairwise scheme (PlayCanvas, MIT): each generation, every
+//! splat finds the cheapest neighbors to merge with (spatial hash → nearest
+//! neighbors → edge cost), disjoint groups (pairs, chain-closed up to 4
+//! members) are greedily matched in cost order, and each group becomes one
+//! gaussian by moment matching. Repeats until the target is reached.
 //!
-//! - Custo geométrico = aumento de entropia da fusão em forma fechada
-//!   (½·logdet(Σm) − Σ pₖ·½·logdetₖ): penaliza distância e formas diferentes.
-//! - Custo de cor = |Δf_dc|², o mesmo critério do splat-transform.
-//! - Pesos e opacidade pelo modelo de "tinta": cada membro pesa
-//!   `opacidade × área do elipsoide`, e a opacidade fundida redistribui a tinta
-//!   total sobre a área do splat resultante (limitada a 1). Conservar a tinta
-//!   mantém as superfícies fechadas; tirar a média das opacidades abre buracos
-//!   translúcidos.
-//! - Diferente do WebGaussian (SHARP só tem DC), as bandas SH também são
-//!   fundidas, pela média ponderada pela tinta.
+//! - Geometric cost = closed-form entropy increase of the merge
+//!   (½·logdet(Σm) − Σ pₖ·½·logdetₖ): penalizes distance and differing shapes.
+//! - Color cost = |Δf_dc|², the same criterion as splat-transform.
+//! - Weights and opacity follow an "ink" model: each member weighs
+//!   `opacity × ellipsoid area`, and the merged opacity spreads the total ink
+//!   over the resulting splat's area (capped at 1). Conserving ink keeps
+//!   surfaces closed; averaging opacities opens translucent holes.
+//! - Unlike WebGaussian (SHARP has DC only), the SH bands are merged too, via
+//!   the ink-weighted mean.
 
 use rayon::prelude::*;
 
 use super::ply::Splats;
 
-/// Abaixo disso a decimação não compensa a perda.
+/// Below this, decimation isn't worth the quality loss.
 const MIN_COUNT: usize = 10_000;
 const EPS_COV: f64 = 1e-8;
-/// Peso do termo de cor (coeficientes DC, como no splat-transform).
+/// Weight of the color term (DC coefficients, as in splat-transform).
 const COLOR_COST_SCALE: f64 = 1.0;
-/// Vizinhos mais próximos avaliados por splat.
+/// Nearest neighbors evaluated per splat.
 const NEIGHBOR_SCAN_CAP: usize = 4;
-/// Melhores candidatos mantidos por splat para o casamento.
+/// Best candidates kept per splat for matching.
 const CANDIDATES: usize = 2;
 const SELECT_BUCKETS: usize = 1024;
-/// Tamanho máximo do grupo: pares primeiro, depois fechamento em cadeia.
+/// Maximum group size: pairs first, then chain closure.
 const GROUP_CAPS: [u32; 2] = [3, 4];
 const MAX_GENERATIONS: usize = 24;
 const MAX_GRID_RESOLUTION: i64 = 1024;
-/// Entradas lidas por célula vizinha (limita células patológicas).
+/// Entries read per neighboring cell (bounds pathological cells).
 const PER_CELL_CAP: usize = 32;
 const NONE: u32 = u32::MAX;
 
-/// Área do elipsoide (aproximação de Knud Thomsen, p ≈ 1,6075).
+/// Ellipsoid surface area (Knud Thomsen's approximation, p ≈ 1.6075).
 fn ellipsoid_area(sx: f64, sy: f64, sz: f64) -> f64 {
     const P: f64 = 1.6075;
     let a = (sx * sy).powf(P);
@@ -53,23 +52,23 @@ fn sigmoid(x: f32) -> f64 {
     1.0 / (1.0 + (-x as f64).exp())
 }
 
-/// Conjunto de trabalho de uma geração, em valores lineares.
+/// Working set of one generation, in linear values.
 struct Work {
     n: usize,
     rl: usize,
     pos: Vec<f32>,
-    /// σ por eixo (linear)
+    /// σ per axis (linear)
     scale: Vec<f32>,
-    /// (w, x, y, z) normalizado
+    /// (w, x, y, z), normalized
     rot: Vec<f32>,
-    /// opacidade linear (0–1)
+    /// linear opacity (0–1)
     opacity: Vec<f32>,
     dc: Vec<f32>,
     rest: Vec<f32>,
-    /// Covariância no mundo, simétrica: xx, yy, zz, xy, xz, yz.
+    /// World-space covariance, symmetric: xx, yy, zz, xy, xz, yz.
     cov: Vec<f64>,
     logdet: Vec<f64>,
-    /// opacidade × área
+    /// opacity × area
     ink: Vec<f64>,
 }
 
@@ -110,7 +109,7 @@ impl Work {
         w
     }
 
-    /// Acrescenta um splat calculando covariância, logdet e tinta.
+    /// Appends a splat, computing its covariance, logdet and ink.
     fn push(&mut self, pos: &[f32], scale: [f32; 3], rot: [f32; 4], opacity: f32, dc: &[f32], rest: &[f32]) {
         let sx = (scale[0] as f64).max(1e-9);
         let sy = (scale[1] as f64).max(1e-9);
@@ -168,8 +167,8 @@ impl Work {
     }
 }
 
-/// Funde gaussianas parecidas até restar ~`1 − reduction` delas.
-/// `reduction` vai de 0 a 0,9; zero (ou entrada pequena) não faz nada.
+/// Merges similar gaussians until ~`1 − reduction` of them remain.
+/// `reduction` ranges from 0 to 0.9; zero (or a small input) is a no-op.
 pub fn decimate(input: &Splats, reduction: f32, mut progress: impl FnMut(f32)) -> Option<Splats> {
     let reduction = reduction.clamp(0.0, 0.9);
     if reduction <= 0.0 || input.count < MIN_COUNT {
@@ -179,7 +178,7 @@ pub fn decimate(input: &Splats, reduction: f32, mut progress: impl FnMut(f32)) -
     let mut work = Work::from_splats(input);
     let to_remove = (work.n - target) as f32;
 
-    // Uma geração travada (sem vizinhos ao alcance) amplia a busca.
+    // A stalled generation (no neighbors in reach) widens the search.
     let mut reach = 1.0;
     let mut generation = 0;
     while generation < MAX_GENERATIONS && work.n > target {
@@ -207,16 +206,16 @@ fn run_generation(work: &Work, target: usize, reach: f64) -> Option<Work> {
 }
 
 // ---------------------------------------------------------------------------
-// Candidatos: hash espacial → vizinhos mais próximos → custo da aresta.
+// Candidates: spatial hash → nearest neighbors → edge cost.
 // ---------------------------------------------------------------------------
 
 struct Grid {
     n: [i64; 3],
     min: [f64; 3],
     cell: f64,
-    /// Índices dos splats agrupados por célula.
+    /// Splat indices grouped by cell.
     entries: Vec<u32>,
-    /// Início de cada célula densa em `entries` (+ sentinela).
+    /// Start of each dense cell in `entries` (+ sentinel).
     start: Vec<u32>,
     keys: Vec<i64>,
     ids: Vec<u32>,
@@ -319,9 +318,9 @@ fn build_candidates(work: &Work, reach: f64) -> (Vec<f64>, Vec<u32>) {
     }
     let ext = [0, 1, 2].map(|a| (max[a] - min[a]).max(1e-9));
 
-    // Célula com ocupação média baixa: o custo da varredura de 27 células é
-    // ocupação × 27 por splat. Superfícies ocupam bem menos células do que o
-    // palpite volumétrico supõe, daí as correções pela ocupação real.
+    // Cells with low average occupancy: scanning 27 cells costs
+    // occupancy × 27 per splat. Surfaces occupy far fewer cells than the
+    // volumetric guess assumes, hence the corrections by actual occupancy.
     let min_cell = ext[0].max(ext[1]).max(ext[2]) / MAX_GRID_RESOLUTION as f64;
     let mut cell = ((ext[0] * ext[1] * ext[2] / n as f64).cbrt() * 2.0 * reach).max(min_cell);
     let mut grid = Grid::build(work, min, max, cell);
@@ -371,10 +370,10 @@ fn build_candidates(work: &Work, reach: f64) -> (Vec<f64>, Vec<u32>) {
     (cost, idx)
 }
 
-/// Insere `(v, j)` numa lista curta ordenada por `v`, descartando o pior.
+/// Inserts `(v, j)` into a short list sorted by `v`, dropping the worst.
 fn insert_sorted<T: PartialOrd + Copy>(vals: &mut [T], ids: &mut [u32], v: T, j: u32) {
     let last = vals.len() - 1;
-    // NaN também fica de fora.
+    // NaN is rejected too.
     if v.partial_cmp(&vals[last]) != Some(std::cmp::Ordering::Less) {
         return;
     }
@@ -388,7 +387,7 @@ fn insert_sorted<T: PartialOrd + Copy>(vals: &mut [T], ids: &mut [u32], v: T, j:
     ids[k] = j;
 }
 
-/// Custo de fundir (i, j): aumento de entropia + |Δdc|².
+/// Cost of merging (i, j): entropy increase + |Δdc|².
 fn edge_cost(w: &Work, i: usize, j: usize) -> f64 {
     let (wi, wj) = (w.ink[i], w.ink[j]);
     let pi = wi / (wi + wj);
@@ -411,13 +410,13 @@ fn edge_cost(w: &Work, i: usize, j: usize) -> f64 {
 }
 
 // ---------------------------------------------------------------------------
-// Seleção: casamento guloso disjunto em ordem de custo + fechamento em cadeia.
+// Selection: greedy disjoint matching in cost order + chain closure.
 // ---------------------------------------------------------------------------
 
 struct Selection {
-    /// Grupo de cada splat, ou NONE para os que sobrevivem.
+    /// Group of each splat, or NONE for survivors.
     group_of: Vec<u32>,
-    /// Membros por grupo (CSR).
+    /// Members per group (CSR).
     offsets: Vec<u32>,
     members: Vec<u32>,
     removed: usize,
@@ -436,7 +435,7 @@ fn select_merges(n: usize, cost: &[f64], idx: &[u32], needed: usize) -> Selectio
     let span = if hi > lo { hi - lo } else { 1.0 };
     let bucket = |c: f64| (((c - lo) / span * SELECT_BUCKETS as f64) as usize).min(SELECT_BUCKETS - 1);
 
-    // Ordenação por contagem das entradas finitas, por faixa de custo.
+    // Counting sort of the finite entries, by cost bucket.
     let mut counts = vec![0u32; SELECT_BUCKETS + 1];
     for &c in cost.iter().filter(|c| c.is_finite()) {
         counts[bucket(c) + 1] += 1;
@@ -456,7 +455,7 @@ fn select_merges(n: usize, cost: &[f64], idx: &[u32], needed: usize) -> Selectio
 
     let mut pairs: Vec<[u32; 2]> = Vec::new();
     let mut removed = 0;
-    // Passada principal: casa pontas livres, do mais barato para o mais caro.
+    // Main pass: match free endpoints, cheapest first.
     for &e in &order {
         if removed >= needed {
             break;
@@ -472,8 +471,8 @@ fn select_merges(n: usize, cost: &[f64], idx: &[u32], needed: usize) -> Selectio
         removed += 1;
     }
 
-    // Fechamento em cadeia: splats ainda livres entram no grupo de um
-    // candidato, para alvos altos fecharem em menos gerações.
+    // Chain closure: still-free splats join a candidate's group, so high
+    // targets converge in fewer generations.
     let groups = pairs.len();
     let mut size = vec![2u32; groups];
     let mut joins: Vec<(u32, u32)> = Vec::new();
@@ -516,7 +515,7 @@ fn select_merges(n: usize, cost: &[f64], idx: &[u32], needed: usize) -> Selectio
 }
 
 // ---------------------------------------------------------------------------
-// Fusão: casamento de momentos n-ário que conserva a tinta.
+// Merge: ink-conserving n-ary moment matching.
 // ---------------------------------------------------------------------------
 
 fn apply_merges(w: &Work, sel: &Selection) -> Work {
@@ -578,8 +577,8 @@ fn merge_group(w: &Work, members: &[u32], out: &mut Work, rest: &mut [f64]) {
     let sc = ev.map(|v| v.max(1e-12).sqrt());
     let q = quat_from_matrix(&vecs);
 
-    // Opacidade que conserva a tinta: a tinta do grupo espalhada pela área do
-    // splat fundido, limitada a 1.
+    // Ink-conserving opacity: the group's ink spread over the merged splat's
+    // area, capped at 1.
     let area = ellipsoid_area(sc[0], sc[1], sc[2]).max(1e-30);
     let opacity = (total / area).min(1.0);
     let rest32: Vec<f32> = rest.iter().map(|&v| v as f32).collect();
@@ -594,10 +593,10 @@ fn merge_group(w: &Work, members: &[u32], out: &mut Work, rest: &mut [f64]) {
 }
 
 // ---------------------------------------------------------------------------
-// Álgebra 3×3 (linha maior), igual ao sharp-eigen.ts.
+// 3×3 algebra (row-major), same as sharp-eigen.ts.
 // ---------------------------------------------------------------------------
 
-/// Matriz de rotação a partir de (w, x, y, z) normalizado.
+/// Rotation matrix from a normalized (w, x, y, z).
 fn quat_to_matrix([w, x, y, z]: [f64; 4]) -> [f64; 9] {
     [
         w * w + x * x - y * y - z * z,
@@ -612,8 +611,8 @@ fn quat_to_matrix([w, x, y, z]: [f64; 4]) -> [f64; 9] {
     ]
 }
 
-/// Jacobi in-place: a diagonal de `m` vira os autovalores; as colunas do
-/// retorno são os autovetores.
+/// In-place Jacobi: the diagonal of `m` becomes the eigenvalues; the columns
+/// of the returned matrix are the eigenvectors.
 fn jacobi_eigen(m: &mut [f64; 9]) -> [f64; 9] {
     let mut v = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0];
     for _ in 0..8 {
@@ -674,7 +673,7 @@ fn sort_eigen_desc(ev: &mut [f64; 3], v: &mut [f64; 9]) {
     }
 }
 
-/// Inverte uma coluna se preciso para a base ser rotação própria (det = +1).
+/// Flips a column if needed so the basis is a proper rotation (det = +1).
 fn ensure_proper_rotation(r: &mut [f64; 9]) {
     let det = r[0] * (r[4] * r[8] - r[5] * r[7]) - r[1] * (r[3] * r[8] - r[5] * r[6]) + r[2] * (r[3] * r[7] - r[4] * r[6]);
     if det < 0.0 {
@@ -717,8 +716,8 @@ mod tests {
         assert_eq!(out.rest.len(), out.count * 9);
         assert!(out.pos.iter().chain(&out.scale).chain(&out.opacity).all(|v| v.is_finite()));
 
-        // A tinta total (opacidade × área) não deve encolher com a fusão
-        // (só cresce quando a opacidade bate no teto de 1… e aí encolhe um pouco).
+        // Total ink (opacity × area) should not shrink when merging (except
+        // where the merged opacity hits the cap of 1, where it shrinks a bit).
         let ink = |s: &Splats| -> f64 {
             (0..s.count)
                 .map(|i| {
@@ -728,7 +727,7 @@ mod tests {
                 .sum()
         };
         let (a, b) = (ink(&s), ink(&out));
-        assert!(b > a * 0.8, "tinta {a} → {b}");
+        assert!(b > a * 0.8, "ink {a} → {b}");
     }
 
     #[test]

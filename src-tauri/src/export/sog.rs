@@ -1,15 +1,14 @@
-//! Escrita do SOG v2 (PlayCanvas): um ZIP sem compressão com `meta.json` e
-//! texturas WebP sem perdas. Port do `sog-encode.ts` do WebGaussian, que por
-//! sua vez segue o `write-sog.ts` do splat-transform: ordem de Morton,
-//! quantizador 1D por programação dinâmica (codebooks de 256), posições em
-//! 16 bits log-transformadas, quatérnios "smallest three" e opacidade no alfa
-//! do `sh0`.
+//! SOG v2 writer (PlayCanvas): an uncompressed ZIP with `meta.json` and
+//! lossless WebP textures. Port of WebGaussian's `sog-encode.ts`, which in
+//! turn follows splat-transform's `write-sog.ts`: Morton order, 1D quantizer
+//! via dynamic programming (256-entry codebooks), log-transformed 16-bit
+//! positions, "smallest three" quaternions and opacity in the `sh0` alpha.
 //!
-//! Ao contrário do SHARP, o Brush treina bandas SH. Elas vão como no
-//! splat-transform: uma paleta de até 64k vetores SH (k-means), quantizada
-//! num codebook de 256, e um rótulo de 16 bits por gaussiana. O k-means é em
-//! dois níveis (256 grupos grossos, cada um subdividido proporcionalmente à
-//! população) para caber na CPU: o splat-transform usa a GPU para isso.
+//! Unlike SHARP, Brush trains SH bands. They are stored as in
+//! splat-transform: a palette of up to 64k SH vectors (k-means), quantized
+//! into a 256-entry codebook, plus a 16-bit label per gaussian. The k-means is
+//! two-level (256 coarse groups, each subdivided in proportion to its
+//! population) to fit on the CPU: splat-transform uses the GPU for this.
 
 use std::io::{Seek, Write};
 use std::path::Path;
@@ -29,19 +28,19 @@ const COARSE_SAMPLE: usize = 65_536;
 pub fn write(path: &Path, s: &Splats, mut progress: impl FnMut(f32, &Msg)) -> Result<u64> {
     let n = s.count;
     if n == 0 {
-        bail!("nenhuma gaussiana para exportar");
+        bail!("no gaussians to export");
     }
     let width = (((n as f64).sqrt() / 4.0).ceil() as usize * 4).max(4);
     let height = ((n as f64 / width as f64 / 4.0).ceil() as usize * 4).max(4);
     if width > 16383 || height > 16383 {
-        bail!("gaussianas demais para o SOG ({n})");
+        bail!("too many gaussians for SOG ({n})");
     }
     let texels = width * height;
 
     progress(0.0, &msg!("export.sorting"));
     let order = morton_order(&s.pos);
 
-    // ---- quantização das escalas e das cores (codebooks de 256)
+    // ---- quantize scales and colors (256-entry codebooks)
     progress(0.1, &msg!("export.quantizing"));
     let column = |src: &[f32], stride: usize, a: usize| -> Vec<f32> { src.iter().skip(a).step_by(stride).copied().collect() };
     let (scales_q, sh0_q) = rayon::join(
@@ -49,7 +48,7 @@ pub fn write(path: &Path, s: &Splats, mut progress: impl FnMut(f32, &Msg)) -> Re
         || quantize_1d(&[column(&s.dc, 3, 0), column(&s.dc, 3, 1), column(&s.dc, 3, 2)], 256),
     );
 
-    // ---- paleta SH
+    // ---- SH palette
     let sh = if s.sh_degree > 0 {
         progress(0.25, &msg!("export.clustering"));
         Some(encode_sh(s))
@@ -58,7 +57,7 @@ pub fn write(path: &Path, s: &Splats, mut progress: impl FnMut(f32, &Msg)) -> Re
     };
 
     progress(0.6, &msg!("export.textures"));
-    // ---- means: log, 16 bits em duas texturas
+    // ---- means: log, 16 bits split across two textures
     let log_t = |v: f32| (v as f64).signum() * ((v as f64).abs() + 1.0).ln();
     let mut mins = [f64::INFINITY; 3];
     let mut maxs = [f64::NEG_INFINITY; 3];
@@ -152,8 +151,8 @@ pub fn write(path: &Path, s: &Splats, mut progress: impl FnMut(f32, &Msg)) -> Re
     Ok(file.stream_position()?)
 }
 
-/// Quatérnio normalizado em 4 bytes: as três menores componentes em RGB e o
-/// índice da maior (descartada) em A (252 + i).
+/// Normalized quaternion in 4 bytes: the three smallest components in RGB and
+/// the index of the largest (dropped) one in A (252 + i).
 fn pack_quat(q: &[f32]) -> [u8; 4] {
     let mut q = [q[0] as f64, q[1] as f64, q[2] as f64, q[3] as f64];
     let l = q.iter().map(|v| v * v).sum::<f64>().sqrt();
@@ -173,7 +172,7 @@ fn pack_quat(q: &[f32]) -> [u8; 4] {
 }
 
 // ---------------------------------------------------------------------------
-// Ordem de Morton (localidade espacial → WebP comprime melhor).
+// Morton order (spatial locality → WebP compresses better).
 // ---------------------------------------------------------------------------
 
 fn morton_order(pos: &[f32]) -> Vec<u32> {
@@ -191,8 +190,8 @@ fn part1by2(mut v: u32) -> u32 {
     v
 }
 
-/// Port do `sortMortonInterleaved`: códigos de 10 bits por eixo; grupos com o
-/// mesmo código e mais de 256 elementos são refinados recursivamente.
+/// Port of `sortMortonInterleaved`: 10-bit codes per axis; groups sharing a
+/// code with more than 256 elements are refined recursively.
 fn sort_morton(pos: &[f32], range: &mut [u32]) {
     if range.is_empty() {
         return;
@@ -234,8 +233,8 @@ fn sort_morton(pos: &[f32], range: &mut [u32]) {
 }
 
 // ---------------------------------------------------------------------------
-// Quantizador 1D ótimo (programação dinâmica num histograma), port direto do
-// `quantize1dColumns` (k = 256, alpha = 0,5). As colunas dividem um codebook.
+// Optimal 1D quantizer (dynamic programming over a histogram), direct port of
+// `quantize1dColumns` (k = 256, alpha = 0.5). The columns share one codebook.
 // ---------------------------------------------------------------------------
 
 pub struct Quantized {
@@ -348,14 +347,14 @@ pub fn quantize_1d(columns: &[Vec<f32>], k: usize) -> Quantized {
 }
 
 // ---------------------------------------------------------------------------
-// Bandas SH: paleta por k-means em dois níveis.
+// SH bands: palette via two-level k-means.
 // ---------------------------------------------------------------------------
 
 struct ShPalette {
     count: usize,
     labels: Vec<u16>,
     codebook: Vec<f32>,
-    /// Textura `shN_centroids`: 64 centroides por linha, `coeffs` texels cada.
+    /// `shN_centroids` texture: 64 centroids per row, `coeffs` texels each.
     centroids_rgba: Vec<u8>,
 }
 
@@ -363,12 +362,12 @@ fn encode_sh(s: &Splats) -> ShPalette {
     let n = s.count;
     let d = s.rest_len();
     let coeffs = sh_coeffs(s.sh_degree);
-    // Mesmo tamanho de paleta do splat-transform.
+    // Same palette size as splat-transform.
     let palette = ((2f64.powf((n as f64 / 1024.0).log2().floor()).min(64.0) * 1024.0) as usize).clamp(1, n.min(65_536));
     let (centroids, labels) = kmeans_two_level(&s.rest, n, d, palette);
     let count = centroids.len() / d;
 
-    // Codebook único sobre todas as colunas da paleta.
+    // Single codebook over every palette column.
     let cols: Vec<Vec<f32>> = (0..d).map(|j| (0..count).map(|i| centroids[i * d + j]).collect()).collect();
     let q = quantize_1d(&cols, 256);
     let rows = count.div_ceil(64);
@@ -403,8 +402,9 @@ fn nearest(point: &[f32], centroids: &[f32], d: usize) -> (u32, f32) {
     best
 }
 
-/// Lloyd sobre os pontos `members` de `data`, com `k` centroides iniciais
-/// espaçados na lista. Devolve centroides e o rótulo local de cada membro.
+/// Lloyd over the `members` points of `data`, with `k` initial centroids
+/// evenly spaced through the list. Returns the centroids and each member's
+/// local label.
 fn lloyd(data: &[f32], d: usize, members: &[u32], k: usize, iterations: usize) -> (Vec<f32>, Vec<u32>) {
     let k = k.min(members.len()).max(1);
     let mut cent: Vec<f32> = (0..k)
@@ -442,7 +442,7 @@ fn lloyd(data: &[f32], d: usize, members: &[u32], k: usize, iterations: usize) -
                     cent[c * d + j] = (sums[c * d + j] / counts[c] as f64) as f32;
                 }
             } else {
-                // Centroide vazio: recomeça num ponto qualquer do grupo.
+                // Empty centroid: restart at an arbitrary point of the group.
                 let m = members[(c * 7919 + it * 104_729) % members.len()] as usize;
                 cent[c * d..(c + 1) * d].copy_from_slice(&data[m * d..(m + 1) * d]);
             }
@@ -451,9 +451,9 @@ fn lloyd(data: &[f32], d: usize, members: &[u32], k: usize, iterations: usize) -
     (cent, labels)
 }
 
-/// k-means hierárquico: grupos grossos numa amostra, todos os pontos
-/// atribuídos a eles, e cada grupo subdividido com centroides proporcionais
-/// à sua população (soma = `k`).
+/// Hierarchical k-means: coarse groups on a sample, every point assigned to
+/// them, then each group subdivided with centroids proportional to its
+/// population (sum = `k`).
 fn kmeans_two_level(data: &[f32], n: usize, d: usize, k: usize) -> (Vec<f32>, Vec<u16>) {
     let coarse_k = COARSE_CLUSTERS.min(k);
     let step = (n / COARSE_SAMPLE).max(1);
@@ -468,7 +468,7 @@ fn kmeans_two_level(data: &[f32], n: usize, d: usize, k: usize) -> (Vec<f32>, Ve
     }
     groups.retain(|g| !g.is_empty());
 
-    // Distribui os k centroides proporcionalmente (pelo menos 1 por grupo).
+    // Distribute the k centroids proportionally (at least 1 per group).
     let mut alloc: Vec<usize> = groups.iter().map(|g| ((g.len() * k) as f64 / n as f64).floor().max(1.0) as usize).collect();
     let mut total: usize = alloc.iter().sum();
     let mut by_size: Vec<usize> = (0..groups.len()).collect();
@@ -513,33 +513,33 @@ fn kmeans_two_level(data: &[f32], n: usize, d: usize, k: usize) -> (Vec<f32>, Ve
 }
 
 // ---------------------------------------------------------------------------
-// WebP sem perdas.
+// Lossless WebP.
 // ---------------------------------------------------------------------------
 
-/// Esforço do libwebp sem perdas (0–9). Num splat real do Brush, o 9 deu
-/// arquivos só 0,4% menores que o padrão do cwebp, bem mais devagar.
+/// libwebp lossless effort (0–9). On a real Brush splat, 9 gave files only
+/// 0.4% smaller than cwebp's default, and much more slowly.
 const WEBP_EFFORT: i32 = 6;
 
-/// Como o `webp_encode_lossless_rgba_level` do splat-transform: preset sem
-/// perdas e `exact`, para o RGB de texels com alfa 0 (opacidade arredondada
-/// para zero no `sh0`) não ser alterado pelo encoder.
+/// Like splat-transform's `webp_encode_lossless_rgba_level`: lossless preset
+/// and `exact`, so the encoder doesn't alter the RGB of texels with alpha 0
+/// (opacity rounded to zero in `sh0`).
 fn webp_lossless(rgba: &[u8], w: usize, h: usize) -> Result<Vec<u8>> {
     use libwebp_sys::*;
-    // SAFETY: estruturas inicializadas pelas funções do libwebp; o buffer
-    // do writer é liberado em todos os caminhos.
+    // SAFETY: structs are initialized by the libwebp functions; the writer
+    // buffer is freed on every path.
     unsafe {
-        let mut config = WebPConfig::new().map_err(|_| anyhow::anyhow!("WebPConfigInit falhou"))?;
+        let mut config = WebPConfig::new().map_err(|_| anyhow::anyhow!("WebPConfigInit failed"))?;
         if WebPConfigLosslessPreset(&mut config, WEBP_EFFORT) == 0 {
-            bail!("WebPConfigLosslessPreset falhou");
+            bail!("WebPConfigLosslessPreset failed");
         }
         config.exact = 1;
-        let mut pic = WebPPicture::new().map_err(|_| anyhow::anyhow!("WebPPictureInit falhou"))?;
+        let mut pic = WebPPicture::new().map_err(|_| anyhow::anyhow!("WebPPictureInit failed"))?;
         pic.use_argb = 1;
         pic.width = w as i32;
         pic.height = h as i32;
         if WebPPictureImportRGBA(&mut pic, rgba.as_ptr(), (w * 4) as i32) == 0 {
             WebPPictureFree(&mut pic);
-            bail!("WebPPictureImportRGBA falhou");
+            bail!("WebPPictureImportRGBA failed");
         }
         let mut writer = std::mem::zeroed::<WebPMemoryWriter>();
         WebPMemoryWriterInit(&mut writer);
@@ -550,7 +550,7 @@ fn webp_lossless(rgba: &[u8], w: usize, h: usize) -> Result<Vec<u8>> {
         WebPPictureFree(&mut pic);
         let out = if ok != 0 && writer.size > 0 { Some(std::slice::from_raw_parts(writer.mem, writer.size).to_vec()) } else { None };
         WebPMemoryWriterClear(&mut writer);
-        out.ok_or_else(|| anyhow::anyhow!("falha ao codificar WebP ({code:?})"))
+        out.ok_or_else(|| anyhow::anyhow!("WebP encoding failed ({code:?})"))
     }
 }
 
@@ -565,7 +565,7 @@ mod tests {
         let q = quantize_1d(std::slice::from_ref(&col), 256);
         assert!(q.centroids.windows(2).all(|w| w[0] <= w[1]));
         let err = col.iter().zip(&q.labels[0]).map(|(v, &l)| (v - q.centroids[l as usize]).abs()).fold(0f32, f32::max);
-        assert!(err < 0.1, "erro máximo {err}");
+        assert!(err < 0.1, "max error {err}");
     }
 
     #[test]
@@ -575,7 +575,7 @@ mod tests {
         let l = q.iter().map(|v| v * v).sum::<f32>().sqrt();
         let max = (p[3] - 252) as usize;
         assert_eq!(max, 2);
-        // Decodifica como o leitor: (b/255 − 0,5)·2/√2.
+        // Decode like the reader does: (b/255 − 0.5)·2/√2.
         let dec = |b: u8| (b as f32 / 255.0 - 0.5) * 2.0 / std::f32::consts::SQRT_2;
         let rest = [0, 1, 3].map(|i| q[i] / l * q[2].signum());
         for (k, &r) in rest.iter().enumerate() {

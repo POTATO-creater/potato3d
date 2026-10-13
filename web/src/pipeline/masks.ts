@@ -1,5 +1,5 @@
-// Recorte (máscaras 255 = sujeito) e dataset com fundo transparente, como
-// src-tauri/src/masks.rs. No web: RMBG-1.4, SAM 2.1 (só aqui) e cor sólida.
+// Cutout (masks, 255 = subject) and transparent-background dataset, like
+// src-tauri/src/masks.rs. On the web: RMBG-1.4, SAM 2.1 (web only) and solid color.
 
 import type { MaskOptions, MaskStats, Msg, SubjectPrompt } from "../../../src/lib/api";
 import { applyDespill, backgroundColor, borderKey, chromaMask, despillFor, type RGB } from "./chroma";
@@ -29,7 +29,7 @@ async function rgbaOf(file: Blob): Promise<{ rgba: Uint8ClampedArray; w: number;
 async function readMask(file: Blob, w: number, h: number): Promise<Uint8Array> {
   const { rgba, bmp, w: mw, h: mh } = await rgbaOf(file);
   bmp.close();
-  if (mw !== w || mh !== h) throw new Error("máscara com tamanho diferente do frame");
+  if (mw !== w || mh !== h) throw new Error("mask size differs from the frame");
   const m = new Uint8Array(w * h);
   for (let i = 0; i < w * h; i++) m[i] = rgba[4 * i];
   return m;
@@ -47,11 +47,11 @@ export async function makeMasks(
   s: MaskOptions,
   log: (s: string) => void,
   progress: Progress,
-  /** Instante ou imagem de origem de cada frame (por nome), para achar o frame marcado. */
+  /** Timestamp or source image of each frame (by name), to find the marked frame. */
   origin?: FrameOrigin,
 ): Promise<MaskStats> {
   const names = await listImages(images);
-  if (!names.length) throw new Error("não há frames para recortar");
+  if (!names.length) throw new Error("no frames to cut out");
   if (s.method === "sam2") return sam2Masks(images, out, names, s.prompt ?? null, log, progress, origin);
   let seg: Segmenter | null = null;
   if (s.method !== "chroma") {
@@ -88,17 +88,17 @@ export async function makeMasks(
   const keyColor = keys.length
     ? ([0, 1, 2].map((c) => keys.map((k) => k[c]).sort((a, b) => a - b)[keys.length >> 1]) as RGB)
     : null;
-  if (keyColor && s.chroma.autoColor) log(`Cor do fundo detectada: rgb(${keyColor.join(", ")})`);
+  if (keyColor && s.chroma.autoColor) log(`Detected background color: rgb(${keyColor.join(", ")})`);
   return {
     count: names.length,
     noSubject: 0,
     meanCoverage: coverage / names.length,
-    backend: seg?.backend ?? "Cor sólida",
+    backend: seg?.backend ?? "Solid color",
     keyColor,
   };
 }
 
-/** SAM 2.1: segmenta o frame marcado e propaga para a frente e depois para trás. */
+/** SAM 2.1: segments the marked frame and propagates forward, then backward. */
 async function sam2Masks(
   images: FileSystemDirectoryHandle,
   out: FileSystemDirectoryHandle,
@@ -113,15 +113,15 @@ async function sam2Masks(
   );
   let start = promptFrame(names, prompt, origin);
   if (start < 0) {
-    log(`SAM 2.1: a imagem marcada (${prompt?.image}) não entrou nos frames; vale o objeto do centro`);
+    log(`SAM 2.1: the marked image (${prompt?.image}) is not among the frames; using the object at the center`);
     prompt = null;
     start = 0;
   }
   log(`${tracker.backend} (${SAM2_LICENSE})`);
   log(
     prompt && (prompt.box || prompt.points.length)
-      ? `SAM 2.1: sujeito marcado, propagando a partir de ${names[start]}`
-      : `SAM 2.1: sem marcação, segue o objeto no centro de ${names[start]}`,
+      ? `SAM 2.1: subject marked, propagating from ${names[start]}`
+      : `SAM 2.1: no marking, tracking the object at the center of ${names[start]}`,
   );
   const order = [...names.keys()].slice(start).concat([...names.keys()].slice(0, start).reverse());
   let coverage = 0, noSubject = 0;
@@ -147,7 +147,7 @@ async function sam2Masks(
   return { count: names.length, noSubject, meanCoverage: coverage / names.length, backend: tracker.backend, keyColor: null };
 }
 
-/** PNG RGBA com A = máscara erodida (alfa direto) e despill no sujeito. */
+/** RGBA PNG with A = eroded mask (straight alpha) and despill on the subject. */
 export async function buildAlpha(
   images: FileSystemDirectoryHandle,
   masks: FileSystemDirectoryHandle,
@@ -172,8 +172,8 @@ export async function buildAlpha(
     despill = key ? despillFor(key, s.despillStrength) : null;
     log(
       despill
-        ? `despill: reflexo de #${key!.map((v) => v.toString(16).padStart(2, "0")).join("")} removido do sujeito`
-        : "despill: o fundo não é verde nem azul; cores mantidas",
+        ? `despill: #${key!.map((v) => v.toString(16).padStart(2, "0")).join("")} spill removed from the subject`
+        : "despill: background is neither green nor blue; colors kept",
     );
   }
   for (let i = 0; i < names.length; i++) {

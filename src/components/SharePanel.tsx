@@ -21,17 +21,17 @@ import { useI18n } from "../i18n";
 import { Select } from "./fields";
 
 interface Props {
-  /** Arquivo exportado que vai para o link. */
+  /** Exported file to share via the link. */
   path: string;
   bytes: number;
-  /** Enquadramento do vídeo, para o link abrir no mesmo ponto de vista. */
+  /** Video framing, so the link opens at the same viewpoint. */
   frame: SceneFrame | null;
   onClose: () => void;
 }
 
-/** Link privado e temporário para a exportação (src/lib/share.ts). Aparece
- *  abaixo do resultado da exportação, aberto pelo botão "Compartilhar". Com
- *  `?admin=true` na URL e a chave de acesso salva, dá para escolher a validade. */
+/** Private, temporary link for the export (src/lib/share.ts). Shown below the
+ *  export result, opened by the "Share" button. With `?admin=true` in the URL
+ *  and a saved access key, the lifetime can be chosen. */
 export function SharePanel({ path, bytes, frame, onClose }: Props) {
   const { t, locale } = useI18n();
   const ts = t.share;
@@ -51,7 +51,7 @@ export function SharePanel({ path, bytes, frame, onClose }: Props) {
     return () => upload.current?.abort();
   }, [key]);
 
-  // O link some daqui quando expira.
+  // The link disappears from here when it expires.
   useEffect(() => {
     if (!link || link.expiresAt === null) return;
     const timer = setTimeout(() => setLink(null), Math.min(link.expiresAt - Date.now(), 2 ** 31 - 1));
@@ -77,7 +77,7 @@ export function SharePanel({ path, bytes, frame, onClose }: Props) {
       saveShare(key, made);
       setLink(made);
     } catch (e) {
-      // Chave errada: some do aparelho para o campo voltar.
+      // Wrong key: forget it on this device so the field comes back.
       if (e instanceof ShareError && e.code === "forbidden") rememberKey(null);
       if (!ctl.signal.aborted) setError(describe(e));
     } finally {
@@ -113,7 +113,7 @@ export function SharePanel({ path, bytes, frame, onClose }: Props) {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
-      /* sem permissão: o campo está selecionável */
+      /* no permission: the field is selectable */
     }
   }
 
@@ -239,7 +239,7 @@ export function SharePanel({ path, bytes, frame, onClose }: Props) {
   );
 }
 
-/** QR code do link, para abrir no celular. A biblioteca só carrega aqui. */
+/** QR code of the link, to open on a phone. The library is loaded only here. */
 function QrCode({ text }: { text: string }) {
   const [qr, setQr] = useState<{ d: string; n: number } | null>(null);
   useEffect(() => {
@@ -258,7 +258,7 @@ function QrCode({ text }: { text: string }) {
     };
   }, [text]);
   if (!qr) return <div className="share-qr" />;
-  // Margem de 2 módulos e fundo branco: leitores de QR precisam do contraste.
+  // 2-module margin and white background: QR readers need the contrast.
   return (
     <svg className="share-qr" viewBox={`-2 -2 ${qr.n + 4} ${qr.n + 4}`} shapeRendering="crispEdges" role="img">
       <rect x={-2} y={-2} width={qr.n + 4} height={qr.n + 4} fill="#fff" />

@@ -1,6 +1,6 @@
-# Gera os instaladores (Windows: NSIS .exe · macOS: .dmg) e publica numa
-# release de rascunho. Dispare criando uma tag `v*` ou pelo botão
-# "Run workflow" na aba Actions.
+# Builds the installers (Windows: NSIS .exe, macOS: .dmg) and uploads them to
+# a draft release. Trigger it by pushing a `v*` tag or with the
+# "Run workflow" button in the Actions tab.
 name: release
 
 on:
@@ -38,16 +38,16 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # O Brush (sidecar) é compilado do commit fixo + patches do web; o cache
-      # evita recompilar quando nada disso mudou (o `.rev` ao lado do binário
-      # faz o setup:tools pular a compilação).
+      # The Brush sidecar is built from the pinned commit + the web patches; the
+      # cache skips the rebuild when none of that changed (the `.rev` file next
+      # to the binary makes setup:tools skip compilation).
       - uses: actions/cache@v4
         with:
           path: src-tauri/binaries/brush_app-*
           key: brush-native-${{ runner.os }}-${{ hashFiles('scripts/build-brush-web.mjs', 'web/brush/*.patch') }}
 
-      # Vai dentro do instalador: Brush (sidecar) e, no Windows, DirectML.dll.
-      # COLMAP, ffmpeg e o modelo de recorte são baixados pelo app no primeiro uso.
+      # Bundled in the installer: Brush (sidecar) and, on Windows, DirectML.dll.
+      # COLMAP, ffmpeg and the masking model are downloaded by the app on first use.
       - run: pnpm setup:tools --only bundle
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -59,8 +59,8 @@ jobs:
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || format('build-{0}', github.run_number) }}
           releaseName: Gausify Orbit ${{ github.ref_type == 'tag' && github.ref_name || format('build {0}', github.run_number) }}
           releaseBody: |
-            Windows: baixe o `*-setup.exe`. Na primeira execução o app oferece
-            instalar COLMAP e ffmpeg (≈ 590 MB com CUDA).
-            macOS: baixe o `.dmg` e instale as dependências com `brew install ffmpeg colmap`.
+            Windows: download the `*-setup.exe`. On first run the app offers to
+            install COLMAP and ffmpeg (≈ 590 MB with CUDA).
+            macOS: download the `.dmg` and install the dependencies with `brew install ffmpeg colmap`.
           releaseDraft: true
           prerelease: false

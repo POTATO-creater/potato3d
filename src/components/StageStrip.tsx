@@ -32,7 +32,7 @@ function Metric({ label, value, tone }: { label: string; value: string; tone?: "
   );
 }
 
-/** ▶ roda só a etapa; na etapa em andamento vira ■ (cancela o job). */
+/** ▶ runs just this stage; on the running stage it becomes ■ (cancels the job). */
 function StageButton({
   running,
   blocked,
@@ -41,9 +41,9 @@ function StageButton({
   onCancel,
 }: {
   running: boolean;
-  /** Motivo de não poder rodar; null = pode. */
+  /** Why it can't run; null = it can. */
   blocked: string | null;
-  /** Algum job está rodando. */
+  /** Some job is running. */
   busy: boolean;
   onRun: () => void;
   onCancel: () => void;
@@ -87,9 +87,9 @@ export function StageStrip({
   totalSteps: number;
   tools: Tools | null;
   masks: MaskOptions;
-  /** Os frames vêm de imagens, não de um vídeo. */
+  /** Frames come from images, not a video. */
   images?: boolean;
-  /** Por que cada etapa não pode rodar sozinha agora; null = pode. */
+  /** Why each stage can't run on its own right now; null = it can. */
   blocked: Record<Stage, string | null>;
   onRunStage: (stage: Stage) => void;
   onCancel: () => void;

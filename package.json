@@ -2,6 +2,8 @@
   "name": "gausify-orbit",
   "private": true,
   "version": "0.4.1",
+  "license": "MIT",
+  "repository": "github:obraia/gausify-orbit",
   "type": "module",
   "scripts": {
     "setup:tools": "node scripts/setup-tools.mjs",

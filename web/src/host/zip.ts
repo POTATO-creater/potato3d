@@ -1,10 +1,10 @@
-// ZIP mínimo para o pacote do projeto (.gorbit), sem dependências: grava em
-// fluxo (STORE, ou DEFLATE pelo CompressionStream do navegador, com data
-// descriptor) e lê pelo diretório central, com ZIP64 (o desktop grava com o
-// crate `zip`, que passa a usá-lo acima de 4 GB). Entradas gravadas sem
-// compressão viram fatias do arquivo na leitura, sem cópia.
+// Minimal dependency-free ZIP for the project package (.gorbit): writes as a
+// stream (STORE, or DEFLATE via the browser's CompressionStream, with a data
+// descriptor) and reads via the central directory, with ZIP64 (the desktop
+// writes with the `zip` crate, which switches to it above 4 GB). Stored
+// (uncompressed) entries become slices of the file when read, with no copy.
 
-/** Destino dos bytes do ZIP, na ordem. */
+/** Sink for the ZIP bytes, in order. */
 export type ZipSink = (part: Blob | Uint8Array<ArrayBuffer>) => Promise<void> | void;
 
 const CRC_TABLE = (() => {
@@ -17,7 +17,7 @@ const CRC_TABLE = (() => {
   return t;
 })();
 
-/** CRC-32 do ZIP; `crc` continua um cálculo anterior. */
+/** ZIP CRC-32; `crc` continues a previous computation. */
 export function crc32(data: Uint8Array, crc = 0): number {
   let c = ~crc >>> 0;
   for (let i = 0; i < data.length; i++) c = CRC_TABLE[(c ^ data[i]) & 0xff] ^ (c >>> 8);
@@ -31,9 +31,9 @@ const END = 0x06054b50;
 const END64 = 0x06064b50;
 const LOCATOR64 = 0x07064b50;
 const MAX32 = 0xffffffff;
-// Bit 3: tamanhos e CRC no data descriptor; bit 11: nome em UTF-8.
+// Bit 3: sizes and CRC in the data descriptor; bit 11: UTF-8 name.
 const FLAGS = 0x0808;
-// 1980-01-01 00:00 no formato do DOS.
+// 1980-01-01 00:00 in DOS format.
 const DOS_DATE = (0 << 9) | (1 << 5) | 1;
 
 interface Written {
@@ -65,12 +65,12 @@ export class ZipWriter {
     this.offset += part instanceof Blob ? part.size : part.length;
   }
 
-  /** `onBytes` recebe quantos bytes da entrada já foram lidos. */
+  /** `onBytes` receives how many bytes of the entry have been read so far. */
   async add(name: string, data: Blob, deflate: boolean, onBytes?: (n: number) => void) {
     const nameBytes = new TextEncoder().encode(name);
     const method = deflate ? 8 : 0;
     const offset = this.offset;
-    if (offset > MAX32) throw new Error("o pacote passa de 4 GB, o limite da versão web");
+    if (offset > MAX32) throw new Error("the package exceeds 4 GB, the web version's limit");
     await this.out(
       header(30 + nameBytes.length, (v) => {
         v.setUint32(0, LOCAL, true);
@@ -104,15 +104,15 @@ export class ZipWriter {
         chunks.push(c);
         csize += c.length;
       }
-      // Um Blob por entrada: o navegador pode guardá-lo fora da memória.
+      // One Blob per entry: the browser may keep it out of memory.
       await this.out(new Blob(chunks));
     } else {
-      // Só o CRC precisa ler os bytes; o arquivo em si entra inteiro.
+      // Only the CRC needs to read the bytes; the file itself goes in whole.
       for await (const _ of pump as unknown as AsyncIterable<Uint8Array>) void _;
       csize = data.size;
       await this.out(data);
     }
-    if (read > MAX32 || csize > MAX32) throw new Error(`"${name}" passa de 4 GB, o limite da versão web`);
+    if (read > MAX32 || csize > MAX32) throw new Error(`"${name}" exceeds 4 GB, the web version's limit`);
 
     await this.out(
       header(16, (v) => {
@@ -125,7 +125,7 @@ export class ZipWriter {
     this.entries.push({ name: nameBytes, method, crc, csize, size: read, offset });
   }
 
-  /** Grava o diretório central; devolve o tamanho total do ZIP. */
+  /** Writes the central directory; returns the total ZIP size. */
   async finish(): Promise<number> {
     const start = this.offset;
     for (const e of this.entries)
@@ -146,7 +146,7 @@ export class ZipWriter {
         }),
       );
     const size = this.offset - start;
-    if (this.offset > MAX32 || this.entries.length > 0xffff) throw new Error("o pacote passa do limite da versão web (4 GB)");
+    if (this.offset > MAX32 || this.entries.length > 0xffff) throw new Error("the package exceeds the web version's limit (4 GB)");
     await this.out(
       header(22, (v) => {
         v.setUint32(0, END, true);
@@ -163,7 +163,7 @@ export class ZipWriter {
 export interface ZipEntry {
   name: string;
   method: number;
-  /** Tamanho descompactado. */
+  /** Uncompressed size. */
   size: number;
   csize: number;
   offset: number;
@@ -172,9 +172,9 @@ export interface ZipEntry {
 const view = async (b: Blob) => new DataView(await b.arrayBuffer());
 const u64 = (v: DataView, at: number) => Number(v.getBigUint64(at, true));
 
-/** Entradas do ZIP pelo diretório central. */
+/** ZIP entries from the central directory. */
 export async function readZip(file: Blob): Promise<Map<string, ZipEntry>> {
-  const notZip = () => new Error("o arquivo não é um ZIP válido");
+  const notZip = () => new Error("the file is not a valid ZIP");
   const tailStart = Math.max(0, file.size - 22 - 0xffff);
   const tail = await view(file.slice(tailStart));
   let end = -1;
@@ -208,7 +208,7 @@ export async function readZip(file: Blob): Promise<Map<string, ZipEntry>> {
     let size = cd.getUint32(o + 24, true);
     let csize = cd.getUint32(o + 20, true);
     let offset = cd.getUint32(o + 42, true);
-    // ZIP64: só os campos que estouraram vêm no extra 0x0001, nesta ordem.
+    // ZIP64: only the overflowed fields appear in extra field 0x0001, in this order.
     for (let x = o + 46 + nameLen; x + 4 <= o + 46 + nameLen + extraLen; ) {
       const id = cd.getUint16(x, true);
       const len = cd.getUint16(x + 2, true);
@@ -226,13 +226,13 @@ export async function readZip(file: Blob): Promise<Map<string, ZipEntry>> {
   return entries;
 }
 
-/** Conteúdo de uma entrada: fatia do arquivo se não foi compactada. */
+/** An entry's content: a slice of the file if it wasn't compressed. */
 export async function entryBlob(file: Blob, e: ZipEntry): Promise<Blob> {
   const local = await view(file.slice(e.offset, e.offset + 30));
-  if (local.getUint32(0, true) !== LOCAL) throw new Error(`pacote corrompido em ${e.name}`);
+  if (local.getUint32(0, true) !== LOCAL) throw new Error(`corrupt package at ${e.name}`);
   const start = e.offset + 30 + local.getUint16(26, true) + local.getUint16(28, true);
   const raw = file.slice(start, start + e.csize);
   if (e.method === 0) return raw;
-  if (e.method !== 8) throw new Error(`compressão não suportada em ${e.name}`);
+  if (e.method !== 8) throw new Error(`unsupported compression in ${e.name}`);
   return new Response(raw.stream().pipeThrough(new DecompressionStream("deflate-raw"))).blob();
 }

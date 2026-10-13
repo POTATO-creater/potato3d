@@ -1,5 +1,6 @@
-//! Orquestra as etapas (frames → recorte → poses → treino), persiste o estado do projeto em disco e envia
-//! eventos de progresso para a interface por um `Channel` do Tauri.
+//! Orchestrates the stages (frames → masks → poses → training), persists the
+//! project state on disk and sends progress events to the UI over a Tauri
+//! `Channel`.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -31,14 +32,14 @@ pub enum Stage {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct JobConfig {
-    /// O vídeo, ou a pasta das imagens quando `images` vem preenchido.
+    /// The video, or the images folder when `images` is set.
     pub video_path: String,
-    /// Frames já extraídos (na ordem da órbita) em vez do vídeo.
+    /// Already-extracted frames (in orbit order) instead of the video.
     #[serde(default)]
     pub images: Option<Vec<String>>,
     pub project_dir: String,
     pub from_stage: Stage,
-    /// Última etapa a rodar (inclusive); ausente = até o treino.
+    /// Last stage to run (inclusive); absent = through training.
     #[serde(default)]
     pub to_stage: Option<Stage>,
     pub frames: FrameOptions,
@@ -57,20 +58,20 @@ pub enum JobEvent {
     FramesReady { frames: Vec<FrameInfo> },
     MasksReady { stats: MaskStats, dir: String },
     PosesReady { stats: ModelStats },
-    /// Etapa pulada (desativada ou resultado anterior reaproveitado).
+    /// Skipped stage (disabled, or a previous result was reused).
     StageSkipped { stage: Stage, reason: Msg },
     Train { event: TrainEvent },
     StageDone { stage: Stage, seconds: f64 },
-    /// `ply` ausente quando o job parou antes do treino.
+    /// `ply` is absent when the job stopped before training.
     Finished { ply: Option<String>, seconds: f64 },
     Failed { stage: Option<Stage>, error: String },
     Cancelled,
 }
 
-/// Destino dos eventos (Channel do Tauri na UI, stdout na CLI).
+/// Event sink (Tauri Channel in the UI, stdout in the CLI).
 pub type Emit = Arc<dyn Fn(JobEvent) + Send + Sync>;
 
-/// O que já existe em disco para um projeto (permite retomar de qualquer etapa).
+/// What already exists on disk for a project (allows resuming from any stage).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectState {
@@ -83,7 +84,7 @@ pub struct ProjectState {
     pub poses: Option<ModelStats>,
     pub final_ply: Option<String>,
     pub last_psnr: Option<f64>,
-    /// Última exportação otimizada (some quando o splat é retreinado).
+    /// Last optimized export (cleared when the splat is retrained).
     #[serde(default)]
     pub last_export: Option<ExportStats>,
 }
@@ -102,16 +103,16 @@ impl Layout {
     fn raw_frames(&self) -> PathBuf {
         self.root.join("frames_raw")
     }
-    /// Pasta passada ao Brush: só `images/` e `sparse/0/` (ele varre tudo
-    /// dentro dela, inclusive .ply, então a saída fica fora).
+    /// Folder passed to Brush: only `images/` and `sparse/0/` (it scans
+    /// everything inside, .ply files included, so the output lives outside).
     pub fn dataset(&self) -> PathBuf {
         self.root.join("dataset")
     }
     pub fn images(&self) -> PathBuf {
         self.dataset().join("images")
     }
-    /// Frames recusados à mão: fora de `dataset/`, para o COLMAP, o recorte
-    /// e o Brush não os verem.
+    /// Manually rejected frames: outside `dataset/` so COLMAP, masking and
+    /// Brush don't see them.
     pub(crate) fn rejected(&self) -> PathBuf {
         self.root.join("rejected")
     }
@@ -121,16 +122,16 @@ impl Layout {
     fn colmap_work(&self) -> PathBuf {
         self.root.join("colmap")
     }
-    /// Fora de `dataset/`: o Brush trataria `dataset/masks` como máscara de
-    /// "ignorar" automaticamente.
+    /// Outside `dataset/`: Brush would automatically treat `dataset/masks` as
+    /// "ignore" masks.
     pub fn masks(&self) -> PathBuf {
         self.root.join("masks")
     }
-    /// Fora de `colmap/`, que a etapa de poses recria do zero.
+    /// Outside `colmap/`, which the poses stage recreates from scratch.
     fn colmap_masks(&self) -> PathBuf {
         self.root.join("colmap_masks")
     }
-    /// Dataset de treino com fundo transparente (PNG RGBA).
+    /// Training dataset with a transparent background (RGBA PNG).
     fn alpha_dataset(&self) -> PathBuf {
         self.root.join("dataset_alpha")
     }
@@ -140,7 +141,7 @@ impl Layout {
     pub(crate) fn final_ply(&self) -> PathBuf {
         self.root.join("splat.ply")
     }
-    /// Exportações otimizadas (.sog/.ply), fora de `dataset/`.
+    /// Optimized exports (.sog/.ply), outside `dataset/`.
     pub(crate) fn exports(&self) -> PathBuf {
         self.root.join("export")
     }
@@ -158,8 +159,8 @@ impl Layout {
     }
 }
 
-/// Envia eventos de progresso limitando a frequência (a UI não precisa de
-/// mais de ~15 atualizações por segundo).
+/// Sends progress events at a limited rate (the UI needs no more than ~15
+/// updates per second).
 struct Reporter<'a> {
     emit: &'a Emit,
     stage: Stage,
@@ -211,7 +212,7 @@ async fn run_inner(
 ) -> Result<Option<String>> {
     let layout = Layout::new(&cfg.project_dir);
     let to = cfg.to_stage.unwrap_or(Stage::Train).max(cfg.from_stage);
-    std::fs::create_dir_all(&layout.root).context("não foi possível criar a pasta do projeto")?;
+    std::fs::create_dir_all(&layout.root).context("could not create the project folder")?;
     let mut state = layout.load();
     let video = PathBuf::from(&cfg.video_path);
 
@@ -222,7 +223,7 @@ async fn run_inner(
         let rep = Reporter::new(emit, Stage::Frames);
         let picked = match cfg.images.as_deref() {
             Some(sources) if !sources.is_empty() => {
-                rep.log(&format!("{} imagens de {}", sources.len(), cfg.video_path));
+                rep.log(&format!("{} images from {}", sources.len(), cfg.video_path));
                 let sources: Vec<PathBuf> = sources.iter().map(PathBuf::from).collect();
                 let (images, opts, progress_emit) = (layout.images(), cfg.frames.clone(), emit.clone());
                 tokio::task::spawn_blocking(move || {
@@ -245,7 +246,7 @@ async fn run_inner(
         };
         rep.progress(1.0, msg!("frames.selected", n = picked.len()));
 
-        // Etapas seguintes ficam inválidas.
+        // Later stages become invalid.
         let _ = std::fs::remove_dir_all(layout.dataset().join("sparse"));
         let _ = std::fs::remove_dir_all(layout.masks());
         let _ = std::fs::remove_dir_all(layout.rejected());
@@ -258,13 +259,13 @@ async fn run_inner(
         emit(JobEvent::FramesReady { frames: picked });
         emit(JobEvent::StageDone { stage: Stage::Frames, seconds: t0.elapsed().as_secs_f64() });
     } else if !layout.images().exists() {
-        anyhow::bail!("não há frames extraídos neste projeto; rode a partir da etapa de frames");
+        anyhow::bail!("this project has no extracted frames; run from the frames stage");
     }
     if to == Stage::Frames {
         return Ok(None);
     }
 
-    // ---------- 2. Recorte (opcional) ----------
+    // ---------- 2. Masks (optional) ----------
     let masks_ready = |state: &ProjectState| state.masks.is_some() && layout.masks().is_dir();
     if cfg.from_stage <= Stage::Masks {
         if cfg.masks.enabled {
@@ -284,7 +285,7 @@ async fn run_inner(
             state.masks = Some(stats.clone());
             state.masks_dir = Some(layout.masks().to_string_lossy().into_owned());
             if cfg.masks.for_poses {
-                // As poses usaram o recorte anterior.
+                // The poses used the previous masks.
                 state.poses = None;
                 state.final_ply = None;
                 state.last_psnr = None;
@@ -301,11 +302,11 @@ async fn run_inner(
         return Ok(None);
     }
     if cfg.masks.enabled && !masks_ready(&state) {
-        anyhow::bail!("não há recortes neste projeto; rode a partir da etapa de recorte");
+        anyhow::bail!("this project has no masks; run from the masks stage");
     }
 
     // ---------- 3. Poses ----------
-    // Recortar de novo sem usar as máscaras no COLMAP não muda as poses.
+    // Re-masking without feeding the masks to COLMAP doesn't change the poses.
     let reuse_poses = cfg.from_stage == Stage::Masks
         && !(cfg.masks.enabled && cfg.masks.for_poses)
         && layout.model().join("images.bin").exists()
@@ -317,7 +318,7 @@ async fn run_inner(
         let t0 = Instant::now();
         let colmap_bin = Tools::require(&tools.colmap, "COLMAP", install_hint("colmap"))?;
         let rep = Reporter::new(emit, Stage::Poses);
-        // Instante de cada frame, para a inferência de poses seguir a velocidade da câmera.
+        // Timestamp of each frame, so pose inference follows the camera speed.
         let times = state
             .frames
             .iter()
@@ -354,13 +355,13 @@ async fn run_inner(
         emit(JobEvent::PosesReady { stats });
         emit(JobEvent::StageDone { stage: Stage::Poses, seconds: t0.elapsed().as_secs_f64() });
     } else if state.poses.is_none() || !layout.model().join("images.bin").exists() {
-        anyhow::bail!("não há poses calculadas neste projeto; rode a partir da etapa de poses");
+        anyhow::bail!("this project has no computed poses; run from the poses stage");
     }
     if to == Stage::Poses {
         return Ok(None);
     }
 
-    // ---------- 4. Treino ----------
+    // ---------- 4. Training ----------
     *current = Some(Stage::Train);
     let t0 = Instant::now();
     let brush_bin = Tools::require(&tools.brush, "Brush", install_hint("brush"))?;
@@ -372,8 +373,8 @@ async fn run_inner(
         let despill = cfg.masks.despill.then_some(cfg.masks.despill_strength);
         let key = tokio::task::spawn_blocking(move || masks::build_alpha_dataset(&dataset, &masks_dir, &out, despill)).await??;
         match key {
-            Some(k) => rep.log(&format!("despill: reflexo de #{:02x}{:02x}{:02x} removido do sujeito", k[0], k[1], k[2])),
-            None if despill.is_some() => rep.log("despill: o fundo não é verde nem azul; cores mantidas"),
+            Some(k) => rep.log(&format!("despill: #{:02x}{:02x}{:02x} spill removed from the subject", k[0], k[1], k[2])),
+            None if despill.is_some() => rep.log("despill: background is neither green nor blue; colors kept"),
             None => {}
         }
         layout.alpha_dataset()
@@ -416,7 +417,7 @@ async fn run_inner(
     Ok(Some(ply))
 }
 
-/// Frames do vídeo: candidatos pelo ffmpeg e o mais nítido de cada janela.
+/// Video frames: candidates from ffmpeg, keeping the sharpest of each window.
 async fn extract_video(
     cfg: &JobConfig,
     tools: &Tools,
@@ -469,9 +470,9 @@ async fn extract_video(
     .await?
 }
 
-/// Recusa (move para `rejected/`) ou aceita de volta frames, pelo nome do
-/// arquivo. As poses deixam de valer; aceitar um frame que ficou sem recorte
-/// invalida também o recorte.
+/// Rejects (moves to `rejected/`) or re-accepts frames by file name. The
+/// poses become invalid; re-accepting a frame that has no mask also
+/// invalidates the masks.
 pub fn set_frames_rejected(project_dir: &str, names: &[String], rejected: bool) -> Result<ProjectState> {
     let layout = Layout::new(project_dir);
     let mut state = layout.load();
@@ -487,7 +488,7 @@ pub fn set_frames_rejected(project_dir: &str, names: &[String], rejected: bool) 
         }
         let dest = dest_dir.join(name);
         if let Err(e) = std::fs::rename(&src, &dest) {
-            moved = Err(anyhow::Error::new(e).context(format!("não foi possível mover {}", src.display())));
+            moved = Err(anyhow::Error::new(e).context(format!("could not move {}", src.display())));
             break;
         }
         missing_mask |= !rejected && !layout.masks().join(name).with_extension("png").exists();
@@ -495,7 +496,7 @@ pub fn set_frames_rejected(project_dir: &str, names: &[String], rejected: bool) 
         f.rejected = rejected;
         changed = true;
     }
-    // Grava o que já mudou de lugar mesmo se um arquivo falhou no meio.
+    // Save what was already moved even if a file failed midway.
     if changed {
         if missing_mask {
             state.masks = None;
@@ -506,13 +507,13 @@ pub fn set_frames_rejected(project_dir: &str, names: &[String], rejected: bool) 
     }
     moved.map(|_| state)
 }
-/// Exporta o splat final do projeto com os ajustes de otimização e guarda o
-/// resultado no `project.json`.
+/// Exports the project's final splat with the optimization settings and
+/// records the result in `project.json`.
 pub fn export_project(project_dir: &str, opts: &ExportOptions, progress: impl FnMut(f32, &Msg)) -> Result<ExportStats> {
     let layout = Layout::new(project_dir);
     let input = layout.final_ply();
     if !input.exists() {
-        anyhow::bail!("este projeto ainda não tem um splat treinado");
+        anyhow::bail!("this project has no trained splat yet");
     }
     let stats = export::run(&input, &layout.exports(), opts, progress)?;
     let mut state = layout.load();
@@ -522,7 +523,7 @@ pub fn export_project(project_dir: &str, opts: &ExportOptions, progress: impl Fn
 }
 
 pub fn default_project_dir(video: &Path) -> PathBuf {
-    let stem = video.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "projeto".into());
+    let stem = video.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "project".into());
     video.with_file_name(format!("{stem}_splat"))
 }
 
@@ -544,7 +545,7 @@ mod tests {
                 FrameInfo { path: path.to_string_lossy().into_owned(), time: i as f64, sharpness: 1.0, source: None, rejected: false }
             })
             .collect();
-        // Só os frames 0 e 1 têm recorte.
+        // Only frames 0 and 1 have masks.
         for i in 0..2 {
             std::fs::write(layout.masks().join(format!("{i:05}.png")), b"m").unwrap();
         }
@@ -561,11 +562,11 @@ mod tests {
         assert!(layout.rejected().join("00001.jpg").exists() && !layout.images().join("00001.jpg").exists());
         assert_eq!(layout.load().frames[2].path, layout.rejected().join("00002.jpg").to_string_lossy());
 
-        // Aceitar de volta um frame com recorte mantém o recorte...
+        // Re-accepting a frame that has a mask keeps the masks...
         let s = set_frames_rejected(&dir, &["00001.jpg".into()], false).unwrap();
         assert!(!s.frames[1].rejected && s.masks.is_some());
         assert!(layout.images().join("00001.jpg").exists());
-        // ...e um sem recorte o invalida.
+        // ...and one without a mask invalidates them.
         let s = set_frames_rejected(&dir, &["00002.jpg".into()], false).unwrap();
         assert!(s.masks.is_none() && !s.frames[2].rejected);
         let _ = std::fs::remove_dir_all(&root);

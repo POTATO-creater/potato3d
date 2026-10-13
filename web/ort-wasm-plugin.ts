@@ -1,11 +1,11 @@
-// O .wasm do ONNX Runtime (~27 MB) passa do limite de 25 MiB por arquivo do
-// Cloudflare Workers. No build ele sai gzipado (~7 MB) e o original é
-// descartado; o app descompacta no navegador e entrega o binário ao ORT
-// (`env.wasm.wasmBinary`, ver web/src/pipeline/segment.ts). Continua tudo no
-// mesmo domínio, então o cache offline do service worker segue valendo.
+// The ONNX Runtime .wasm (~27 MB) exceeds Cloudflare Workers' 25 MiB per-file
+// limit. The build emits it gzipped (~7 MB) and drops the original; the app
+// decompresses it in the browser and hands the binary to ORT
+// (`env.wasm.wasmBinary`, see web/src/pipeline/segment.ts). Everything stays on
+// the same origin, so the service worker's offline cache still covers it.
 //
-// `import url from "virtual:ort-wasm-gz"` dá a URL do .gz no build e `null`
-// no dev, onde o ORT carrega o próprio .wasm como sempre.
+// `import url from "virtual:ort-wasm-gz"` yields the .gz URL in the build and
+// `null` in dev, where ORT loads its own .wasm as usual.
 
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -14,7 +14,7 @@ import { gzipSync } from "node:zlib";
 import type { Plugin } from "vite";
 
 const ID = "virtual:ort-wasm-gz";
-// O que o bundle `onnxruntime-web/webgpu` carrega (JSEP saiu na 1.2x).
+// What the `onnxruntime-web/webgpu` bundle loads (JSEP was removed in 1.2x).
 const WASM = "ort-wasm-simd-threaded.asyncify.wasm";
 
 export function ortWasmGzip(): Plugin {

@@ -1,16 +1,17 @@
-# Converte o export de vídeo do SAM 2.1 tiny (jax-image-tools/sam21-tiny-video-onnx)
-# para fp16, para o recorte da versão web (web/src/pipeline/sam2.ts).
+# Converts the SAM 2.1 tiny video export (jax-image-tools/sam21-tiny-video-onnx)
+# to fp16, for web masking (web/src/pipeline/sam2.ts).
 #
-#   python3 scripts/sam2-export/export_fp16.py <pasta com os 4 .onnx originais> <saída>
+#   python3 scripts/sam2-export/export_fp16.py <folder with the 4 original .onnx> <output>
 #
-# Requer onnx, onnxruntime (1.19+) e numpy. Passos:
-# 1. Encoder: os dois If (interpolação da posição do Hiera) sempre tomam o ramo
-#    else com entrada 1024²; são trocados pelos nós desse ramo. Saída idêntica,
-#    e some o shape errado do ramo then que o ORT Web recusa (fixVisionShape).
-# 2. fp16 com o conversor do ONNX Runtime (o onnxconverter-common deixa tipos
-#    misturados nos subgrafos). Entradas e saídas continuam fp32 (o JS não
-#    muda); Range, Resize, Sin, Cos e CumSum (codificações de posição) também.
-# 3. Confere cada grafo no modo estrito do ORT e imprime tamanho e SHA-256.
+# Requires onnx, onnxruntime (1.19+) and numpy. Steps:
+# 1. Encoder: the two If nodes (Hiera position interpolation) always take the
+#    else branch with a 1024² input; they are replaced by that branch's nodes.
+#    Identical output, and the bad shape in the then branch that ORT Web rejects
+#    (fixVisionShape) goes away.
+# 2. fp16 with ONNX Runtime's converter (onnxconverter-common leaves mixed types
+#    in subgraphs). Inputs and outputs stay fp32 (the JS is unchanged); so do
+#    Range, Resize, Sin, Cos and CumSum (position encodings).
+# 3. Checks each graph in ORT strict mode and prints size and SHA-256.
 import hashlib, sys
 import numpy as np
 import onnx

@@ -1,7 +1,7 @@
-// Progresso de uma execução do ComfyUI a partir das mensagens do WebSocket
-// (/ws?clientId=…). Função pura: o cliente só repassa as mensagens.
+// Progress of a ComfyUI run from the WebSocket messages (/ws?clientId=…).
+// Pure function: the client just forwards the messages.
 //
-// Mensagens usadas (todas com data.prompt_id, menos status):
+// Messages used (all carry data.prompt_id, except status):
 //   execution_start · execution_cached {nodes} · executing {node|null}
 //   progress {value, max, node} · executed {node} · execution_success
 //   execution_error {node_id, node_type, exception_message}
@@ -9,13 +9,13 @@
 
 export interface ComfyProgress {
   promptId: string;
-  /** Nós do grafo enviado; alguns nunca rodam (ramos de um switch). */
+  /** Nodes in the submitted graph; some never run (switch branches). */
   total: number;
   done: string[];
-  /** Nó rodando agora e o passo dele (amostradores mandam value/max). */
+  /** Node running now and its step (samplers send value/max). */
   node: string | null;
   step: { value: number; max: number } | null;
-  /** Posição na fila antes de começar (status.exec_info.queue_remaining). */
+  /** Queue position before starting (status.exec_info.queue_remaining). */
   queue: number | null;
   status: "queued" | "running" | "success" | "error" | "interrupted";
   error: { node: string | null; nodeType: string | null; message: string } | null;
@@ -47,7 +47,7 @@ export function reduceProgress(p: ComfyProgress, msg: { type: string; data?: Rec
       return { ...p, status: "running", done: markDone(p.done, ...((d.nodes as string[]) ?? [])) };
     case "executing": {
       const node = d.node == null ? null : String(d.node);
-      // node null = fim da execução (protocolo antigo, antes do execution_success).
+      // node null = end of execution (old protocol, before execution_success).
       if (node === null) return { ...p, done: markDone(p.done, p.node), node: null, step: null, status: "success" };
       return { ...p, status: "running", done: markDone(p.done, p.node === node ? null : p.node), node, step: null };
     }
@@ -64,7 +64,7 @@ export function reduceProgress(p: ComfyProgress, msg: { type: string; data?: Rec
         error: {
           node: d.node_id == null ? null : String(d.node_id),
           nodeType: (d.node_type as string) ?? null,
-          message: String(d.exception_message ?? "").trim() || "erro no ComfyUI",
+          message: String(d.exception_message ?? "").trim() || "ComfyUI error",
         },
       };
     case "execution_interrupted":
@@ -74,8 +74,8 @@ export function reduceProgress(p: ComfyProgress, msg: { type: string; data?: Rec
   }
 }
 
-/** Fração 0–1: nós concluídos mais a parte do nó atual. Vai a 1 só no fim,
- *  porque nem todo nó do grafo roda. */
+/** Fraction 0–1: finished nodes plus the current node's share. Reaches 1
+ *  only at the end, since not every node in the graph runs. */
 export function progressFraction(p: ComfyProgress): number {
   if (p.status === "success") return 1;
   const partial = p.step && p.step.max > 0 ? Math.min(p.step.value / p.step.max, 1) : 0;

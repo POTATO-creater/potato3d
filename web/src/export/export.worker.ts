@@ -1,5 +1,5 @@
-// Exportação fora da thread da interface: k-means, decimação e WebP de
-// milhões de gaussianas levam segundos.
+// Export off the UI thread: k-means, decimation and WebP over millions of
+// Gaussians take seconds.
 
 import type { ExportOptions, Msg } from "../../../src/lib/api";
 import { runExport } from "./run.ts";

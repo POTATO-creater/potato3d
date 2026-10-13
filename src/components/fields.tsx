@@ -121,18 +121,18 @@ export function Slider(props: {
 export interface SelectOption<T> {
   value: T;
   label: string;
-  /** Linha de apoio no menu (não aparece no botão). */
+  /** Secondary line in the menu (not shown on the button). */
   hint?: string;
 }
 
-/** Texto sem acentos e em minúsculas, para a busca do Select. */
+/** Text without accents and lowercased, for Select search. */
 const fold = (t: string) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 
-/** Lista suspensa no estilo do app, no lugar do `<select>` nativo. O menu vai
- *  num portal com posição fixa (não é cortado pela barra lateral rolável) e
- *  abre para cima quando falta espaço embaixo. Teclado: setas, Home/End,
- *  Enter/Espaço e Esc. Com `searchable`, o menu ganha uma caixa de busca que
- *  filtra pelo rótulo e pela linha de apoio (todas as palavras digitadas). */
+/** App-styled dropdown replacing the native `<select>`. The menu lives in a
+ *  fixed-position portal (not clipped by the scrolling sidebar) and opens
+ *  upward when there's no room below. Keyboard: arrows, Home/End,
+ *  Enter/Space and Esc. With `searchable`, the menu gets a search box that
+ *  filters by label and secondary line (all typed words must match). */
 export function Select<T extends string | number | null>(props: {
   value: T;
   options: SelectOption<T>[];
@@ -153,7 +153,7 @@ export function Select<T extends string | number | null>(props: {
   const id = useId();
   const current = props.options.findIndex((o) => o.value === props.value);
   const selected = props.options[current];
-  // Opções visíveis (com o índice original), filtradas pela busca.
+  // Visible options (with their original index), filtered by the search.
   const terms = fold(query).split(/\s+/).filter(Boolean);
   const shown = props.options
     .map((o, i) => ({ o, i }))
@@ -191,7 +191,7 @@ export function Select<T extends string | number | null>(props: {
     if (pick && pick.i !== current) props.onChange(pick.o.value);
   }
 
-  // Fecha ao clicar fora; acompanha rolagem e redimensionamento.
+  // Close on outside click; follow scroll and resize.
   useEffect(() => {
     if (!open) return;
     const away = (e: PointerEvent) => {

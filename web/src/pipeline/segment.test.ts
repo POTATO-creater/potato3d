@@ -1,9 +1,9 @@
-// Mesmos casos de pré/pós-processamento dos testes de src-tauri/src/masks.rs.
+// Same pre/post-processing cases as the tests in src-tauri/src/masks.rs.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { inputSize, MODELS, postprocess, preprocess } from "./segment.ts";
 
-test("RMBG: 1024², x − 0,5 e estiramento mínimo–máximo", () => {
+test("RMBG: 1024², x − 0.5 and min–max stretch", () => {
   assert.deepEqual(inputSize("rmbg", 64, 48), [1024, 1024]);
   const t = preprocess(new Uint8ClampedArray([255, 0, 128, 255]), 1, 1, MODELS.rmbg);
   assert.ok(Math.abs(t[0] - 0.5) < 1e-3 && Math.abs(t[1] + 0.5) < 1e-3 && Math.abs(t[2]) < 0.01);

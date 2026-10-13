@@ -1,5 +1,5 @@
-// Poses no navegador: features (AKAZE em workers) → matching (WebGPU) →
-// SfM incremental (TS) → modelo COLMAP. Prova de conceito.
+// In-browser poses: features (AKAZE in workers) → matching (WebGPU) →
+// incremental SfM (TS) → COLMAP model. Proof of concept.
 
 import type { Msg } from "../../../src/lib/api";
 import { colmapFiles } from "./colmap";
@@ -12,19 +12,19 @@ import type { SfmWorkerMessage } from "./sfm.worker";
 export interface SfmOptions {
   maxSide: number;
   maxFeatures: number;
-  /** Vizinhos casados de cada lado (como o `matchWindow` do app). */
+  /** Neighbours matched on each side (like the app's `matchWindow`). */
   window: number;
   closedLoop: boolean;
-  /** Máscaras `<nome sem extensão>.png` (0 = ignorar): features só no sujeito. */
+  /** Masks `<name without extension>.png` (0 = ignore): features only on the subject. */
   masksDir?: FileSystemDirectoryHandle;
-  /** Câmeras forçadas no mesmo plano da órbita. */
+  /** Force cameras onto the same orbit plane. */
   flatOrbit?: boolean;
-  /** Pose inferida pelos vizinhos para os frames não registrados. */
+  /** Infer poses from neighbours for unregistered frames. */
   fillMissing?: boolean;
-  /** Instante de cada imagem pelo nome, para a inferência seguir a velocidade
-   *  da câmera; sem ele, vale a ordem dos nomes. */
+  /** Timestamp of each image by name, so inference follows the camera's speed;
+   *  without it, name order is used. */
   times?: Map<string, number>;
-  /** Cancela: os workers são encerrados e a promessa rejeita. */
+  /** Cancels: the workers are terminated and the promise rejects. */
   signal?: AbortSignal;
 }
 
@@ -39,7 +39,7 @@ export interface SfmRun {
 
 const IMAGE_EXT = /\.(jpe?g|png|webp)$/i;
 
-/** Mesma escolha de pares do app (colmap.rs: write_pairs). */
+/** Same pair selection as the app (colmap.rs: write_pairs). */
 export function orbitPairs(n: number, window: number, closed: boolean): [number, number][] {
   const offsets = [...Array(window).keys()].map((k) => k + 1);
   for (const o of [16, 32, 64]) if (o > window) offsets.push(o);
@@ -61,9 +61,9 @@ export function orbitPairs(n: number, window: number, closed: boolean): [number,
   return out;
 }
 
-/** Instante de cada imagem (na ordem dos nomes); se faltar ou não crescer
- *  (frames de imagens soltas), o número no nome (00012.jpg → 12), que guarda
- *  os buracos dos frames recusados. */
+/** Timestamp of each image (in name order); if missing or not increasing
+ *  (frames from loose images), the number in the name (00012.jpg → 12), which
+ *  preserves the gaps left by rejected frames. */
 export function orbitTimes(names: string[], times?: Map<string, number>): number[] {
   const t = names.map((n) => times?.get(n));
   if (t.every((v, i) => v !== undefined && (i === 0 || v > t[i - 1]!))) return t as number[];
@@ -90,7 +90,7 @@ async function extractAll(
         (w) =>
           new Promise<void>((resolve, reject) => {
             const send = () => {
-              if (opts.signal?.aborted) return reject(new DOMException("cancelado", "AbortError"));
+              if (opts.signal?.aborted) return reject(new DOMException("cancelled", "AbortError"));
               if (next >= files.length) return resolve();
               const id = next++;
               const req: FeatureRequest = { id, file: files[id], maxSide: opts.maxSide, maxFeatures: opts.maxFeatures, mask: masks[id] };
@@ -101,7 +101,7 @@ async function extractAll(
               progress(++done);
               send();
             };
-            w.onerror = (e) => reject(new Error(`worker de features: ${e.message}`));
+            w.onerror = (e) => reject(new Error(`features worker: ${e.message}`));
             send();
           }),
       ),
@@ -124,7 +124,7 @@ export async function runSfm(
   const names: string[] = [];
   for await (const [name, h] of imagesDir.entries()) if (h.kind === "file" && IMAGE_EXT.test(name)) names.push(name);
   names.sort();
-  if (names.length < 3) throw new Error("Poucas imagens em images/.");
+  if (names.length < 3) throw new Error("Too few images in images/.");
   const files = await Promise.all(names.map(async (n) => (await imagesDir.getFileHandle(n)).getFile()));
 
   const masks = await Promise.all(
@@ -137,7 +137,7 @@ export async function runSfm(
   const feats = await extractAll(files, masks, opts, (d) => progress((0.3 * d) / names.length, { key: "poses.webFeaturesN", args: { i: d, n: names.length } }));
   timings.features = performance.now() - t0;
   const meanFeat = feats.reduce((s, f) => s + f.n, 0) / feats.length;
-  log(`Features AKAZE: média ${meanFeat.toFixed(0)}/imagem em ${(timings.features / 1000).toFixed(1)} s`);
+  log(`AKAZE features: mean ${meanFeat.toFixed(0)}/image in ${(timings.features / 1000).toFixed(1)} s`);
 
   const t1 = performance.now();
   const pairs = orbitPairs(names.length, opts.window, opts.closedLoop);
@@ -155,7 +155,7 @@ export async function runSfm(
   }
   timings.matching = performance.now() - t1;
   const meanMatches = matches.reduce((s, m) => s + m.ia.length, 0) / Math.max(matches.length, 1);
-  log(`Matching WebGPU: ${pairs.length} pares, média ${meanMatches.toFixed(0)} matches em ${(timings.matching / 1000).toFixed(1)} s`);
+  log(`WebGPU matching: ${pairs.length} pairs, mean ${meanMatches.toFixed(0)} matches in ${(timings.matching / 1000).toFixed(1)} s`);
 
   const t2 = performance.now();
   const imgs: ImageFeatures[] = feats.map((f, i) => ({ name: names[i], width: f.width, height: f.height, n: f.n, xy: f.xy, rgb: f.rgb }));
@@ -173,23 +173,23 @@ export async function runSfm(
     };
     w.onerror = (e) => {
       w.terminate();
-      reject(new Error(`worker do SfM: ${e.message}`));
+      reject(new Error(`SfM worker: ${e.message}`));
     };
     opts.signal?.addEventListener("abort", () => {
       w.terminate();
-      reject(new DOMException("cancelado", "AbortError"));
+      reject(new DOMException("cancelled", "AbortError"));
     });
     w.postMessage({ imgs, matches, closedLoop: opts.closedLoop });
   });
   timings.reconstruction = performance.now() - t2;
   log(
-    `Reconstrução: ${model.stats.registered}/${names.length} câmeras, ${model.stats.points} pontos, ` +
-      `erro médio ${Number(model.stats.meanError).toFixed(2)} px, f = ${model.f.toFixed(1)} em ${(timings.reconstruction / 1000).toFixed(1)} s`,
+    `Reconstruction: ${model.stats.registered}/${names.length} cameras, ${model.stats.points} points, ` +
+      `mean error ${Number(model.stats.meanError).toFixed(2)} px, f = ${model.f.toFixed(1)} in ${(timings.reconstruction / 1000).toFixed(1)} s`,
   );
 
-  // Testes (scripts/web-bench/headless.mjs): `?sfmDrop=0,20,21` tira essas
-  // câmeras do modelo, como se a reconstrução não as tivesse registrado;
-  // `?sfmRefine=0` desliga o refinamento das poses inferidas.
+  // Tests (scripts/web-bench/headless.mjs): `?sfmDrop=0,20,21` removes those
+  // cameras from the model, as if reconstruction had not registered them;
+  // `?sfmRefine=0` disables refinement of the inferred poses.
   const test = new URLSearchParams(globalThis.location?.search ?? "");
   const drop = new Set((test.get("sfmDrop") ?? "").split(",").filter(Boolean).map(Number));
   if (drop.size) {
@@ -198,18 +198,18 @@ export async function runSfm(
       .map((p) => ({ ...p, obs: p.obs.filter(([i]) => !drop.has(i)) }))
       .filter((p) => p.obs.length >= 2);
     model.stats.registered = model.poses.filter(Boolean).length;
-    log(`teste: ${drop.size} câmeras tiradas do modelo`);
+    log(`test: ${drop.size} cameras removed from the model`);
   }
 
-  // Correções da órbita, como em colmap.rs (órbita plana) e pipeline.rs.
+  // Orbit corrections, as in colmap.rs (flat orbit) and pipeline.rs.
   const xy = feats.map((f) => f.xy);
   if (opts.flatOrbit) {
     progress(0.99, { key: "poses.flattening" });
     const dev = flattenOrbit(model, xy);
-    if (dev == null) log("órbita plana não aplicada: as câmeras quase não formam um arco");
+    if (dev == null) log("flat orbit not applied: the cameras barely form an arc");
     else {
       model.stats.flat = 1;
-      log(`órbita plana: maior desvio de altura corrigido ${(dev * 100).toFixed(2)}% do raio, erro ${Number(model.stats.meanError).toFixed(2)} px`);
+      log(`flat orbit: largest height deviation corrected ${(dev * 100).toFixed(2)}% of the radius, error ${Number(model.stats.meanError).toFixed(2)} px`);
     }
   }
   if (opts.fillMissing) {
@@ -218,8 +218,8 @@ export async function runSfm(
     const { inferred, refined } = fillMissing(model, at, { flat: opts.flatOrbit, correspondences: corr });
     model.stats.inferred = inferred.length;
     model.stats.refined = refined.length;
-    if (inferred.length) log(`poses inferidas pelos vizinhos: ${inferred.map((i) => names[i]).join(", ")}`);
-    for (const [i, n] of refined) log(`pose de ${names[i]} refinada contra ${n} pontos 3D`);
+    if (inferred.length) log(`poses inferred from neighbours: ${inferred.map((i) => names[i]).join(", ")}`);
+    for (const [i, n] of refined) log(`pose of ${names[i]} refined against ${n} 3D points`);
   }
   timings.total = performance.now() - t0;
   return { model, files: colmapFiles(model, names, feats.map((f) => f.xy)), names, timings };

@@ -1,51 +1,51 @@
-// Compartilhamento por link: sobe a exportação para o Worker da versão web
-// (worker/index.ts), que guarda no R2 por algumas horas e devolve um link
-// privado para o visualizador (web/share.html). Desktop e web usam o mesmo
-// código; o host só diz como ler o arquivo e onde fica o servidor.
+// Link sharing: uploads the export to the web version's Worker
+// (worker/index.ts), which keeps it in R2 for a few hours and returns a
+// private link to the viewer (web/share.html). Desktop and web share this
+// code; the host only says how to read the file and where the server is.
 
 import type { SceneFrame } from "./api";
 
 type Vec3 = [number, number, number];
 
-/** Enquadramento do visualizador do link, nas coordenadas do splat: o mesmo
- *  "up", centro e ponto de vista inicial do visualizador do app. */
+/** Framing for the link viewer, in splat coordinates: the same "up", center
+ *  and initial viewpoint as the app's viewer. */
 export interface ShareView {
   center: Vec3;
   up: Vec3;
-  /** Câmera do primeiro frame do vídeo. */
+  /** Camera of the video's first frame. */
   camera: Vec3;
-  /** Distância média das câmeras ao centro. */
+  /** Mean camera distance to the center. */
   radius: number;
-  /** Lente do vídeo (campo de visão vertical em radianos e largura/altura). */
+  /** Video lens (vertical field of view in radians and width/height). */
   fovY?: number;
   aspect?: number;
-  /** Faixa de ângulo polar (a partir do "up") que o vídeo filmou, com folga. */
+  /** Polar angle range (from "up") the video covered, with margin. */
   polar?: [number, number];
 }
 
 export interface ShareLink {
   id: string;
   url: string;
-  /** Epoch em ms; `null` quando não expira. */
+  /** Epoch in ms; `null` when it never expires. */
   expiresAt: number | null;
-  /** Só quem criou o link tem: permite revogar antes de expirar. */
+  /** Only the link's creator has it: allows revoking before expiry. */
   deleteToken: string;
 }
 
-/** Validade em horas, ou sem expiração. */
+/** Lifetime in hours, or no expiry. */
 export type ShareTtl = number | "never";
 
-/** Opções do diálogo para quem tem a chave de acesso (o Worker aceita
- *  qualquer valor até 10 anos). Sem a chave, vale o padrão do servidor. */
+/** Dialog options for holders of the access key (the Worker accepts any
+ *  value up to 10 years). Without the key, the server default applies. */
 export const SHARE_TTLS: ShareTtl[] = [6, 24, 24 * 7, 24 * 30, 24 * 365, "never"];
 
-/** Chave de acesso (`SHARE_ADMIN_TOKEN` do Worker) e a validade pedida. */
+/** Access key (the Worker's `SHARE_ADMIN_TOKEN`) and the requested lifetime. */
 export interface ShareAccess {
   key: string;
   ttl: ShareTtl;
 }
 
-/** Códigos de erro do Worker (traduzidos em `share.errors`), mais os do cliente. */
+/** Worker error codes (translated in `share.errors`), plus client-side ones. */
 export type ShareErrorCode =
   | "too_large"
   | "bad_format"
@@ -60,7 +60,7 @@ export class ShareError extends Error {
     readonly code: ShareErrorCode,
     readonly maxBytes?: number,
   ) {
-    super(`compartilhamento: ${code}`);
+    super(`share: ${code}`);
   }
 }
 
@@ -73,8 +73,8 @@ const norm = (a: number[]): Vec3 => {
 
 const POLAR_MARGIN = (20 * Math.PI) / 180;
 
-/** Faixa de ângulo polar (a partir do "up") coberta pelas câmeras do vídeo,
- *  com folga: fora dela não há dados e o splat mostra buracos. */
+/** Polar angle range (from "up") covered by the video's cameras, with
+ *  margin: outside it there is no data and the splat shows holes. */
 export function polarRange(frame: SceneFrame): [number, number] {
   const up = norm(frame.up);
   let lo = Math.PI;
@@ -87,7 +87,7 @@ export function polarRange(frame: SceneFrame): [number, number] {
   return [Math.max(0, lo - POLAR_MARGIN), Math.min(Math.PI, hi + POLAR_MARGIN)];
 }
 
-/** Arredonda para os metadados do link caberem com folga no limite do R2. */
+/** Rounds so the link metadata fits comfortably within R2's limit. */
 const r = (x: number) => Number(x.toPrecision(6));
 const rv = (v: number[]): Vec3 => [r(v[0]), r(v[1]), r(v[2])];
 
@@ -108,8 +108,8 @@ export function shareView(frame: SceneFrame | null): ShareView | null {
   return view;
 }
 
-/** Sobe o arquivo e devolve o link. XHR em vez de fetch: só ele dá o
- *  progresso do envio. */
+/** Uploads the file and returns the link. XHR instead of fetch: only XHR
+ *  reports upload progress. */
 export function uploadShare(
   origin: string,
   file: Blob,
@@ -136,7 +136,7 @@ export function uploadShare(
       else reject(new ShareError(body?.error ?? (xhr.status === 413 ? "too_large" : "server"), body?.maxBytes));
     };
     xhr.onerror = () => reject(new ShareError("network"));
-    xhr.onabort = () => reject(new DOMException("cancelado", "AbortError"));
+    xhr.onabort = () => reject(new DOMException("cancelled", "AbortError"));
     signal?.addEventListener("abort", () => xhr.abort());
     xhr.send(file);
   });
@@ -151,11 +151,11 @@ export async function revokeShare(origin: string, link: ShareLink) {
   if (!res.ok) throw new ShareError("server");
 }
 
-// Links criados neste aparelho, por exportação: reabrir o projeto mostra o
-// link ainda válido em vez de subir de novo.
+// Links created on this device, per export: reopening the project shows the
+// still-valid link instead of uploading again.
 const STORE_KEY = "splatforge.shares.v1";
 
-/** Uma exportação refeita com o mesmo nome é outro arquivo: entra o tamanho. */
+/** A redone export with the same name is a different file: include the size. */
 export const shareKey = (path: string, bytes: number) => `${path}|${bytes}`;
 
 function loadAll(): Record<string, ShareLink> {
@@ -179,15 +179,15 @@ export function saveShare(key: string, link: ShareLink | null) {
   try {
     localStorage.setItem(STORE_KEY, JSON.stringify(all));
   } catch {
-    /* armazenamento indisponível: o link só vale nesta sessão */
+    /* storage unavailable: the link only lasts this session */
   }
 }
 
-// Chave de acesso que libera escolher a validade; fica só neste aparelho.
+// Access key that unlocks choosing the lifetime; stays on this device only.
 const ACCESS_KEY = "splatforge.shareAccess.v1";
 
-/** `?admin=true` na URL mostra o campo da chave e o seletor de validade.
- *  Sem ele, o painel é o de todo mundo, mesmo com a chave salva. */
+/** `?admin=true` in the URL shows the key field and the lifetime picker.
+ *  Without it, the panel is the regular one, even with a saved key. */
 export const shareAdmin = (() => {
   try {
     return new URLSearchParams(location.search).get("admin") === "true";
@@ -209,6 +209,6 @@ export function setShareAccessKey(key: string | null) {
     if (key) localStorage.setItem(ACCESS_KEY, key);
     else localStorage.removeItem(ACCESS_KEY);
   } catch {
-    /* armazenamento indisponível */
+    /* storage unavailable */
   }
 }

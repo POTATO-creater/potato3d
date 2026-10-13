@@ -1,5 +1,5 @@
-// Projetos da versão web: mesmo layout e mesmo project.json do desktop
-// (src-tauri/src/pipeline.rs: Layout e ProjectState), dentro do OPFS.
+// Web projects: same layout and project.json as the desktop
+// (src-tauri/src/pipeline.rs: Layout and ProjectState), inside OPFS.
 
 import type { FrameInfo, ProjectState } from "../../../src/lib/api";
 import { sharpness } from "../pipeline/frames";
@@ -26,7 +26,7 @@ export const layout = (root: string) => ({
   state: `${root}/project.json`,
   dataset: `${root}/dataset`,
   images: `${root}/dataset/images`,
-  /** Frames recusados à mão, fora do dataset. */
+  /** Frames rejected by hand, kept outside the dataset. */
   rejected: `${root}/rejected`,
   model: `${root}/dataset/sparse/0`,
   masks: `${root}/masks`,
@@ -34,11 +34,11 @@ export const layout = (root: string) => ({
   training: `${root}/training`,
   finalPly: `${root}/splat.ply`,
   exports: `${root}/export`,
-  /** Clipes de retoque, um por pasta (retouch/<id>/clip.json…). */
+  /** Retouch clips, one per folder (retouch/<id>/clip.json…). */
   retouch: `${root}/retouch`,
-  /** Dataset do treino incremental, fora de dataset/ (o Brush lê tudo de lá). */
+  /** Incremental-training dataset, outside dataset/ (Brush reads everything in there). */
   retouchDataset: `${root}/dataset_retouch`,
-  /** Splat de antes do retoque: base do ajuste e do desfazer. */
+  /** Pre-retouch splat: base for fine-tuning and for undo. */
   retouchBase: `${root}/splat_before_retouch.ply`,
 });
 
@@ -54,7 +54,7 @@ export const emptyState = (): ProjectState => ({
   retouch: null,
 });
 
-/** project.json mais o instante da última gravação (para a limpeza). */
+/** project.json plus the last-save timestamp (for pruning). */
 type Stored = ProjectState & { updatedAt?: number };
 
 export async function readState(root: string): Promise<Stored> {
@@ -69,7 +69,7 @@ export async function saveState(root: string, state: ProjectState) {
   await writeFile(layout(root).state, JSON.stringify({ ...state, updatedAt: Date.now() }, null, 2));
 }
 
-/** Estado salvo, com os arquivos que a interface mostra já publicados. */
+/** Saved state, with the files the UI shows already published. */
 export async function openProject(root: string): Promise<ProjectState> {
   const l = layout(root);
   const s = await readState(root);
@@ -95,8 +95,8 @@ export async function openProject(root: string): Promise<ProjectState> {
   return s;
 }
 
-/** Recusa (move para `rejected/`) ou aceita de volta frames, como
- *  `set_frames_rejected` em src-tauri/src/pipeline.rs. */
+/** Rejects (moves to `rejected/`) or restores frames, like
+ *  `set_frames_rejected` in src-tauri/src/pipeline.rs. */
 export async function setFramesRejected(root: string, names: string[], rejected: boolean): Promise<ProjectState> {
   const l = layout(root);
   const state = await readState(root);
@@ -123,15 +123,15 @@ export async function setFramesRejected(root: string, names: string[], rejected:
       changed = true;
     }
   } catch (e) {
-    // Grava o que já mudou de lugar antes de repassar o erro.
+    // Save whatever already moved before rethrowing.
     await save();
     throw e;
   }
   return save();
 }
 
-/** Mantém só os projetos mais recentes: cada um ocupa centenas de MB na
- *  cota do navegador. */
+/** Keeps only the most recent projects: each takes hundreds of MB of the
+ *  browser's quota. */
 export async function pruneProjects(keep: string, max = 3) {
   const dir = await dirAt(PROJECTS, true);
   const all: { path: string; at: number }[] = [];
@@ -143,8 +143,8 @@ export async function pruneProjects(keep: string, max = 3) {
   for (const p of all.slice(max - 1)) await remove(p.path);
 }
 
-/** Frames de um dataset que não veio de um vídeo: nitidez medida como na
- *  extração, instante desconhecido. */
+/** Frames of a dataset that didn't come from a video: sharpness measured as in
+ *  extraction, timestamp unknown. */
 async function framesOf(images: string): Promise<FrameInfo[]> {
   const frames: FrameInfo[] = [];
   for (const name of await listFiles(images, IMAGE_EXT)) {
@@ -159,11 +159,11 @@ async function framesOf(images: string): Promise<FrameInfo[]> {
   return frames;
 }
 
-/** Estado de um projeto montado a partir de um dataset COLMAP já copiado. */
+/** Project state built from an already-copied COLMAP dataset. */
 async function datasetState(root: string, mapper: string, saved?: ProjectState): Promise<ProjectState> {
   const l = layout(root);
   const names = new Set(await listFiles(l.images, IMAGE_EXT));
-  // Do project.json do desktop vêm o instante e a nitidez de cada frame.
+  // The desktop's project.json provides each frame's timestamp and sharpness.
   const known = saved?.frames.filter((f) => names.has(basename(f.path)));
   const frames =
     known && known.length === names.size
@@ -171,7 +171,7 @@ async function datasetState(root: string, mapper: string, saved?: ProjectState):
       : await framesOf(l.images);
   const bin = async (n: string) => (await exists(`${l.model}/${n}`) ? (await readFile(`${l.model}/${n}`)).arrayBuffer() : null);
   const images = await bin("images.bin");
-  // Pode haver recortes a mais, de frames recusados (que não vêm junto).
+  // There may be extra masks from rejected frames (which aren't imported).
   const cut = new Set(await listFiles(l.masks, /\.png$/i));
   const masks = saved?.masks && [...names].every((n) => cut.has(`${stem(n)}.png`)) ? saved.masks : null;
   return {
@@ -184,9 +184,9 @@ async function datasetState(root: string, mapper: string, saved?: ProjectState):
   };
 }
 
-/** Copia uma pasta escolhida no disco para o projeto: um projeto do
- *  Gausify Orbit (dataset/ + masks/ + project.json) ou um dataset COLMAP
- *  (images/ + sparse/0 ou sparse/). */
+/** Copies a folder picked from disk into the project: a Gausify Orbit project
+ *  (dataset/ + masks/ + project.json) or a COLMAP dataset
+ *  (images/ + sparse/0 or sparse/). */
 export async function importFolder(src: FileSystemDirectoryHandle, root: string): Promise<ProjectState> {
   const sub = async (d: FileSystemDirectoryHandle, path: string[]) => {
     for (const p of path) d = await d.getDirectoryHandle(p);
@@ -201,11 +201,11 @@ export async function importFolder(src: FileSystemDirectoryHandle, root: string)
     try {
       saved = JSON.parse(await (await (await src.getFileHandle("project.json")).getFile()).text());
     } catch {
-      /* pasta de projeto sem project.json */
+      /* project folder without project.json */
     }
   }
   const images = await sub(dataset, ["images"]).catch(() => {
-    throw new Error(`"${src.name}" não tem images/ nem é uma pasta de projeto do Gausify Orbit.`);
+    throw new Error(`"${src.name}" has no images/ and is not a Gausify Orbit project folder.`);
   });
   const model = (await sub(dataset, ["sparse", "0"]).catch(() => null)) ?? (await sub(dataset, ["sparse"]).catch(() => null));
 
@@ -219,19 +219,19 @@ export async function importFolder(src: FileSystemDirectoryHandle, root: string)
   if (model) await copy(model, l.model, new RegExp(`^(${MODEL_FILES.join("|").replace(/\./g, "\\.")})$`));
   const masks = desktop && (await tryDir(["masks"]));
   if (masks && saved?.masks) await copy(masks, l.masks, /\.png$/i);
-  const state = await datasetState(root, "importado", saved);
+  const state = await datasetState(root, "imported", saved);
   await saveState(root, state);
   return state;
 }
 
-/** Dataset COLMAP servido por HTTP (`<base>/images/…`, `<base>/sparse/0/*.bin`),
- *  para os testes automatizados. Sem listagem de diretório: os nomes das
- *  imagens vêm do images.bin. */
+/** COLMAP dataset served over HTTP (`<base>/images/…`, `<base>/sparse/0/*.bin`),
+ *  for automated tests. No directory listing: image names come from
+ *  images.bin. */
 export async function importUrl(base: string, root: string): Promise<ProjectState> {
   base = base.replace(/\/+$/, "");
   const get = async (rel: string) => {
     const r = await fetch(`${base}/${rel}`);
-    if (!r.ok) throw new Error(`${r.status} ao baixar ${base}/${rel}`);
+    if (!r.ok) throw new Error(`${r.status} downloading ${base}/${rel}`);
     return r.blob();
   };
   const l = layout(root);
@@ -244,7 +244,7 @@ export async function importUrl(base: string, root: string): Promise<ProjectStat
       await writeFile(`${l.images}/${basename(n)}`, await get(`images/${n.split("/").map(encodeURIComponent).join("/")}`));
   };
   await Promise.all(Array.from({ length: 6 }, worker));
-  const state = await datasetState(root, `importado de ${basename(base)}`);
+  const state = await datasetState(root, `imported from ${basename(base)}`);
   await saveState(root, state);
   return state;
 }

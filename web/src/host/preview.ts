@@ -1,6 +1,6 @@
-// Prévia do recorte no painel (Host.maskPreview): o mesmo modelo do pipeline
-// num quadro só. Os modelos ficam abertos entre uma prévia e outra e são
-// liberados antes de um job, que abre os seus.
+// Mask preview in the panel (Host.maskPreview): the pipeline's model on a single
+// frame. Models stay open between previews and are released before a job,
+// which opens its own.
 
 import type { MaskMethod, MaskOptions, MaskPreviewer } from "../../../src/lib/api";
 import { borderKey, chromaMask } from "../pipeline/chroma";
@@ -10,7 +10,7 @@ import { cachedModel, MODELS, Segmenter } from "../pipeline/segment";
 
 let sam2: Promise<Sam2Preview> | null = null;
 let rmbg: Promise<Segmenter> | null = null;
-// Uma prévia de cada vez na GPU; as que chegam no meio esperam a anterior.
+// One preview at a time on the GPU; ones that arrive meanwhile wait for the previous.
 let queue: Promise<unknown> = Promise.resolve();
 
 function rgba(frame: ImageBitmap) {
@@ -61,5 +61,5 @@ export const maskPreview: MaskPreviewer = {
   },
 };
 
-/** Espera a liberação terminar (antes de abrir as sessões de um job). */
+/** Waits for the release to finish (before opening a job's sessions). */
 export const previewIdle = () => queue;

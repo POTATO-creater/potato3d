@@ -1,4 +1,4 @@
-// Mesmos casos dos testes de src-tauri/src/export (ply.rs, sog.rs, decimate.rs).
+// Same cases as the tests in src-tauri/src/export (ply.rs, sog.rs, decimate.rs).
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -8,7 +8,7 @@ import { kmeansTwoLevel, packQuat, quantize1d } from "./sog.ts";
 import { plyInfo, readPly, sample, truncateSh, writePly, type Splats } from "./splats.ts";
 import factory from "./webp/webp.mjs";
 
-test("PLY: ida e volta e corte de bandas SH", () => {
+test("PLY: round trip and SH band truncation", () => {
   const s = sample(100, 2);
   const bytes = writePly(s);
   const back = readPly(bytes);
@@ -21,32 +21,32 @@ test("PLY: ida e volta e corte de bandas SH", () => {
 
   const t = truncateSh(back, 1);
   assert.equal(t.rest.length, 100 * 9);
-  // Coeficiente 0 do canal G fica na posição 3 (antes estava em 8).
+  // Coefficient 0 of the G channel lands at index 3 (it was at 8).
   assert.equal(t.rest[3], back.rest[8]);
   assert.equal(t.rest[9 + 6], back.rest[24 + 16]);
 });
 
-test("SOG: quantizador monótono e próximo", () => {
+test("SOG: quantizer is monotonic and close", () => {
   const col = Float32Array.from({ length: 10_000 }, (_, i) => Math.sin(i * 0.37) * 3);
   const q = quantize1d([col], 256);
   for (let i = 1; i < q.centroids.length; i++) assert.ok(q.centroids[i - 1] <= q.centroids[i]);
   let err = 0;
   col.forEach((v, i) => (err = Math.max(err, Math.abs(v - q.centroids[q.labels[0][i]]))));
-  assert.ok(err < 0.1, `erro máximo ${err}`);
+  assert.ok(err < 0.1, `max error ${err}`);
 });
 
-test("SOG: quatérnio em 4 bytes", () => {
+test("SOG: quaternion in 4 bytes", () => {
   const q = [0.3, -0.5, 0.6, 0.2];
   const p = new Uint8Array(4);
   packQuat(q, 0, p, 0);
   const l = Math.hypot(...q);
   assert.equal(p[3] - 252, 2);
-  // Decodifica como o leitor: (b/255 − 0,5)·2/√2.
+  // Decode like the reader: (b/255 − 0.5)·2/√2.
   const dec = (b: number) => ((b / 255 - 0.5) * 2) / Math.SQRT2;
   [0, 1, 3].forEach((i, k) => assert.ok(Math.abs(dec(p[k]) - (q[i] / l) * Math.sign(q[2])) < 0.01));
 });
 
-test("SOG: k-means com rótulos dentro da paleta", () => {
+test("SOG: k-means with labels inside the palette", () => {
   const s = sample(5_000, 1);
   const { centroids, labels } = kmeansTwoLevel(s.rest, s.count, 9, 512);
   const count = centroids.length / 9;
@@ -54,13 +54,13 @@ test("SOG: k-means com rótulos dentro da paleta", () => {
   assert.ok(labels.every((l) => l < count));
 });
 
-test("decimação: chega ao alvo e conserva a tinta", () => {
+test("decimation: reaches the target and conserves ink", () => {
   const s = sample(40_000, 1);
   const out = decimate(s, 0.5, () => {})!;
   assert.ok(Math.abs(out.count - 20_000) < 400, `count ${out.count}`);
   assert.equal(out.rest.length, out.count * 9);
   for (const a of [out.pos, out.scale, out.opacity]) assert.ok(a.every(Number.isFinite));
-  // A tinta total (opacidade × área) não deve encolher muito com a fusão.
+  // Total ink (opacity × area) should not shrink much from merging.
   const ink = (x: Splats) => {
     let t = 0;
     for (let i = 0; i < x.count; i++) {
@@ -73,14 +73,14 @@ test("decimação: chega ao alvo e conserva a tinta", () => {
   assert.equal(decimate(sample(500, 0), 0.5, () => {}), null);
 });
 
-test("decimação: rotação ida e volta", () => {
+test("decimation: rotation round trip", () => {
   const n = Math.hypot(0.8, 0.2, -0.4, 0.4);
   const q = [0.8, 0.2, -0.4, 0.4].map((v) => v / n);
   const back = quatFromMatrix(quatToMatrix(q[0], q[1], q[2], q[3]));
   assert.ok(Math.abs(Math.abs(q.reduce((s, v, i) => s + v * back[i], 0)) - 1) < 1e-9);
 });
 
-test("SOG: pacote com meta.json, bandas SH e WebP que o libwebp lê", async () => {
+test("SOG: package with meta.json, SH bands and WebP that libwebp can read", async () => {
   const wasm = new URL("./webp/webp.wasm", import.meta.url);
   const m = (await factory({ wasmBinary: readFileSync(wasm) })) as {
     HEAPU8: Uint8Array;
@@ -103,7 +103,7 @@ test("SOG: pacote com meta.json, bandas SH e WebP que o libwebp lê", async () =
   assert.equal(r.name, "splat.sog");
   assert.equal(r.stats.outputCount, 3000);
 
-  // Lê o ZIP pelo diretório central.
+  // Read the ZIP through the central directory.
   const z = r.bytes, v = new DataView(z.buffer, z.byteOffset);
   const eocd = z.length - 22;
   assert.equal(v.getUint32(eocd, true), 0x06054b50);

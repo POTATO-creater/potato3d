@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Gera o favicon e os ícones do PWA (web/public/) a partir de assets/icon.png.
+"""Generates the favicon and PWA icons (web/public/) from assets/icon.png.
 
-Uso: python3 scripts/web-icons.py
+Usage: python3 scripts/web-icons.py
 
-- favicon.ico, icon-192.png, icon-512.png: o bloco arredondado do ícone, sem a
-  margem transparente do padrão do macOS (lê melhor em tamanhos pequenos).
-- icon-maskable-*.png e apple-touch-icon.png: opacos e sem cantos, porque o
-  sistema aplica a própria máscara. A esfera fica dentro da zona segura (80%).
+- favicon.ico, icon-192.png, icon-512.png: the icon's rounded tile, without the
+  transparent margin of the macOS template (reads better at small sizes).
+- icon-maskable-*.png and apple-touch-icon.png: opaque and without corners,
+  because the OS applies its own mask. The sphere stays inside the safe zone (80%).
 """
 
 from pathlib import Path
@@ -19,21 +19,21 @@ OUT = ROOT / "web" / "public"
 
 
 def tile(src: Image.Image) -> Image.Image:
-    """Recorta o bloco arredondado (tudo que é quase opaco)."""
+    """Crops the rounded tile (everything that is nearly opaque)."""
     box = src.getchannel("A").point(lambda a: 255 if a > 200 else 0).getbbox()
     return src.crop(box)
 
 
 def full_bleed(t: Image.Image) -> Image.Image:
-    """Bloco sem os cantos arredondados: o fundo é interpolado de uma grade 3×3
-    de cores amostradas dentro do próprio bloco (segue a vinheta dele)."""
+    """Tile without the rounded corners: the background is interpolated from a 3×3
+    grid of colors sampled inside the tile itself (following its vignette)."""
     w, h = t.size
     edge, corner, r = w // 12, w // 5, w // 40
     grid = Image.new("RGB", (3, 3))
     for gy in range(3):
         for gx in range(3):
-            # Nos cantos amostra mais para dentro, longe da curva transparente;
-            # o centro do bloco é a esfera, então usa a borda de cima.
+            # At the corners, sample further in, away from the transparent curve;
+            # the tile's center is the sphere, so use the top edge instead.
             inset = corner if gx != 1 and gy != 1 else edge
             x = (inset, w // 2, w - inset)[gx]
             y = edge if (gx, gy) == (1, 1) else (inset, h // 2, h - inset)[gy]
@@ -41,8 +41,8 @@ def full_bleed(t: Image.Image) -> Image.Image:
             mean = ImageStat.Stat(t.crop(box).convert("RGB"), t.getchannel("A").crop(box)).mean
             grid.putpixel((gx, gy), tuple(round(v) for v in mean))
     bg = grid.resize((w, h), Image.BICUBIC).convert("RGBA")
-    # Só a esfera e o entorno dela vêm do bloco, num disco esfumado: a borda
-    # do bloco não chega a aparecer.
+    # Only the sphere and its surroundings come from the tile, in a feathered
+    # disc: the tile's edge never shows.
     mask = Image.new("L", (w, h), 0)
     ImageDraw.Draw(mask).ellipse((w * 0.08, h * 0.08, w * 0.92, h * 0.92), fill=255)
     mask = mask.filter(ImageFilter.GaussianBlur(w * 0.04))

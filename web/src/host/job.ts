@@ -1,5 +1,5 @@
-// Frames → recorte → poses → treino no navegador, com os mesmos eventos,
-// regras de retomada e project.json de src-tauri/src/pipeline.rs.
+// Frames → masks → poses → training in the browser, with the same events,
+// resume rules and project.json as src-tauri/src/pipeline.rs.
 
 import type { JobConfig, JobEvent, Msg, ProjectState, Stage } from "../../../src/lib/api";
 import { train } from "../brush";
@@ -13,14 +13,14 @@ import { IMAGE_EXT, layout, pruneProjects, readState, saveState } from "./projec
 const ORDER: Stage[] = ["frames", "masks", "poses", "train"];
 const before = (a: Stage, b: Stage) => ORDER.indexOf(a) <= ORDER.indexOf(b);
 
-const cancelled = () => new DOMException("cancelado", "AbortError");
+const cancelled = () => new DOMException("cancelled", "AbortError");
 
-/** Eventos de uma etapa, com o progresso limitado a ~15 por segundo. */
+/** Events for one stage, with progress throttled to ~15 per second. */
 function reporter(emit: (e: JobEvent) => void, stage: Stage, signal: AbortSignal) {
   emit({ type: "stageStarted", stage });
   let last = 0;
   return {
-    /** Também é o ponto de cancelamento dos laços de cada etapa. */
+    /** Also the cancellation point for each stage's loops. */
     progress(fraction: number, message: Msg) {
       if (signal.aborted) throw cancelled();
       const now = performance.now();
@@ -49,7 +49,7 @@ export async function runJob(cfg: JobConfig, emit: (e: JobEvent) => void, signal
 
 async function run(cfg: JobConfig, emit: (e: JobEvent) => void, signal: AbortSignal, at: { stage: Stage | null }): Promise<string | null> {
   const l = layout(cfg.projectDir);
-  /** Clipes de retoque, o dataset e o splat de antes do retoque. */
+  /** Retouch clips, their dataset and the pre-retouch splat. */
   const retouchFiles = [l.retouch, l.retouchDataset, l.retouchBase];
   const from = cfg.fromStage;
   const to = before(cfg.toStage ?? "train", from) ? from : (cfg.toStage ?? "train");
@@ -62,7 +62,7 @@ async function run(cfg: JobConfig, emit: (e: JobEvent) => void, signal: AbortSig
     const t = performance.now();
     const rep = reporter(emit, "frames", signal);
     await pruneProjects(l.root);
-    // Etapas seguintes ficam inválidas.
+    // Later stages become invalid.
     const clear = async () => {
       for (const p of [l.images, l.rejected, `${l.dataset}/sparse`, l.masks, l.alpha, l.training, l.finalPly, l.exports, ...retouchFiles]) await remove(p);
       return dirAt(l.images, true);
@@ -70,7 +70,7 @@ async function run(cfg: JobConfig, emit: (e: JobEvent) => void, signal: AbortSig
     let picked: PickedFrame[];
     if (cfg.images?.length) {
       const sources = cfg.images.map(inputImage);
-      rep.log(`${sources.length} imagens de ${cfg.videoPath}`);
+      rep.log(`${sources.length} images from ${cfg.videoPath}`);
       picked = await framesFromImages(sources, cfg.frames, await clear(), (f) => rep.progress(f, { key: "frames.sharpness" }));
     } else {
       const v = video(cfg.videoPath);
@@ -89,11 +89,11 @@ async function run(cfg: JobConfig, emit: (e: JobEvent) => void, signal: AbortSig
     emit({ type: "framesReady", frames });
     emit({ type: "stageDone", stage: "frames", seconds: secs(t) });
   } else if (!state.frames.length || !(await exists(l.images))) {
-    throw new Error("não há frames extraídos neste projeto; rode a partir da etapa de frames");
+    throw new Error("this project has no extracted frames; run from the frames stage");
   }
   if (to === "frames") return null;
 
-  // ---------- 2. Recorte (opcional) ----------
+  // ---------- 2. Masks (optional) ----------
   const m = cfg.masks;
   if (before(from, "masks")) {
     if (m.enabled) {
@@ -107,7 +107,7 @@ async function run(cfg: JobConfig, emit: (e: JobEvent) => void, signal: AbortSig
       await publishDir(l.masks, /\.png$/i);
       rep.progress(1, m.method === "chroma" ? { key: "masks.doneChroma", args: { n: stats.count } } : { key: "masks.done", args: { n: stats.count, backend: stats.backend } });
       state = { ...state, masks: stats, masksDir: l.masks };
-      // As poses usaram o recorte anterior.
+      // The poses were computed with the previous masks.
       if (m.forPoses) {
         for (const p of retouchFiles) await remove(p);
         state = { ...state, poses: null, finalPly: null, lastPsnr: null, lastExport: null, retouch: null };
@@ -121,10 +121,10 @@ async function run(cfg: JobConfig, emit: (e: JobEvent) => void, signal: AbortSig
   }
   if (to === "masks") return null;
   if (m.enabled && !(state.masks && (await exists(l.masks))))
-    throw new Error("não há recortes neste projeto; rode a partir da etapa de recorte");
+    throw new Error("this project has no masks; run from the masks stage");
 
   // ---------- 3. Poses ----------
-  // Recortar de novo sem usar as máscaras nas poses não muda as poses.
+  // Re-masking without using the masks for poses doesn't change the poses.
   const hasModel = () => exists(`${l.model}/images.bin`);
   const reuse = from === "masks" && !(m.enabled && m.forPoses) && state.poses && (await hasModel());
   if (reuse) {
@@ -156,23 +156,23 @@ async function run(cfg: JobConfig, emit: (e: JobEvent) => void, signal: AbortSig
       total: Number(s.total),
       points: Number(s.points),
       reprojectionError: Number(s.meanError),
-      mapper: ["SfM incremental (navegador)", s.flat ? "órbita plana" : null].filter(Boolean).join(" · "),
+      mapper: ["incremental SfM (browser)", s.flat ? "flat orbit" : null].filter(Boolean).join(" · "),
       inferred: Number(s.inferred ?? 0),
       refined: Number(s.refined ?? 0),
     };
-    if (stats.registered < 3) throw new Error(`só ${stats.registered} câmeras registradas; o vídeo não reconstrói`);
-    // Os clipes de retoque têm poses do modelo antigo: deixam de valer.
+    if (stats.registered < 3) throw new Error(`only ${stats.registered} cameras registered; the video can't be reconstructed`);
+    // Retouch clips have poses from the old model: they are no longer valid.
     for (const p of retouchFiles) await remove(p);
     state = { ...state, poses: stats, finalPly: null, lastPsnr: null, lastExport: null, retouch: null };
     await saveState(l.root, state);
     emit({ type: "posesReady", stats });
     emit({ type: "stageDone", stage: "poses", seconds: secs(t) });
   } else if (!state.poses || !(await hasModel())) {
-    throw new Error("não há poses calculadas neste projeto; rode a partir da etapa de poses");
+    throw new Error("this project has no computed poses; run from the poses stage");
   }
   if (to === "poses") return null;
 
-  // ---------- 4. Treino ----------
+  // ---------- 4. Training ----------
   at.stage = "train";
   const t = performance.now();
   const rep = reporter(emit, "train", signal);
@@ -185,7 +185,7 @@ async function run(cfg: JobConfig, emit: (e: JobEvent) => void, signal: AbortSig
     await buildAlpha(await dirAt(l.images), await dirAt(l.masks), await dirAt(`${l.alpha}/images`, true), m, rep.log, (_, msg) =>
       rep.progress(0, msg),
     );
-    // O Brush acha as imagens pelo nome gravado no images.bin.
+    // Brush finds the images by the name stored in images.bin.
     for (const f of ["cameras.bin", "points3D.bin"]) await writeFile(`${l.alpha}/sparse/0/${f}`, await readFile(`${l.model}/${f}`));
     const images = await (await readFile(`${l.model}/images.bin`)).arrayBuffer();
     await writeFile(`${l.alpha}/sparse/0/images.bin`, renameImages(images, (n) => `${stem(n)}.png`));
@@ -200,18 +200,18 @@ async function run(cfg: JobConfig, emit: (e: JobEvent) => void, signal: AbortSig
     m.enabled,
     {
       status: (msg) => rep.progress(0, msg),
-      dataset: (n, e) => rep.log(`dataset: ${n} vistas de treino${e ? `, ${e} de avaliação` : ""}`),
+      dataset: (n, e) => rep.log(`dataset: ${n} training views${e ? `, ${e} for evaluation` : ""}`),
       step: (iter, splats) => {
         rep.progress(iter / total, { key: "train.step", args: { iter, total, splats } });
         emit({ type: "train", event: { kind: "step", iter, splats } });
       },
       eval: (iter, psnr, ssim) => {
         lastPsnr = psnr;
-        rep.log(`avaliação no passo ${iter}: PSNR ${psnr.toFixed(2)} dB, SSIM ${ssim.toFixed(3)}`);
+        rep.log(`eval at step ${iter}: PSNR ${psnr.toFixed(2)} dB, SSIM ${ssim.toFixed(3)}`);
         emit({ type: "train", event: { kind: "eval", iter, psnr, ssim } });
       },
       snapshot: (iter, data) => {
-        // Prévias ficam só na memória; a anterior é solta pelo publish.
+        // Previews stay in memory only; publish revokes the previous one.
         const path = `${l.training}/export_${iter}.ply`;
         publish(path, new Blob([data as BlobPart]));
         if (snapshot) unpublishUnder(snapshot);
@@ -224,7 +224,7 @@ async function run(cfg: JobConfig, emit: (e: JobEvent) => void, signal: AbortSig
   );
   publish(l.finalPly, await writeFile(l.finalPly, ply as BufferSource));
   rep.progress(1, { key: "train.done" });
-  // Splat novo: o de antes do retoque não serve mais de base (os clipes, sim).
+  // New splat: the pre-retouch one is no longer a valid base (the clips still are).
   await remove(l.retouchBase);
   state = { ...state, finalPly: l.finalPly, lastPsnr, lastExport: null, retouch: null };
   await saveState(l.root, state);

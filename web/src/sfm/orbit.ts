@@ -1,6 +1,6 @@
-// Correções da órbita depois do SfM, as mesmas de src-tauri/src/scene.rs:
-// órbita plana (flatten_orbit) e poses inferidas para os frames que a
-// reconstrução não registrou (fill_missing).
+// Post-SfM orbit corrections, the same as src-tauri/src/scene.rs: flat orbit
+// (flatten_orbit) and inferred poses for frames the reconstruction did not
+// register (fill_missing).
 
 import { bundleAdjust } from "./ba.ts";
 import type { Pose } from "./geometry";
@@ -21,14 +21,14 @@ function median(v: number[]) {
   return s[s.length >> 1];
 }
 
-/** Para onde as câmeras olham: mediana dos pontos (como scene.rs: read). */
+/** Where the cameras look: median of the points (like scene.rs: read). */
 function target(model: SfmModel, centers: Vec3[]): Vec3 {
   if (!model.points.length) return scale(centers.reduce((a, c) => add(a, c), [0, 0, 0] as Vec3), 1 / centers.length);
   return [0, 1, 2].map((k) => median(model.points.map((p) => p.X[k]))) as Vec3;
 }
 
-/** Normal do plano da órbita (Newell: soma dos produtos vetoriais de câmeras
- *  consecutivas em torno da média), ou null se as câmeras não formam arco. */
+/** Orbit plane normal (Newell: sum of cross products of consecutive cameras
+ *  around the mean), or null if the cameras don't form an arc. */
 function orbitNormal(centers: Vec3[]): Vec3 | null {
   const k = centers.length;
   const mean = scale(centers.reduce((a, c) => add(a, c), [0, 0, 0] as Vec3), 1 / k);
@@ -38,7 +38,7 @@ function orbitNormal(centers: Vec3[]): Vec3 | null {
   return Math.hypot(...n) < 1e-3 * spread * k ? null : unit(n);
 }
 
-/** Menor rotação que leva o vetor unitário `a` em `b` (Rodrigues). */
+/** Smallest rotation taking unit vector `a` to `b` (Rodrigues). */
 function rotationBetween(a: Vec3, b: Vec3): Mat3 {
   const v = cross(a, b);
   const K = Float64Array.from([0, -v[2], v[1], v[2], 0, -v[0], -v[1], v[0], 0]);
@@ -50,11 +50,11 @@ function rotationBetween(a: Vec3, b: Vec3): Mat3 {
 }
 
 /**
- * Força a órbita plana: projeta o centro de cada câmera no plano da órbita e
- * gira a câmera para o sujeito ficar no mesmo pixel; depois reajusta só os
- * pontos 3D (poses e focal fixas). `xy[i]`: keypoints da imagem i. Retorna o
- * maior desvio de altura removido, em fração do raio, ou null se as câmeras
- * não formam um arco.
+ * Forces a flat orbit: projects each camera center onto the orbit plane and
+ * rotates the camera so the subject stays at the same pixel; then re-fits only
+ * the 3D points (poses and focal fixed). `xy[i]`: keypoints of image i. Returns
+ * the largest height deviation removed, as a fraction of the radius, or null
+ * if the cameras don't form an arc.
  */
 export function flattenOrbit(model: SfmModel, xy: ArrayLike<number>[]): number | null {
   const reg = model.poses.flatMap((p, i) => (p ? [i] : []));
@@ -74,7 +74,7 @@ export function flattenOrbit(model: SfmModel, xy: ArrayLike<number>[]): number |
     model.poses[i] = poseAt(R, c2);
   });
 
-  // Pontos: BA só com eles variando.
+  // Points: BA with only the points varying.
   const obsImg: number[] = [], obsPt: number[] = [], obsUV: number[] = [];
   model.points.forEach((p, j) => {
     for (const [i, k] of p.obs) {
@@ -112,7 +112,7 @@ export function flattenOrbit(model: SfmModel, xy: ArrayLike<number>[]): number |
   return maxH / Math.max(radius, 1e-12);
 }
 
-/** Rotação de θ em torno do eixo unitário `n`. */
+/** Rotation of θ about unit axis `n`. */
 const about = (n: Vec3, th: number) => expSO3(scale(n, th));
 
 type Quat = [number, number, number, number];
@@ -140,8 +140,8 @@ function matFromQuat([w, x, y, z]: Quat): Mat3 {
   ]);
 }
 
-/** Hermite cúbico com tangentes de Catmull-Rom não uniformes: segue a
- *  velocidade dos vizinhos dos dois lados da lacuna. */
+/** Cubic Hermite with non-uniform Catmull-Rom tangents: follows the
+ *  neighbours' speed on both sides of the gap. */
 function hermite(s: number[], y: number[], a: number, b: number, at: number) {
   const slope = (i: number, j: number) => (y[j] - y[i]) / (s[j] - s[i]);
   const ma = a > 0 ? slope(a - 1, b) : slope(a, b);
@@ -152,7 +152,7 @@ function hermite(s: number[], y: number[], a: number, b: number, at: number) {
   return (2 * u3 - 3 * u2 + 1) * y[a] + (u3 - 2 * u2 + u) * h * ma + (-2 * u3 + 3 * u2) * y[b] + (u3 - u2) * h * mb;
 }
 
-/** Inclinação (mínimos quadrados) de y em s. */
+/** Least-squares slope of y over s. */
 function fitSlope(s: number[], y: number[]) {
   const n = s.length;
   const ms = s.reduce((a, v) => a + v, 0) / n, my = y.reduce((a, v) => a + v, 0) / n;
@@ -164,9 +164,10 @@ function fitSlope(s: number[], y: number[]) {
   return den > 0 ? num / den : 0;
 }
 
-/** Ângulo, raio e altura da órbita no instante `t`: Hermite entre os
- *  registrados vizinhos; antes do primeiro ou depois do último, extrapola o
- *  ângulo com a velocidade dos 4 da ponta e usa o raio e a altura médios deles. */
+/** Orbit angle, radius and height at time `t`: Hermite between the
+ *  neighbouring registered frames; before the first or after the last, the
+ *  angle is extrapolated with the speed of the 4 end frames, using their mean
+ *  radius and height. */
 function orbitAt(s: number[], th: number[], rad: number[], hgt: number[], t: number): [number, number, number] {
   const b = s.findIndex((v) => v > t);
   if (b > 0) return [th, rad, hgt].map((y) => hermite(s, y, b - 1, b, t)) as [number, number, number];
@@ -176,18 +177,18 @@ function orbitAt(s: number[], th: number[], rad: number[], hgt: number[], t: num
   return [th[end] + fitSlope(ks.map((k) => s[k]), ks.map((k) => th[k])) * (t - s[end]), mean(rad), mean(hgt)];
 }
 
-/** Correspondências 2D (pixels) → 3D de um frame, pelos matches com os
- *  vizinhos registrados. */
+/** A frame's 2D (pixels) → 3D correspondences, from its matches with
+ *  registered neighbours. */
 export interface Correspondences {
   uv: Float64Array;
   X: Float64Array;
   n: number;
 }
 
-/** Ruído típico de um ponto 2D casado (pixels): pesa as correspondências
- *  contra a confiança na trajetória (`refinePose`). */
+/** Typical noise of a matched 2D point (pixels): weighs the correspondences
+ *  against the trajectory confidence (`refinePose`). */
 const KEYPOINT_SIGMA = 0.5;
-/** Mínimo de inliers (≤ 4 px) para aceitar uma pose refinada. */
+/** Minimum inliers (≤ 4 px) to accept a refined pose. */
 const REFINE_MIN_INLIERS = 15;
 
 function reproj(model: SfmModel, R: Mat3, t: Vec3, c: Correspondences, j: number) {
@@ -196,7 +197,7 @@ function reproj(model: SfmModel, R: Mat3, t: Vec3, c: Correspondences, j: number
   return Math.hypot((model.f * p[0]) / p[2] + model.cx - c.uv[2 * j], (model.f * p[1]) / p[2] + model.cy - c.uv[2 * j + 1]);
 }
 
-/** Resolve o sistema 6×6 `A x = b` (eliminação com pivô parcial). */
+/** Solves the 6×6 system `A x = b` (elimination with partial pivoting). */
 function solve6(A: number[][], b: number[]): number[] | null {
   for (let col = 0; col < 6; col++) {
     let piv = col;
@@ -220,13 +221,14 @@ function solve6(A: number[][], b: number[]): number[] | null {
 }
 
 /**
- * Refina a pose inferida (rotação mundo→câmera `R0`, centro `c0`) contra as
- * correspondências, partindo dela: a cada rodada só entram as que a pose atual
- * projeta perto (limiar de 32 px caindo até 4 px), num Gauss-Newton amortecido
- * com perda de Huber, para matches errados longe da pose inferida não puxarem
- * a câmera. O centro inferido entra como prior com desvio `sigma`: onde os
- * pontos vistos deixam uma direção mal amarrada, vale a trajetória; onde
- * amarram bem, os pontos. Mesmo algoritmo de scene.rs: refine_pose.
+ * Refines the inferred pose (world→camera rotation `R0`, center `c0`) against
+ * the correspondences, starting from it: each round only uses those the
+ * current pose projects nearby (threshold from 32 px down to 4 px), in a damped
+ * Gauss-Newton with Huber loss, so wrong matches far from the inferred pose
+ * don't pull the camera. The inferred center enters as a prior with deviation
+ * `sigma`: where the visible points leave a direction poorly constrained, the
+ * trajectory wins; where they constrain it well, the points do. Same algorithm
+ * as scene.rs: refine_pose.
  */
 export function refinePose(
   model: SfmModel,
@@ -237,7 +239,7 @@ export function refinePose(
 ): { pose: Pose; inliers: number } | null {
   let R = R0;
   let t = scale(mulVec3(R0, c0), -1);
-  // Custo em px²: o prior vira (σ_px/σ)²·|centro − c0|².
+  // Cost in px²: the prior becomes (σ_px/σ)²·|center − c0|².
   const prior = (KEYPOINT_SIGMA / Math.max(sigma, 1e-12)) ** 2;
   const centerAt = (R: Mat3, t: Vec3) => scale(mulTVec3(R, t), -1);
   const all = [...Array(corr.n).keys()];
@@ -267,7 +269,7 @@ export function refinePose(
         const e = [model.f * p[0] * iz + model.cx - corr.uv[2 * j], model.f * p[1] * iz + model.cy - corr.uv[2 * j + 1]];
         const nrm = Math.hypot(e[0], e[1]);
         const w = nrm <= delta ? 1 : delta / nrm;
-        // d(pixel)/d(p) · [−[RX]× | I], com p = exp(δr)·RX + t + δt.
+        // d(pixel)/d(p) · [−[RX]× | I], with p = exp(δr)·RX + t + δt.
         const jp = [[model.f * iz, 0, -model.f * p[0] * iz * iz], [0, model.f * iz, -model.f * p[1] * iz * iz]];
         const sk = [[0, RX[2], -RX[1]], [-RX[2], 0, RX[0]], [RX[1], -RX[0], 0]];
         const J = [0, 1].map((a) => [
@@ -279,7 +281,7 @@ export function refinePose(
           for (let b = 0; b < 6; b++) H[a][b] += w * (J[0][a] * J[0][b] + J[1][a] * J[1][b]);
         }
       }
-      // Prior: centro = −Rᵀt; d(centro) = −Rᵀ[t]×·δr − Rᵀ·δt.
+      // Prior: center = −Rᵀt; d(center) = −Rᵀ[t]×·δr − Rᵀ·δt.
       const Rt = transpose3(R);
       const d = sub(centerAt(R, t), c0);
       const tx = Float64Array.from([0, -t[2], t[1], t[2], 0, -t[0], -t[1], t[0], 0]);
@@ -307,29 +309,29 @@ export function refinePose(
   return inliers >= REFINE_MIN_INLIERS ? { pose: { R, t }, inliers } : null;
 }
 
-/** Ângulo (radianos) da rotação relativa entre duas orientações. */
+/** Angle (radians) of the relative rotation between two orientations. */
 function rotationAngle(a: Mat3, b: Mat3) {
   const M = mul3(a, transpose3(b));
   return Math.acos(Math.min(1, Math.max(-1, (M[0] + M[4] + M[8] - 1) / 2)));
 }
 
 export interface FillOptions {
-  /** Órbita plana: a pose refinada volta para o plano da órbita. */
+  /** Flat orbit: the refined pose is put back onto the orbit plane. */
   flat?: boolean;
-  /** Por índice do frame não registrado; os que não têm ficam só inferidos. */
+  /** Keyed by unregistered frame index; frames without an entry are only inferred. */
   correspondences?: Map<number, Correspondences>;
 }
 
 /**
- * Dá pose aos frames que o SfM não registrou, a partir dos vizinhos: em
- * coordenadas da órbita (ângulo em torno do eixo, raio e altura), por Hermite
- * cúbico no instante de cada frame, ou seja, seguindo a velocidade e o
- * espaçamento da câmera; a orientação relativa à órbita vem por slerp. Nas
- * pontas, extrapola com a velocidade angular dos últimos frames. Sem arco
- * definido, interpola os centros em linha reta. Depois, a pose inferida é
- * refinada contra os pontos 3D que o frame enxerga (`refinePose`), se houver
- * correspondências suficientes e o resultado não se afastar demais dela.
- * `at[i]`: instante (ou índice) do frame i, crescente. Mesmo algoritmo de
+ * Gives poses to frames the SfM did not register, from their neighbours: in
+ * orbit coordinates (angle about the axis, radius and height), via cubic
+ * Hermite at each frame's timestamp, i.e. following the camera's speed and
+ * spacing; orientation relative to the orbit comes from slerp. At the ends, it
+ * extrapolates with the angular speed of the last frames. Without a defined
+ * arc, centers are interpolated linearly. The inferred pose is then refined
+ * against the 3D points the frame sees (`refinePose`), if there are enough
+ * correspondences and the result doesn't stray too far from it.
+ * `at[i]`: timestamp (or index) of frame i, increasing. Same algorithm as
  * scene.rs: fill_missing.
  */
 export function fillMissing(
@@ -348,7 +350,7 @@ export function fillMissing(
   const o = target(model, centers);
   const radius = median(centers.map((c) => Math.hypot(...sub(c, o))));
 
-  // Base do plano: e1 aponta para a primeira câmera.
+  // Plane basis: e1 points toward the first camera.
   const d0 = sub(centers[0], o);
   const e1 = unit(sub(d0, scale(n, dot(d0, n))));
   const e2 = cross(n, e1);
@@ -358,13 +360,13 @@ export function fillMissing(
     const hh = dot(d, n);
     const p = sub(d, scale(n, hh));
     let a = Math.atan2(dot(p, e2), dot(p, e1));
-    // Desenrola: passo de menos de meia volta entre registrados vizinhos.
+    // Unwrap: less than half a turn between neighbouring registered frames.
     if (th.length) a += 2 * Math.PI * Math.round((th[th.length - 1] - a) / (2 * Math.PI));
     th.push(a);
     rad.push(Math.hypot(...p));
     hgt.push(hh);
   });
-  // Orientação "na órbita": a câmera girada de volta para θ = 0.
+  // "On-orbit" orientation: the camera rotated back to θ = 0.
   const q0: Quat[] = [];
   reg.forEach((i, k) => {
     const R0 = linear ? model.poses[i]!.R : mul3(model.poses[i]!.R, about(n, th[k]));
@@ -374,8 +376,9 @@ export function fillMissing(
     q0.push(q);
   });
 
-  // Confiança na trajetória, medida nos próprios registrados: cada um
-  // previsto sem ele (no meio, pelos vizinhos; nas pontas, extrapolado).
+  // Trajectory confidence, measured on the registered frames themselves: each
+  // one predicted without it (in the middle, from neighbours; at the ends,
+  // extrapolated).
   const atCenter = ([theta, r, h]: [number, number, number]) =>
     add(o, add(add(scale(e1, r * Math.cos(theta)), scale(e2, r * Math.sin(theta))), scale(n, h)));
   const loo = (k: number) => {
@@ -388,9 +391,9 @@ export function fillMissing(
     linear || reg.length < 6
       ? [0.05 * radius, 0.05 * radius]
       : [median(Array.from({ length: last - 1 }, (_, k) => loo(k + 1))), Math.max(loo(0), loo(last))];
-  // A partir do erro medido com um frame só de fora: no meio, cresce com a
-  // lacuna (≈ linear numa órbita suave); na ponta, com o quadrado da
-  // distância extrapolada.
+  // From the error measured with a single frame left out: in the middle it
+  // grows with the gap (≈ linear on a smooth orbit); at the ends, with the
+  // square of the extrapolated distance.
   const sigmaAt = (t: number) => {
     const b = s.findIndex((v) => v > t);
     const sigma =
@@ -409,7 +412,7 @@ export function fillMissing(
       q = slerp(q0[b - 1], q0[b], u);
       lin = add(centers[b - 1], scale(sub(centers[b], centers[b - 1]), u));
     } else {
-      // Antes do primeiro ou depois do último registrado.
+      // Before the first or after the last registered frame.
       const end = b === 0 ? 0 : last;
       const [k0, k1] = end === 0 ? [0, Math.min(3, last)] : [Math.max(0, last - 3), last];
       q = q0[end];
@@ -422,11 +425,11 @@ export function fillMissing(
     const r = corr && refinePose(model, R, c, sigmaAt(t), corr);
     if (r) {
       const c2 = centerOf(r.pose);
-      // Longe demais da trajetória: matches ruins, fica a inferida.
+      // Too far from the trajectory: bad matches, keep the inferred pose.
       if (Math.hypot(...sub(c2, c)) <= 0.2 * radius && rotationAngle(r.pose.R, R) <= (15 * Math.PI) / 180) {
         [R, c] = [r.pose.R, c2];
         if (opts.flat && !linear) {
-          // De volta ao plano, com o sujeito no mesmo pixel.
+          // Back onto the plane, with the subject at the same pixel.
           const flat = sub(c, scale(n, dot(sub(c, o), n) - orbit[2]));
           R = mul3(R, rotationBetween(unit(sub(o, flat)), unit(sub(o, c))));
           c = flat;
@@ -439,12 +442,12 @@ export function fillMissing(
   return { inferred: missing, refined };
 }
 
-/** Correspondências dos frames não registrados: seus matches com frames
- *  registrados, levados aos pontos 3D que estes enxergam. Um keypoint casado
- *  com pontos diferentes fica com o mais votado. Mesma regra de colmap.rs:
+/** Correspondences for unregistered frames: their matches with registered
+ *  frames, carried over to the 3D points those frames see. A keypoint matched
+ *  to different points keeps the most voted one. Same rule as colmap.rs:
  *  correspondences. */
 export function correspondences(model: SfmModel, xy: ArrayLike<number>[], matches: PairMatches[]): Map<number, Correspondences> {
-  const seen = new Map<number, Map<number, number>>(); // imagem → keypoint → ponto
+  const seen = new Map<number, Map<number, number>>(); // image → keypoint → point
   model.points.forEach((p, pi) => {
     for (const [i, k] of p.obs) {
       let m = seen.get(i);
@@ -455,7 +458,7 @@ export function correspondences(model: SfmModel, xy: ArrayLike<number>[], matche
   const votes = new Map<number, Map<number, Map<number, number>>>();
   for (const m of matches) {
     const aReg = !!model.poses[m.a] && seen.has(m.a), bReg = !!model.poses[m.b] && seen.has(m.b);
-    // Exatamente um dos dois fora do modelo.
+    // Exactly one of the two outside the model.
     if (aReg === bReg || (aReg ? model.poses[m.b] : model.poses[m.a])) continue;
     const [missing, km, kr, reg] = aReg ? [m.b, m.ib, m.ia, m.a] : [m.a, m.ia, m.ib, m.b];
     const pts = seen.get(reg)!;

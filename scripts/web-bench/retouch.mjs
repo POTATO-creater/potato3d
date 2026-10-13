@@ -1,17 +1,19 @@
 #!/usr/bin/env node
-// Retoque de ponta a ponta num Chrome headless (abas visíveis no app de
-// desktop sofrem throttling e o treino WebGPU não anda). Precisa do
-// `pnpm web:dev` com WEB_FS_ANY=1 e de um ComfyUI (ou o simulado,
-// scripts/comfy-mock.mjs) no endereço dado.
+// End-to-end retouch in headless Chrome (visible tabs in the desktop app get
+// throttled and WebGPU training stalls). Requires `pnpm web:dev` with
+// WEB_FS_ANY=1 and a ComfyUI (or the mock, scripts/comfy-mock.mjs) at the
+// given address.
 //
-//   node scripts/web-bench/retouch.mjs <url do app> <projeto.gorbit> <workflow.json>
+//   node scripts/web-bench/retouch.mjs <app url> <project.gorbit> <workflow.json>
 //        [--comfy http://127.0.0.1:8188] [--camera 27]
 //        [--preset view|below|above|orbitBelow|orbitAbove|wave] [--seconds 3.2] [--tilt 30]
 //        [--steps 3000] [--out splat.ply]
 //
-// Abre o pacote, mira a câmera de índice --camera, cria o clipe do preset,
-// gera o vídeo de referência, restaura pelo ComfyUI, aplica o retoque e
-// grava o splat resultante em --out.
+// Opens the package, aims at camera index --camera, creates the preset's clip,
+// generates the reference video, restores it through ComfyUI, applies the
+// retouch and writes the resulting splat to --out.
+//
+// The UI selectors below match pt-BR text, so the script forces the pt-BR locale.
 
 import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -24,7 +26,7 @@ const opt = (name, def) => {
   return i >= 0 ? rest[i + 1] : def;
 };
 if (!url || !gorbit || !workflowPath) {
-  console.error("uso: retouch.mjs <url> <projeto.gorbit> <workflow.json> [opções] (ver o cabeçalho)");
+  console.error("usage: retouch.mjs <url> <project.gorbit> <workflow.json> [options] (see the header)");
   process.exit(2);
 }
 const comfy = opt("comfy", "http://127.0.0.1:8188");
@@ -71,7 +73,7 @@ for (let i = 0; i < 100 && !target; i++) {
   } catch {}
 }
 if (!target) {
-  console.error("Chrome não abriu a porta de depuração.");
+  console.error("Chrome did not open the debugging port.");
   process.exit(1);
 }
 const ws = new WebSocket(target.webSocketDebuggerUrl);
@@ -96,11 +98,11 @@ const send = (method, params = {}) =>
   });
 const evaluate = async (expression) => {
   const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
-  if (r.result?.exceptionDetails) throw new Error(r.result.exceptionDetails.exception?.description ?? "erro na página");
+  if (r.result?.exceptionDetails) throw new Error(r.result.exceptionDetails.exception?.description ?? "page error");
   return r.result?.result?.value;
 };
 const fail = (msg) => {
-  console.log("ERRO:", msg);
+  console.log("ERROR:", msg);
   process.exit(1);
 };
 const btn = (text) => `[...document.querySelectorAll('.retouch button')].find(b => b.textContent.trim().startsWith(${JSON.stringify(text)}))`;
@@ -114,7 +116,7 @@ const waitFor = async (expr, what, timeoutS = 600) => {
   fail(`timeout: ${what}`);
 };
 
-// Configuração do ComfyUI e do recorte antes de abrir o app.
+// ComfyUI and motion settings before opening the app.
 const graph = JSON.parse(readFileSync(workflowPath, "utf8"));
 const save = [...Object.entries(graph)].find(([, n]) => /^Save|Combine/.test(n.class_type))?.[0];
 const load = [...Object.entries(graph)].find(([, n]) => /^(VHS_)?LoadVideo/.test(n.class_type));
@@ -134,31 +136,31 @@ await sleep(2500);
 
 const t0 = Date.now();
 const secs = () => ((Date.now() - t0) / 1000).toFixed(0);
-console.log("abrindo o pacote…");
+console.log("opening the package…");
 await evaluate(`(async () => {
   const file = new File([await (await fetch(${JSON.stringify(`/@fs${resolve(gorbit)}`)})).blob()], ${JSON.stringify(gorbit.split("/").pop())});
   const dt = new DataTransfer(); dt.items.add(file);
   for (const type of ["dragenter", "dragover", "drop"]) window.dispatchEvent(new DragEvent(type, { dataTransfer: dt, bubbles: true, cancelable: true }));
 })()`);
-await waitFor(`!!${btn("Traçar trajetória")} && !${btn("Traçar trajetória")}.disabled && !!window.__gorbitViewer?.hasSplat()`, "projeto aberto", 300);
+await waitFor(`!!${btn("Traçar trajetória")} && !${btn("Traçar trajetória")}.disabled && !!window.__gorbitViewer?.hasSplat()`, "project open", 300);
 const projectDir = await evaluate(`document.querySelector('.panel .path')?.textContent`);
-console.log(`[${secs()}s] projeto ${projectDir}`);
+console.log(`[${secs()}s] project ${projectDir}`);
 
-// Mira a câmera real pedida (o preset centra na foto mais próxima da vista).
+// Aim at the requested real camera (the preset centers on the photo closest to the view).
 await evaluate(`(async () => {
-  // O mesmo endereço com que o app carregou o módulo (senão é outra instância, sem o host).
+  // The same URL the app loaded the module from (otherwise it's another instance, without the host).
   const src = performance.getEntriesByType('resource').map((e) => e.name).find((n) => n.split('?')[0].endsWith('/src/lib/api.ts'));
   const { api } = await import(src);
   const cams = await api.retouch.cameras(${JSON.stringify(projectDir)});
   window.__gorbitViewer.goTo(cams.cameras[${camera}]);
 })()`);
 await sleep(500);
-// O movimento (--preset) já está escolhido no localStorage.
+// The motion (--preset) is already chosen in localStorage.
 await evaluate(`${btn("Traçar trajetória")}.click()`);
 await sleep(300);
 await evaluate(`${btn("Gerar vídeo de referência")}.click()`);
-await waitFor(`!document.querySelector('.retouch-draft') && document.querySelectorAll('.retouch-clip').length > 0`, "vídeo de referência");
-console.log(`[${secs()}s] referência gerada`);
+await waitFor(`!document.querySelector('.retouch-draft') && document.querySelectorAll('.retouch-clip').length > 0`, "reference video");
+console.log(`[${secs()}s] reference generated`);
 
 await evaluate(`[...document.querySelectorAll('.retouch-clip')].pop().querySelector('button').click()`);
 let last = "";
@@ -172,9 +174,9 @@ await (async () => {
     await sleep(500);
   }
 })();
-console.log(`[${secs()}s] restaurado · ${await evaluate(`[...document.querySelectorAll('.retouch-clip')].pop()?.querySelector('.muted')?.textContent`)}`);
+console.log(`[${secs()}s] restored · ${await evaluate(`[...document.querySelectorAll('.retouch-clip')].pop()?.querySelector('.muted')?.textContent`)}`);
 
-// Passos do ajuste e aplicar.
+// Fine-tune steps, then apply.
 await evaluate(`(() => {
   const input = document.querySelector('.retouch-apply input');
   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ${steps});
@@ -189,12 +191,12 @@ for (;;) {
   last = s ?? last;
   if (await evaluate(`!!document.querySelector('.retouch-applied') && !document.querySelector('.retouch-apply .retouch-progress')`)) break;
   const err = await evaluate(`document.querySelector('.retouch-error')?.textContent ?? null`);
-  if (err) fail(`aplicar: ${err}`);
+  if (err) fail(`apply: ${err}`);
   await sleep(1000);
 }
 console.log(`[${secs()}s] ${await evaluate(`document.querySelector('.retouch-applied .good')?.textContent`)}`);
 
-// Splat final do OPFS para o disco.
+// Final splat from OPFS to disk.
 const b64 = await evaluate(`(async () => {
   let d = await navigator.storage.getDirectory();
   for (const p of ${JSON.stringify(projectDir)}.split('/').filter(Boolean)) d = await d.getDirectoryHandle(p);
@@ -203,5 +205,5 @@ const b64 = await evaluate(`(async () => {
   return btoa(s);
 })()`);
 writeFileSync(out, Buffer.from(b64, "base64"));
-console.log(`splat retocado em ${out}`);
+console.log(`retouched splat at ${out}`);
 process.exit(0);

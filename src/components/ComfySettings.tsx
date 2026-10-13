@@ -6,7 +6,7 @@ import { loadComfy, saveComfy, type ComfySettings as Settings, type ComfyWorkflo
 import { checkIO, editableFields, fileFields, guessIO, listNodes, paramDefault, parseWorkflow, WorkflowParseError, type WorkflowParam } from "../lib/comfy/workflow";
 import { Field, Select } from "./fields";
 
-/** Texto de um erro do ComfyUI para a interface. */
+/** UI text for a ComfyUI error. */
 export function comfyErrorText(t: Messages, e: unknown): string {
   const te = t.comfy.errors;
   if (e instanceof ComfyError) {
@@ -30,8 +30,8 @@ export function comfyErrorText(t: Messages, e: unknown): string {
 
 const ICON_CLOSE = "M4.5 4.5l9 9M13.5 4.5l-9 9";
 
-/** Configuração da integração: endereço do ComfyUI e workflows importados,
- *  com os nós de entrada e saída de cada um. Fica no localStorage. */
+/** Integration settings: ComfyUI address and imported workflows, with each
+ *  one's input and output nodes. Stored in localStorage. */
 export function ComfySettings({ onClose }: { onClose: () => void }) {
   const { t } = useI18n();
   const tc = t.comfy;
@@ -50,7 +50,7 @@ export function ComfySettings({ onClose }: { onClose: () => void }) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      // Um Select aberto consome o Esc (preventDefault) para fechar a lista.
+      // An open Select consumes Esc (preventDefault) to close its list.
       if (e.key !== "Escape" || e.defaultPrevented) return;
       onClose();
     };
@@ -168,7 +168,7 @@ function WorkflowCard({ wf, onChange, onRemove }: { wf: ComfyWorkflow; onChange:
   const fields = inputNode ? fileFields(inputNode) : [];
   const problems = checkIO(wf.graph, wf.io);
   const label = (n: (typeof nodes)[number]) => `${n.id} · ${n.title}`;
-  // Nós com campo de arquivo primeiro; o resto também vale (nós customizados).
+  // Nodes with a file field first; the rest are allowed too (custom nodes).
   const inputOptions = [...nodes].sort((a, b) => Number(fileFields(b).length > 0) - Number(fileFields(a).length > 0));
   const outputOptions = [...nodes].sort((a, b) => Number(/save|combine/i.test(b.classType)) - Number(/save|combine/i.test(a.classType)));
 
@@ -229,8 +229,8 @@ function WorkflowCard({ wf, onChange, onRemove }: { wf: ComfyWorkflow; onChange:
   );
 }
 
-/** Campos do workflow que aparecem no painel de retoque para editar antes de
- *  enviar (prompt, seed, força da LoRA...). */
+/** Workflow fields shown in the retouch panel for editing before sending
+ *  (prompt, seed, LoRA strength...). */
 function ParamsEditor({
   wf,
   nodes,
@@ -311,7 +311,7 @@ function ParamsEditor({
   );
 }
 
-/** Botão do topbar que abre a configuração. */
+/** Topbar button that opens the settings. */
 export function ComfySettingsButton() {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);

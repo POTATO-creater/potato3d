@@ -1,7 +1,6 @@
-//! Etapa 1: extração de frames candidatos com ffmpeg (decodificação por
-//! hardware) e seleção dos mais nítidos, distribuídos uniformemente ao
-//! longo da órbita. Também aceita frames já extraídos (imagens soltas ou
-//! uma pasta), com a mesma seleção.
+//! Step 1: extract candidate frames with ffmpeg (hardware decoding) and pick
+//! the sharpest ones, evenly spread along the orbit. Also accepts
+//! pre-extracted frames (loose images or a folder), with the same selection.
 
 use std::cmp::Ordering;
 use std::path::{Path, PathBuf};
@@ -27,14 +26,14 @@ pub struct VideoInfo {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FrameOptions {
-    /// Quantos frames entram na reconstrução.
+    /// How many frames go into the reconstruction.
     pub target_frames: u32,
-    /// Lado maior máximo dos frames (px).
+    /// Maximum long side of the frames (px).
     pub max_side: u32,
-    /// Candidatos extraídos por frame final; o mais nítido de cada janela vence.
+    /// Candidates extracted per final frame; the sharpest in each window wins.
     pub oversample: u32,
     pub trim_start: f64,
-    /// `None` = até o fim do vídeo.
+    /// `None` = until the end of the video.
     pub trim_end: Option<f64>,
 }
 
@@ -44,23 +43,23 @@ pub struct FrameInfo {
     pub path: String,
     pub time: f64,
     pub sharpness: f32,
-    /// Nome da imagem de origem, quando os frames vieram de imagens (aí
-    /// `time` não se aplica).
+    /// Source image name, when the frames came from images (then `time`
+    /// doesn't apply).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
-    /// Recusado à mão: a imagem fica em `rejected/`, fora do dataset.
+    /// Manually rejected: the image lives in `rejected/`, outside the dataset.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub rejected: bool,
 }
 
-/// Frames já extraídos, na ordem da órbita.
+/// Pre-extracted frames, in orbit order.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImageSetInfo {
     pub paths: Vec<String>,
-    /// Pasta das imagens: dá nome ao projeto.
+    /// Image folder: names the project.
     pub dir: String,
-    /// Da primeira imagem, já girada conforme o EXIF.
+    /// Of the first image, already rotated per EXIF.
     pub width: u32,
     pub height: u32,
 }
@@ -72,10 +71,10 @@ pub async fn probe(ffprobe: &Path, video: &Path) -> Result<VideoInfo> {
         .args(["-of", "json"])
         .arg(video);
     let out = run_capture(cmd).await?;
-    let json: serde_json::Value = serde_json::from_str(&out).context("saída inesperada do ffprobe")?;
+    let json: serde_json::Value = serde_json::from_str(&out).context("unexpected ffprobe output")?;
     let stream = json["streams"]
         .get(0)
-        .context("o arquivo não tem trilha de vídeo")?;
+        .context("the file has no video track")?;
     let fps = stream["avg_frame_rate"]
         .as_str()
         .and_then(|r| {
@@ -96,7 +95,7 @@ pub async fn probe(ffprobe: &Path, video: &Path) -> Result<VideoInfo> {
     })
 }
 
-/// Extrai candidatos para `raw_dir`. Retorna o fps de amostragem usado.
+/// Extracts candidates into `raw_dir`. Returns the sampling fps used.
 pub async fn extract(
     ffmpeg: &Path,
     video: &Path,
@@ -115,7 +114,7 @@ pub async fn extract(
         .min(info.duration);
     let span = end - start;
     if span <= 0.1 {
-        bail!("trecho selecionado do vídeo é vazio");
+        bail!("selected video range is empty");
     }
 
     let wanted = (opts.target_frames * opts.oversample.max(1)) as f64;
@@ -130,8 +129,8 @@ pub async fn extract(
     let mut cmd = Command::new(ffmpeg);
     cmd.args(["-hide_banner", "-nostats", "-loglevel", "error", "-y"])
         .args(["-progress", "pipe:1"])
-        // VideoToolbox no macOS; no Windows/Linux o ffmpeg escolhe
-        // (D3D11VA, CUDA, VAAPI…) e cai para software se nada servir.
+        // VideoToolbox on macOS; on Windows/Linux ffmpeg picks one
+        // (D3D11VA, CUDA, VAAPI…) and falls back to software if none works.
         .args(["-hwaccel", if cfg!(target_os = "macos") { "videotoolbox" } else { "auto" }])
         .args(["-ss", &format!("{start:.3}"), "-t", &format!("{span:.3}")])
         .arg("-i")
@@ -154,8 +153,8 @@ pub async fn extract(
     Ok(sample_fps)
 }
 
-/// Variância do Laplaciano numa versão reduzida em tons de cinza: métrica
-/// clássica e barata de foco/nitidez.
+/// Variance of the Laplacian on a downscaled grayscale copy: a classic,
+/// cheap focus/sharpness metric.
 fn sharpness(path: &Path) -> Result<f32> {
     let img = image::open(path)?.thumbnail(640, 640).to_luma8();
     let (w, h) = img.dimensions();
@@ -177,8 +176,8 @@ fn sharpness(path: &Path) -> Result<f32> {
     Ok((sum_sq / n - mean * mean) as f32)
 }
 
-/// Escolhe o frame mais nítido de cada janela e grava em `images_dir` com
-/// numeração sequencial (a ordem importa para o matching circular).
+/// Picks the sharpest frame in each window and writes it to `images_dir` with
+/// sequential numbering (order matters for circular matching).
 pub fn select(
     raw_dir: &Path,
     images_dir: &Path,
@@ -192,7 +191,7 @@ pub fn select(
         .collect();
     candidates.sort();
     if candidates.is_empty() {
-        bail!("o ffmpeg não gerou nenhum frame");
+        bail!("ffmpeg produced no frames");
     }
 
     let done = std::sync::atomic::AtomicUsize::new(0);
@@ -230,8 +229,8 @@ pub fn select(
     Ok(out)
 }
 
-/// Divide os candidatos em `target` janelas seguidas e devolve o índice do
-/// mais nítido de cada uma (no empate, o último).
+/// Splits the candidates into `target` consecutive windows and returns the
+/// index of the sharpest in each (last one on ties).
 fn sharpest_per_window(scores: &[f32], target: u32) -> Vec<usize> {
     let total = scores.len();
     let target = (target as usize).clamp(1, total.max(1));
@@ -244,17 +243,17 @@ fn sharpest_per_window(scores: &[f32], target: u32) -> Vec<usize> {
         .collect()
 }
 
-/// Extensões aceitas como frames já extraídos.
+/// Extensions accepted as pre-extracted frames.
 pub const IMAGE_EXT: &[&str] = &["jpg", "jpeg", "png", "webp"];
 
 fn is_image(p: &Path) -> bool {
     let name = p.file_name().map(|n| n.to_string_lossy()).unwrap_or_default();
-    // `._foo.jpg`: metadados do macOS em discos exFAT/FAT, não imagens.
+    // `._foo.jpg`: macOS metadata on exFAT/FAT drives, not images.
     !name.starts_with('.')
         && p.extension().is_some_and(|e| IMAGE_EXT.contains(&e.to_string_lossy().to_lowercase().as_str()))
 }
 
-/// Ordem natural ("frame2" antes de "frame10"), sem diferenciar maiúsculas.
+/// Natural order ("frame2" before "frame10"), case-insensitive.
 fn natural_cmp(a: &str, b: &str) -> Ordering {
     let (mut a, mut b) = (a.chars().peekable(), b.chars().peekable());
     loop {
@@ -289,7 +288,7 @@ fn natural_cmp(a: &str, b: &str) -> Ordering {
     }
 }
 
-/// Decodificador da imagem e a rotação pedida pelo EXIF (fotos de celular).
+/// Image decoder plus the rotation requested by EXIF (phone photos).
 fn open_oriented(p: &Path) -> Result<(impl image::ImageDecoder, image::metadata::Orientation)> {
     use image::ImageDecoder;
     let mut dec = image::ImageReader::open(p)?.with_guessed_format()?.into_decoder()?;
@@ -305,12 +304,12 @@ fn oriented_size(p: &Path) -> Result<(u32, u32)> {
     Ok(if matches!(o, Rotate90 | Rotate270 | Rotate90FlipH | Rotate270FlipH) { (h, w) } else { (w, h) })
 }
 
-/// Imagens soltas e pastas (só o primeiro nível) → lista na ordem dos nomes.
+/// Loose images and folders (top level only) → list in name order.
 pub fn probe_images(paths: &[PathBuf]) -> Result<ImageSetInfo> {
     let mut files = Vec::new();
     for p in paths {
         if p.is_dir() {
-            for e in std::fs::read_dir(p).with_context(|| format!("não foi possível ler a pasta {}", p.display()))? {
+            for e in std::fs::read_dir(p).with_context(|| format!("could not read folder {}", p.display()))? {
                 let f = e?.path();
                 if f.is_file() && is_image(&f) {
                     files.push(f);
@@ -323,9 +322,9 @@ pub fn probe_images(paths: &[PathBuf]) -> Result<ImageSetInfo> {
     files.sort_by(|a, b| natural_cmp(&a.to_string_lossy(), &b.to_string_lossy()));
     files.dedup();
     let Some(first) = files.first() else {
-        bail!("nenhuma imagem ({}) encontrada", IMAGE_EXT.join(", "));
+        bail!("no images ({}) found", IMAGE_EXT.join(", "));
     };
-    let (width, height) = oriented_size(first).with_context(|| format!("não foi possível ler {}", first.display()))?;
+    let (width, height) = oriented_size(first).with_context(|| format!("could not read {}", first.display()))?;
     let dir = match paths {
         [d] if d.is_dir() => d.clone(),
         _ => first.parent().map(Path::to_path_buf).unwrap_or_default(),
@@ -338,8 +337,8 @@ pub fn probe_images(paths: &[PathBuf]) -> Result<ImageSetInfo> {
     })
 }
 
-/// Frames a partir de imagens: a mais nítida de cada janela (como no vídeo),
-/// girada pelo EXIF e reduzida para caber em `max_side`, vira 00000.jpg, …
+/// Frames from images: the sharpest in each window (as with video), rotated
+/// per EXIF and downscaled to fit `max_side`, becomes 00000.jpg, …
 pub fn from_images(
     sources: &[PathBuf],
     images_dir: &Path,
@@ -347,16 +346,16 @@ pub fn from_images(
     on_progress: impl Fn(f32) + Sync,
 ) -> Result<Vec<FrameInfo>> {
     if sources.is_empty() {
-        bail!("nenhuma imagem para usar como frame");
+        bail!("no images to use as frames");
     }
-    // A pasta de saída é apagada antes de gravar.
+    // The output folder is wiped before writing.
     if let Ok(out) = images_dir.canonicalize() {
         if sources.iter().any(|s| s.canonicalize().is_ok_and(|s| s.starts_with(&out))) {
-            bail!("as imagens estão dentro da pasta do projeto ({}); escolha outra pasta de projeto", out.display());
+            bail!("the images are inside the project folder ({}); choose another project folder", out.display());
         }
     }
 
-    // Metade do progresso medindo a nitidez de todas, metade gravando as escolhidas.
+    // Half the progress scores sharpness of all images, half writes the picked ones.
     let done = std::sync::atomic::AtomicUsize::new(0);
     let tick = |base: f32, total: usize| {
         let d = done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
@@ -367,7 +366,7 @@ pub fn from_images(
     let scores: Vec<f32> = sources
         .par_iter()
         .map(|p| {
-            let s = sharpness(p).with_context(|| format!("não foi possível ler {}", p.display()));
+            let s = sharpness(p).with_context(|| format!("could not read {}", p.display()));
             tick(0.0, sources.len());
             s
         })
@@ -386,16 +385,16 @@ pub fn from_images(
         .map(|(i, &k)| {
             let src = &sources[k];
             let size = write_frame(src, &images_dir.join(format!("{i:05}.jpg")), max)
-                .with_context(|| format!("não foi possível converter {}", src.display()));
+                .with_context(|| format!("could not convert {}", src.display()));
             tick(0.5, picked.len());
             size
         })
         .collect::<Result<_>>()?;
 
-    // O COLMAP e o Brush usam uma câmera só para todos os frames.
+    // COLMAP and Brush use a single camera for all frames.
     if let Some(i) = sizes.iter().position(|s| *s != sizes[0]) {
         bail!(
-            "as imagens têm tamanhos diferentes ({}: {}×{}, {}: {}×{}); use imagens de uma mesma câmera",
+            "the images have different sizes ({}: {}×{}, {}: {}×{}); use images from a single camera",
             name_of(&sources[picked[0]]),
             sizes[0].0,
             sizes[0].1,
@@ -422,8 +421,8 @@ fn name_of(p: &Path) -> String {
     p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
 }
 
-/// Grava um frame JPEG; devolve o tamanho final. Um JPEG que já cabe e não
-/// pede rotação é copiado sem recompressão.
+/// Writes a JPEG frame; returns the final size. A JPEG that already fits and
+/// needs no rotation is copied without re-encoding.
 fn write_frame(src: &Path, dest: &Path, max_side: u32) -> Result<(u32, u32)> {
     use image::metadata::Orientation::NoTransforms;
     use image::ImageDecoder;
@@ -463,7 +462,7 @@ mod tests {
     fn windows_pick_sharpest() {
         let s = [1.0, 3.0, 2.0, 5.0, 4.0, 0.0];
         assert_eq!(sharpest_per_window(&s, 3), [1, 3, 4]);
-        // Menos imagens que o alvo: usa todas.
+        // Fewer images than the target: use them all.
         assert_eq!(sharpest_per_window(&s, 100), [0, 1, 2, 3, 4, 5]);
     }
 
@@ -476,7 +475,7 @@ mod tests {
             let img = image::RgbImage::from_fn(400, 200, |x, y| image::Rgb([((x * i) % 256) as u8, (y % 256) as u8, 0]));
             img.save(src.join(format!("frame{i}.png"))).unwrap();
         }
-        std::fs::write(src.join("._frame3.png"), b"lixo do macOS").unwrap();
+        std::fs::write(src.join("._frame3.png"), b"macOS junk").unwrap();
         let set = probe_images(&[src.clone()]).unwrap();
         assert_eq!((set.width, set.height, set.paths.len()), (400, 200, 3));
         assert!(set.paths[2].ends_with("frame10.png"));
@@ -488,7 +487,7 @@ mod tests {
         assert_eq!(out[2].source.as_deref(), Some("frame10.png"));
         assert_eq!(image::image_dimensions(&out[0].path).unwrap(), (100, 50));
 
-        // Tamanhos diferentes não formam uma câmera só.
+        // Different sizes can't form a single camera.
         image::RgbImage::new(300, 300).save(src.join("frame11.png")).unwrap();
         let set = probe_images(&[src.clone()]).unwrap();
         let paths: Vec<PathBuf> = set.paths.iter().map(PathBuf::from).collect();

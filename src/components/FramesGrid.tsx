@@ -4,13 +4,13 @@ import { useI18n } from "../i18n";
 
 const nameOf = (p: string) => p.split(/[\\/]/).pop() ?? p;
 const stemOf = (p: string) => (p.split(/[\\/]/).pop() ?? p).replace(/\.[^.]+$/, "");
-/** De onde o frame veio: o instante no vídeo ou a imagem de origem. */
+/** Where the frame came from: the video time or the source image. */
 const origin = (f: FrameInfo) => f.source ?? `${f.time.toFixed(2)} s`;
 
-/** Recorte por CSS (luminância da máscara), no mesmo enquadramento da <img>
- *  (object-fit: cover, centralizada). */
+/** CSS masking (mask luminance), framed like the <img> (object-fit: cover,
+ *  centered). */
 function frameMaskStyle(f: FrameInfo, masksDir: { path: string; version: number } | null) {
-  // Frame recusado pode não ter recorte: a máscara faltando o esconderia.
+  // A rejected frame may have no mask: the missing mask would hide it.
   if (!masksDir || f.rejected) return undefined;
   const url = `url("${fileUrl(`${masksDir.path}/${stemOf(f.path)}.png`, masksDir.version)}")`;
   return {
@@ -26,8 +26,8 @@ function frameMaskStyle(f: FrameInfo, masksDir: { path: string; version: number 
   } as React.CSSProperties;
 }
 
-/** Ícones dos botões redondos do modal: SVG centralizado pela geometria, e
- *  não glifos de texto, que cada fonte assenta numa altura. */
+/** Icons for the modal's round buttons: SVG centered by geometry rather than
+ *  text glyphs, which each font sets at a different height. */
 function ModalIcon({ d }: { d: string }) {
   return (
     <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden>
@@ -39,8 +39,8 @@ const ICON_PREV = "M11 3.5 5.5 9l5.5 5.5";
 const ICON_NEXT = "M7 3.5 12.5 9 7 14.5";
 const ICON_CLOSE = "M4.5 4.5l9 9M13.5 4.5l-9 9";
 
-/** Um frame em tela cheia, com setas (e ← → no teclado) para os vizinhos.
- *  `masksDir` presente mostra o recorte. */
+/** One frame fullscreen, with arrows (and ← → keys) to its neighbors.
+ *  When `masksDir` is set, shows the mask. */
 export function FrameLightbox({
   frames,
   index,
@@ -67,7 +67,7 @@ export function FrameLightbox({
       if (e.key === "Escape") onClose();
       else if (e.key in to) go(to[e.key]);
       else return;
-      // Captura na janela: o player de vídeo também usa as setas.
+      // Capture on the window: the video player also uses the arrow keys.
       e.preventDefault();
       e.stopPropagation();
     };
@@ -75,7 +75,7 @@ export function FrameLightbox({
     return () => window.removeEventListener("keydown", onKey, true);
   });
 
-  // Os frames são grandes: adianta os vizinhos para a troca ser imediata.
+  // Frames are large: preload the neighbors so switching is instant.
   useEffect(() => {
     for (const i of [index - 1, index + 1]) {
       const f = frames[i];
@@ -118,8 +118,8 @@ export interface MenuItem {
   danger?: boolean;
 }
 
-/** Menu de contexto na posição do clique, mantido dentro da janela. Fecha com
- *  Esc, clique fora, rolagem ou perda de foco. */
+/** Context menu at the click position, kept inside the window. Closes on
+ *  Esc, outside click, scroll or blur. */
 function ContextMenu({ x, y, items, onClose }: { x: number; y: number; items: (MenuItem | "sep")[]; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ left: x, top: y });
@@ -168,10 +168,10 @@ function ContextMenu({ x, y, items, onClose }: { x: number; y: number; items: (M
   );
 }
 
-/** Miniaturas dos frames escolhidos, com a nitidez relativa de cada um.
- *  Frames bem abaixo da mediana costumam virar borrão no splat. Com recorte,
- *  a máscara é aplicada por CSS (luminância) sobre um xadrez. O botão direito
- *  recusa um frame (sai do recorte, das poses e do treino) ou o aceita de volta. */
+/** Thumbnails of the selected frames, with each one's relative sharpness.
+ *  Frames well below the median tend to become blur in the splat. With masks,
+ *  the mask is applied via CSS (luminance) over a checkerboard. Right-click
+ *  rejects a frame (dropped from masks, poses and training) or restores it. */
 export function FramesGrid({
   frames,
   version,
@@ -182,9 +182,9 @@ export function FramesGrid({
   frames: FrameInfo[];
   version: number;
   masksDir: { path: string; version: number } | null;
-  /** Recusa (ou aceita de volta) frames pelo nome do arquivo. */
+  /** Rejects (or restores) frames by file name. */
   onReject?: (names: string[], rejected: boolean) => void;
-  /** Um job está rodando: os arquivos não podem mudar de lugar. */
+  /** A job is running: files must not move. */
   locked?: boolean;
 }) {
   const { t } = useI18n();

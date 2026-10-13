@@ -1,7 +1,7 @@
 import { CATALOGS, LOCALES, useI18n, type Locale } from "../i18n";
 import { Select } from "./fields";
 
-/** Troca o idioma da interface (fica salvo no navegador/webview). */
+/** Switches the UI language (persisted in the browser/webview). */
 export function LanguageSelect() {
   const { locale, setLocale, t } = useI18n();
   return (

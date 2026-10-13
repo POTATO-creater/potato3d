@@ -1,4 +1,4 @@
-// Host do app desktop: comandos do backend em Rust via Tauri.
+// Desktop app host: Rust backend commands via Tauri.
 
 import { Channel, convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -34,13 +34,13 @@ const api: Api = {
 
 export const tauriHost: Host = {
   api,
-  // Protocolo `asset:` do Tauri.
+  // Tauri's `asset:` protocol.
   fileUrl(path, bust) {
     const url = convertFileSrc(path);
     return bust === undefined ? url : `${url}?v=${bust}`;
   },
   async pickFiles(extensions) {
-    const p = await open({ multiple: true, filters: [{ name: "Vídeo ou imagens", extensions }] });
+    const p = await open({ multiple: true, filters: [{ name: "Video or images", extensions }] });
     return p ?? [];
   },
   async pickFramesFolder() {
@@ -52,7 +52,7 @@ export const tauriHost: Host = {
     return typeof p === "string" ? p : null;
   },
   async pickPackageDest(projectDir) {
-    // Ao lado da pasta do projeto: video_splat → video_splat.gorbit.
+    // Next to the project folder: video_splat → video_splat.gorbit.
     const p = await save({
       defaultPath: `${projectDir.replace(/[\\/]+$/, "")}.${PACKAGE_EXT}`,
       filters: [{ name: "Gausify Orbit", extensions: [PACKAGE_EXT] }],
@@ -61,7 +61,7 @@ export const tauriHost: Host = {
   },
   reveal: (path) => revealItemInDir(path),
   readBlob: (path) => fetch(convertFileSrc(path)).then((r) => r.blob()),
-  // O desktop compartilha pela versão web publicada (CORS liberado no Worker).
+  // Desktop shares via the published web version (CORS allowed on the Worker).
   shareOrigin: import.meta.env.VITE_SHARE_ORIGIN ?? "https://gausify-orbit.obraiadev.workers.dev",
   onDrop(handler) {
     const un = getCurrentWebview().onDragDropEvent((e) => {

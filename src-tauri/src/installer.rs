@@ -1,9 +1,9 @@
-//! Instalação das ferramentas externas pelo próprio app (primeiro uso).
+//! In-app installation of the external tools (first run).
 //!
-//! No Windows baixa o COLMAP (com CUDA se houver GPU NVIDIA) e o ffmpeg para
-//! a pasta de ferramentas do app, conferindo o SHA-256. O Brush já vem
-//! dentro do instalador (sidecar). No macOS/Linux as ferramentas vêm do
-//! gerenciador de pacotes; o app só baixa o modelo RMBG-1.4, se pedido.
+//! On Windows it downloads COLMAP (with CUDA if there is an NVIDIA GPU) and
+//! ffmpeg into the app's tools folder, verifying SHA-256. Brush already ships
+//! inside the installer (sidecar). On macOS/Linux the tools come from the
+//! package manager; the app only downloads the RMBG-1.4 model, if requested.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -18,7 +18,7 @@ use crate::proc::Cancelled;
 use crate::tools::{tools_root, Tools};
 
 const COLMAP_TAG: &str = "4.2.1";
-// SHA-256 publicados na release 4.2.1 do COLMAP.
+// SHA-256 hashes published in the COLMAP 4.2.1 release.
 const COLMAP_CUDA: (&str, &str, u64) = (
     "colmap-x64-windows-cuda.zip",
     "e9c5cbd84c2ea986d2e970a2473fc2d2e6b34a2cdcf5d3df2765c319a63af881",
@@ -29,41 +29,41 @@ const COLMAP_CPU: (&str, &str, u64) = (
     "c493d88cb4a43f21afba42cb55bf786e5434a0420e73db0ba1454c5d8b3686ae",
     127_731_595,
 );
-/// BiRefNet-lite (MIT), revisão fixa do onnx-community no Hugging Face.
+/// BiRefNet-lite (MIT), pinned revision of onnx-community on Hugging Face.
 const BIREFNET: (&str, &str, u64) = (
     "https://huggingface.co/onnx-community/BiRefNet_lite-ONNX/resolve/de15b22ba131738a16dff04aab8bdf8dc32e3ac1/onnx/model.onnx",
     "5600024376f572a557870a5eb0afb1e5961636bef4e1e22132025467d0f03333",
     224_005_088,
 );
-/// MODNet (Apache 2.0), revisão fixa do Xenova/modnet no Hugging Face.
+/// MODNet (Apache 2.0), pinned revision of Xenova/modnet on Hugging Face.
 const MODNET: (&str, &str, u64) = (
     "https://huggingface.co/Xenova/modnet/resolve/fa2fa546052fba4c08921230a26cc69a333fca12/onnx/model.onnx",
     "07c308cf0fc7e6e8b2065a12ed7fc07e1de8febb7dc7839d7b7f15dd66584df9",
     25_888_640,
 );
-/// RMBG-1.4 (BRIA, licença não comercial), revisão fixa do briaai/RMBG-1.4.
-/// Só é baixado quando o usuário escolhe esse método.
+/// RMBG-1.4 (BRIA, non-commercial license), pinned revision of briaai/RMBG-1.4.
+/// Only downloaded when the user picks this method.
 const RMBG: (&str, &str, u64) = (
     "https://huggingface.co/briaai/RMBG-1.4/resolve/2ceba5a5efaec153162aedea169f76caf9b46cf8/onnx/model.onnx",
     "8cafcf770b06757c4eaced21b1a88e57fd2b66de01b8045f35f01535ba742e0f",
     176_153_355,
 );
-/// Builds estáveis do ffmpeg (LGPL) do BtbN. A tag "latest" é refeita
-/// diariamente, então o arquivo e o hash são resolvidos pela API do GitHub.
+/// BtbN's stable ffmpeg builds (LGPL). The "latest" tag is rebuilt daily, so
+/// the file and hash are resolved through the GitHub API.
 const FFMPEG_RELEASE: &str = "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Package {
-    /// Subpasta em `tools_root()`; o pacote deve conter `bin/<exe>`.
+    /// Subfolder in `tools_root()`; the package must contain `bin/<exe>`.
     pub id: String,
     pub label: String,
     pub file: String,
     pub url: String,
     pub sha256: String,
     pub size: u64,
-    /// Zip: executável procurado em `bin/<exe>`. Arquivo único (modelo):
-    /// nome final dentro de `tools_root()/models/`.
+    /// Zip: executable looked up at `bin/<exe>`. Single file (model): final
+    /// name inside `tools_root()/models/`.
     pub exe: String,
     pub archive: bool,
 }
@@ -74,7 +74,7 @@ pub struct Plan {
     pub packages: Vec<Package>,
     pub total_bytes: u64,
     pub cuda: bool,
-    /// Explicação quando não há nada a baixar por aqui (macOS/Linux).
+    /// Explanation when there is nothing to download here (macOS/Linux).
     pub note: Option<String>,
 }
 
@@ -111,10 +111,10 @@ async fn ffmpeg_package(client: &reqwest::Client) -> Result<Package> {
         .send()
         .await?
         .error_for_status()
-        .context("não foi possível consultar a release do ffmpeg no GitHub")?
+        .context("could not query the ffmpeg release on GitHub")?
         .json()
         .await?;
-    // ffmpeg-n<versão>-latest-win64-lgpl-<versão>.zip; pega a maior versão.
+    // ffmpeg-n<version>-latest-win64-lgpl-<version>.zip; pick the highest version.
     let mut best: Option<(Vec<u32>, &serde_json::Value)> = None;
     for a in release["assets"].as_array().into_iter().flatten() {
         let name = a["name"].as_str().unwrap_or_default();
@@ -130,11 +130,11 @@ async fn ffmpeg_package(client: &reqwest::Client) -> Result<Package> {
             best = Some((ver, a));
         }
     }
-    let (_, a) = best.context("nenhum build do ffmpeg para Windows encontrado")?;
+    let (_, a) = best.context("no ffmpeg build for Windows found")?;
     let sha256 = a["digest"]
         .as_str()
         .and_then(|d| d.strip_prefix("sha256:"))
-        .context("o GitHub não publicou o SHA-256 do ffmpeg; abortando por segurança")?;
+        .context("GitHub did not publish the ffmpeg SHA-256; aborting for safety")?;
     Ok(Package {
         id: "ffmpeg".into(),
         label: "ffmpeg".into(),
@@ -160,16 +160,16 @@ fn model_package(id: &str, label: &str, (url, sha, size): (&str, &str, u64), fil
     }
 }
 
-/// O que falta instalar neste computador. `rmbg`: incluir o RMBG-1.4.
+/// What is still missing on this computer. `rmbg`: include RMBG-1.4.
 pub async fn plan(rmbg: bool) -> Result<Plan> {
     let tools = Tools::detect();
     let rmbg = (rmbg && crate::tools::ONNX_AVAILABLE && tools.rmbg_model.is_none())
-        .then(|| model_package("rmbg", "Recorte RMBG-1.4", RMBG, crate::tools::RMBG_FILE));
+        .then(|| model_package("rmbg", "Masking RMBG-1.4", RMBG, crate::tools::RMBG_FILE));
     if !cfg!(windows) {
         let note = if cfg!(target_os = "macos") {
-            "No macOS instale pelo Homebrew: brew install ffmpeg colmap"
+            "On macOS, install with Homebrew: brew install ffmpeg colmap"
         } else {
-            "No Linux instale ffmpeg e COLMAP 4.x pelo gerenciador de pacotes."
+            "On Linux, install ffmpeg and COLMAP 4.x with your package manager."
         };
         let packages: Vec<Package> = rmbg.into_iter().collect();
         let total_bytes = packages.iter().map(|p| p.size).sum();
@@ -195,8 +195,8 @@ pub async fn plan(rmbg: bool) -> Result<Plan> {
         packages.push(ffmpeg_package(&client).await?);
     }
     let models = [
-        (tools.modnet_model.is_none(), "modnet", "Recorte de pessoas (MODNet)", MODNET, crate::tools::MODNET_FILE),
-        (tools.birefnet_model.is_none(), "birefnet", "Recorte de objetos (BiRefNet)", BIREFNET, crate::tools::BIREFNET_FILE),
+        (tools.modnet_model.is_none(), "modnet", "People masking (MODNet)", MODNET, crate::tools::MODNET_FILE),
+        (tools.birefnet_model.is_none(), "birefnet", "Object masking (BiRefNet)", BIREFNET, crate::tools::BIREFNET_FILE),
     ];
     for (missing, id, label, model, file) in models {
         if missing {
@@ -211,7 +211,7 @@ pub async fn plan(rmbg: bool) -> Result<Plan> {
 pub async fn install(plan: Plan, cancel: CancellationToken, emit: impl Fn(InstallEvent) + Send + Sync + 'static) {
     let emit = std::sync::Arc::new(emit);
     let result = async {
-        let root = tools_root().context("pasta de dados do usuário não encontrada")?;
+        let root = tools_root().context("user data folder not found")?;
         std::fs::create_dir_all(&root)?;
         let client = client()?;
         for pkg in &plan.packages {
@@ -236,7 +236,7 @@ async fn install_one(
 ) -> Result<()> {
     let staging = root.join(format!(".tmp-{}", pkg.id));
     let result = download_and_place(client, root, &staging, pkg, cancel, emit).await;
-    // Nunca deixa download parcial para trás, com sucesso ou não.
+    // Never leave a partial download behind, whether it succeeded or not.
     let _ = std::fs::remove_dir_all(&staging);
     result
 }
@@ -258,9 +258,9 @@ async fn download_and_place(
     std::fs::create_dir_all(staging)?;
     let archive = staging.join(&pkg.file);
 
-    // Download com SHA-256 calculado durante a transferência.
+    // Download, computing SHA-256 during the transfer.
     let res = client.get(&pkg.url).send().await?.error_for_status()
-        .with_context(|| format!("download de {} falhou", pkg.label))?;
+        .with_context(|| format!("download of {} failed", pkg.label))?;
     let total = res.content_length().unwrap_or(pkg.size);
     let mut file = std::io::BufWriter::new(std::fs::File::create(&archive)?);
     let mut hasher = Sha256::new();
@@ -274,7 +274,7 @@ async fn download_and_place(
             c = stream.next() => c,
         };
         let Some(chunk) = chunk else { break };
-        let chunk = chunk.context("conexão interrompida durante o download")?;
+        let chunk = chunk.context("connection interrupted during download")?;
         hasher.update(&chunk);
         file.write_all(&chunk)?;
         done += chunk.len() as u64;
@@ -288,7 +288,7 @@ async fn download_and_place(
 
     let got = format!("{:x}", hasher.finalize());
     if !got.eq_ignore_ascii_case(&pkg.sha256) {
-        bail!("SHA-256 de {} não confere (esperado {}, obtido {got})", pkg.file, pkg.sha256);
+        bail!("SHA-256 mismatch for {} (expected {}, got {got})", pkg.file, pkg.sha256);
     }
 
     if !pkg.archive {
@@ -299,7 +299,7 @@ async fn download_and_place(
         return Ok(());
     }
 
-    // Extração (bloqueante) e troca atômica da pasta final.
+    // Extraction (blocking) and atomic swap of the final folder.
     emit(InstallEvent::Extracting { id: id.clone() });
     let (root, staging, pkg2) = (root.to_path_buf(), staging.to_path_buf(), pkg.clone());
     tokio::task::spawn_blocking(move || extract_and_place(&root, &staging, &archive, &pkg2)).await??;
@@ -310,12 +310,12 @@ async fn download_and_place(
 fn extract_and_place(root: &Path, staging: &Path, archive: &Path, pkg: &Package) -> Result<()> {
     let out = staging.join("x");
     let mut zip = zip::ZipArchive::new(std::fs::File::open(archive)?)?;
-    zip.extract(&out).context("não foi possível extrair o pacote")?;
+    zip.extract(&out).context("could not extract the package")?;
     std::fs::remove_file(archive)?;
 
-    let exe = find_file(&out, &pkg.exe).with_context(|| format!("{} não encontrado no pacote", pkg.exe))?;
-    // .../<pacote>/bin/<exe> → <pacote>
-    let pkg_root = exe.parent().and_then(Path::parent).context("estrutura inesperada do pacote")?;
+    let exe = find_file(&out, &pkg.exe).with_context(|| format!("{} not found in the package", pkg.exe))?;
+    // .../<package>/bin/<exe> → <package>
+    let pkg_root = exe.parent().and_then(Path::parent).context("unexpected package layout")?;
     let target = root.join(&pkg.id);
     if target.exists() {
         std::fs::remove_dir_all(&target)?;
@@ -342,7 +342,7 @@ fn find_file(dir: &Path, name: &str) -> Option<PathBuf> {
 mod tests {
     use super::*;
 
-    /// Baixa o COLMAP de verdade (128 MB):
+    /// Downloads the real COLMAP (128 MB):
     /// `cargo test installs_real_package -- --ignored --nocapture`
     #[tokio::test]
     #[ignore]
@@ -371,11 +371,11 @@ mod tests {
         assert!(!root.join(".tmp-colmap").exists());
         let ev = events.into_inner().unwrap();
         assert!(matches!(ev.last(), Some(InstallEvent::Done { .. })));
-        println!("{} eventos, último progresso: {:?}", ev.len(), ev.iter().rev().find(|e| matches!(e, InstallEvent::Progress { .. })));
+        println!("{} events, last progress: {:?}", ev.len(), ev.iter().rev().find(|e| matches!(e, InstallEvent::Progress { .. })));
         std::fs::remove_dir_all(&root).unwrap();
     }
 
-    /// Também usa a rede: `cargo test rejects_wrong_checksum -- --ignored`
+    /// Also uses the network: `cargo test rejects_wrong_checksum -- --ignored`
     #[tokio::test]
     #[ignore]
     async fn rejects_wrong_checksum() {
@@ -384,7 +384,7 @@ mod tests {
             id: "x".into(),
             label: "x".into(),
             file: "small.txt".into(),
-            // Arquivo pequeno qualquer; o hash propositalmente não confere.
+            // Any small file; the hash deliberately doesn't match.
             url: "https://raw.githubusercontent.com/colmap/colmap/4.2.1/README.md".into(),
             sha256: "0".repeat(64),
             size,
@@ -397,7 +397,7 @@ mod tests {
         let err = install_one(&client().unwrap(), &root, &pkg, &CancellationToken::new(), &|_| {})
             .await
             .unwrap_err();
-        assert!(format!("{err:#}").contains("não confere"), "{err:#}");
+        assert!(format!("{err:#}").contains("SHA-256 mismatch"), "{err:#}");
         assert!(!root.join(".tmp-x").exists());
         std::fs::remove_dir_all(&root).unwrap();
     }

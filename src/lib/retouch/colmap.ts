@@ -1,7 +1,7 @@
-// Acrescenta câmeras e imagens a um modelo binário do COLMAP (cameras.bin e
-// images.bin), copiando as entradas existentes byte a byte. Usado no dataset
-// do retoque: os frames restaurados entram com uma câmera própria (outro
-// tamanho) e sem pontos 2D. Porte de write_cameras/image_entry de
+// Appends cameras and images to a binary COLMAP model (cameras.bin and
+// images.bin), copying the existing entries byte for byte. Used for the retouch
+// dataset: restored frames get their own camera (different size) and no 2D
+// points. Port of write_cameras/image_entry from
 // scripts/restore-test/restore_test.py.
 
 export interface NewCamera {
@@ -18,15 +18,15 @@ export interface NewImage {
   name: string;
   qvec: [number, number, number, number];
   tvec: [number, number, number];
-  /** Índice em `cameras` do appendCameras. */
+  /** Index into the `cameras` passed to appendCameras. */
   camera: number;
 }
 
 const PINHOLE = 1;
-/** Número de parâmetros por modelo de câmera do COLMAP. */
+/** Parameter count per COLMAP camera model. */
 const PARAMS: Record<number, number> = { 0: 3, 1: 4, 2: 4, 3: 5, 4: 8, 5: 8, 6: 12, 7: 5, 8: 4, 9: 5, 10: 12 };
 
-/** cameras.bin com as câmeras novas no fim; devolve os ids que receberam. */
+/** cameras.bin with the new cameras appended; returns the ids they were given. */
 export function appendCameras(bin: ArrayBuffer, cams: NewCamera[]): { bin: ArrayBuffer; ids: number[] } {
   const v = new DataView(bin);
   const n = Number(v.getBigUint64(0, true));
@@ -35,7 +35,7 @@ export function appendCameras(bin: ArrayBuffer, cams: NewCamera[]): { bin: Array
     maxId = Math.max(maxId, v.getInt32(o, true));
     const model = v.getInt32(o + 4, true);
     const params = PARAMS[model];
-    if (params == null) throw new Error(`modelo de câmera COLMAP desconhecido: ${model}`);
+    if (params == null) throw new Error(`unknown COLMAP camera model: ${model}`);
     o += 24 + 8 * params;
   }
   const out = new ArrayBuffer(o + cams.length * (24 + 8 * 4));
@@ -55,7 +55,7 @@ export function appendCameras(bin: ArrayBuffer, cams: NewCamera[]): { bin: Array
   return { bin: out, ids };
 }
 
-/** images.bin com as imagens novas (sem pontos 2D) no fim. */
+/** images.bin with the new images (no 2D points) appended. */
 export function appendImages(bin: ArrayBuffer, images: NewImage[], cameraIds: number[]): ArrayBuffer {
   const v = new DataView(bin);
   const bytes = new Uint8Array(bin);

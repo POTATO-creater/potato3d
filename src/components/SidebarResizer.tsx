@@ -4,7 +4,7 @@ import { useI18n } from "../i18n";
 const KEY = "splatforge.sidebar.v1";
 export const SIDEBAR_DEFAULT = 340;
 const MIN = 280;
-/** Espaço mínimo que sobra para o 3D. */
+/** Minimum space left for the 3D view. */
 const MAIN_MIN = 420;
 
 const clampWidth = (w: number) => Math.round(Math.max(MIN, Math.min(w, window.innerWidth - MAIN_MIN)));
@@ -22,11 +22,11 @@ function save(w: number) {
   try {
     localStorage.setItem(KEY, String(w));
   } catch {
-    /* armazenamento indisponível */
+    /* storage unavailable */
   }
 }
 
-/** Largura da barra lateral (salva) e a alça na borda que a arrasta. */
+/** Sidebar width (persisted) and the edge handle that drags it. */
 export function useSidebarWidth() {
   const [width, setWidth] = useState(load);
   const drag = useRef<{ x: number; w: number } | null>(null);

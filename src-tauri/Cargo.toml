@@ -1,8 +1,10 @@
 [package]
 name = "splatforge"
 version = "0.4.1"
-description = "Vídeo orbital → Gaussian Splatting, 100% local"
+description = "Orbit video → Gaussian Splatting, 100% local"
 authors = ["Bryan Diniz"]
+license = "MIT"
+repository = "https://github.com/obraia/gausify-orbit"
 edition = "2021"
 
 [lib]
@@ -25,23 +27,23 @@ tokio = { version = "1", features = ["process", "io-util", "macros", "rt-multi-t
 tokio-util = "0.7"
 rayon = "1"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "rayon"] }
-# TLS nativo (SChannel no Windows, Security.framework no macOS): nada de C
-# para compilar na máquina de build.
+# Native TLS (SChannel on Windows, Security.framework on macOS): no C code
+# to compile on the build machine.
 reqwest = { version = "0.13.5", default-features = false, features = ["native-tls", "http2", "charset", "system-proxy", "stream", "json"] }
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 sha2 = "0.10"
 futures-util = "0.3.34"
-# Texturas do .sog: libwebp compilado do fonte (cc), sem nada para instalar.
-# ~18% menor que o encoder em Rust puro (image-webp), que não faz LZ77 bem.
+# .sog textures: libwebp built from source (cc), nothing to install.
+# ~18% smaller output than the pure-Rust encoder (image-webp), which does LZ77 poorly.
 libwebp-sys = "0.14"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 
-# Recorte no Windows: MODNet/BiRefNet/RMBG com ONNX Runtime (estático) + DirectML.dll.
+# Masking on Windows: MODNet/BiRefNet/RMBG with ONNX Runtime (static) + DirectML.dll.
 [target.'cfg(windows)'.dependencies]
 ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "download-binaries", "copy-dylibs", "tls-native", "directml", "api-27"] }
 
-# Recorte no macOS (Apple Silicon): RMBG-1.4 com ONNX Runtime (estático) + CoreML.
-# O pyke só publica binário com CoreML para aarch64-apple-darwin.
+# Masking on macOS (Apple Silicon): RMBG-1.4 with ONNX Runtime (static) + CoreML.
+# pyke only publishes CoreML-enabled binaries for aarch64-apple-darwin.
 [target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dependencies]
 ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "download-binaries", "tls-native", "coreml", "api-27"] }
 

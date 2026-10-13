@@ -1,7 +1,7 @@
-// Workflows do ComfyUI no formato de API (o "Export (API)" do editor): um
-// objeto { "<id do nó>": { class_type, inputs, _meta?: { title } } }. É o
-// formato que o POST /prompt aceita. O formato do editor (nodes/links) não
-// serve: faltam os valores resolvidos dos widgets.
+// ComfyUI workflows in API format (the editor's "Export (API)"): an object
+// { "<node id>": { class_type, inputs, _meta?: { title } } }. This is the
+// format POST /prompt accepts. The editor format (nodes/links) won't do: it
+// lacks the resolved widget values.
 
 export interface ApiNode {
   class_type: string;
@@ -15,11 +15,11 @@ export interface NodeInfo {
   id: string;
   classType: string;
   title: string;
-  /** Entradas com valor literal (widgets), não ligações a outros nós. */
+  /** Inputs with a literal value (widgets), not links to other nodes. */
   literalInputs: { name: string; value: unknown }[];
 }
 
-/** Onde o app injeta o arquivo enviado e onde lê o resultado. */
+/** Where the app injects the uploaded file and where it reads the result. */
 export interface WorkflowIO {
   input: { node: string; field: string };
   output: { node: string };
@@ -35,7 +35,7 @@ export class WorkflowParseError extends Error {
   }
 }
 
-/** Uma ligação no formato de API é `[id do nó de origem, índice da saída]`. */
+/** A link in API format is `[source node id, output index]`. */
 const isLink = (v: unknown) => Array.isArray(v) && v.length === 2 && typeof v[0] === "string" && typeof v[1] === "number";
 
 export function parseWorkflow(text: string): ApiGraph {
@@ -72,7 +72,7 @@ export function listNodes(graph: ApiGraph): NodeInfo[] {
     .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
 }
 
-/** Campo de arquivo dos nós de carregar vídeo/imagem mais comuns. */
+/** File field of the most common video/image loader nodes. */
 const INPUT_FIELDS: Record<string, string> = {
   LoadVideo: "file",
   VHS_LoadVideo: "video",
@@ -82,14 +82,14 @@ const INPUT_FIELDS: Record<string, string> = {
 
 const OUTPUT_CLASSES = ["SaveVideo", "VHS_VideoCombine", "SaveAnimatedWEBP", "SaveAnimatedPNG", "SaveWEBM", "SaveImage"];
 
-/** Campos string de um nó que podem receber um nome de arquivo. */
+/** String fields of a node that can take a file name. */
 export function fileFields(node: NodeInfo): string[] {
   const known = INPUT_FIELDS[node.classType];
   const strings = node.literalInputs.filter((i) => typeof i.value === "string").map((i) => i.name);
   return known && strings.includes(known) ? [known, ...strings.filter((s) => s !== known)] : strings;
 }
 
-/** Palpite inicial de entrada e saída; o usuário pode trocar na configuração. */
+/** Initial guess for input and output; the user can change it in settings. */
 export function guessIO(graph: ApiGraph): WorkflowIO | null {
   const nodes = listNodes(graph);
   const input =
@@ -102,8 +102,8 @@ export function guessIO(graph: ApiGraph): WorkflowIO | null {
 
 export const DEFAULT_FPS = 24;
 
-/** Taxa de quadros do vídeo de referência para um workflow: o primeiro
- *  `fps`/`frame_rate` fixo do grafo (o vídeo sai nesse ritmo), senão 24. */
+/** Reference video frame rate for a workflow: the graph's first literal
+ *  `fps`/`frame_rate` (the output video uses that rate), otherwise 24. */
 export function workflowFps(graph: ApiGraph): number {
   for (const n of listNodes(graph)) {
     const f = n.literalInputs.find((i) => (i.name === "fps" || i.name === "frame_rate") && typeof i.value === "number");
@@ -112,7 +112,7 @@ export function workflowFps(graph: ApiGraph): number {
   return DEFAULT_FPS;
 }
 
-/** Problemas da configuração de entrada/saída diante do grafo. */
+/** Problems of the input/output configuration against the graph. */
 export type IOProblem = "inputNode" | "inputField" | "outputNode";
 
 export function checkIO(graph: ApiGraph, io: WorkflowIO): IOProblem[] {
@@ -124,15 +124,15 @@ export function checkIO(graph: ApiGraph, io: WorkflowIO): IOProblem[] {
   return problems;
 }
 
-/** Cópia do grafo com o arquivo enviado no campo de entrada. O resto (duração,
- *  resolução) o workflow tira do próprio vídeo. */
+/** Copy of the graph with the uploaded file in the input field. The workflow
+ *  takes everything else (duration, resolution) from the video itself. */
 export function withInput(graph: ApiGraph, io: WorkflowIO, filename: string): ApiGraph {
   const copy = structuredClone(graph);
   copy[io.input.node].inputs[io.input.field] = filename;
   return copy;
 }
 
-/** Campo de um nó exposto no app para o usuário editar antes de enviar. */
+/** A node field exposed in the app for the user to edit before sending. */
 export interface WorkflowParam {
   id: string;
   label: string;
@@ -142,19 +142,19 @@ export interface WorkflowParam {
 
 export type ParamValue = string | number | boolean;
 
-/** Valor atual do campo no grafo (o padrão), se for um valor simples. */
+/** Current field value in the graph (the default), if it is a simple value. */
 export function paramDefault(graph: ApiGraph, p: Pick<WorkflowParam, "node" | "field">): ParamValue | undefined {
   const v = graph[p.node]?.inputs[p.field];
   return typeof v === "string" || typeof v === "number" || typeof v === "boolean" ? v : undefined;
 }
 
-/** Campos com valor simples (texto, número, liga/desliga) de um nó. */
+/** A node's fields with simple values (text, number, on/off). */
 export function editableFields(node: NodeInfo): string[] {
   return node.literalInputs.filter((i) => ["string", "number", "boolean"].includes(typeof i.value)).map((i) => i.name);
 }
 
-/** Cópia do grafo com os valores dos campos personalizados. Valores de tipo
- *  diferente do original são ignorados (o grafo mudou desde a escolha). */
+/** Copy of the graph with the custom field values. Values whose type differs
+ *  from the original are ignored (the graph changed since they were chosen). */
 export function withParams(graph: ApiGraph, params: WorkflowParam[], values: Record<string, ParamValue | undefined>): ApiGraph {
   const copy = structuredClone(graph);
   for (const p of params) {

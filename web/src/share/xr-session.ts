@@ -1,20 +1,20 @@
-// Sessão WebXR do visualizador de links (VR nos óculos, AR no celular):
-// disponibilidade, entrar/sair, posicionar a cena e andar com os controles.
-// Porte do player do WebGaussian (xr-session.ts).
+// WebXR session for the link viewer (VR on headsets, AR on phones):
+// availability, enter/exit, placing the scene and moving with the controllers.
+// Port of the WebGaussian player (xr-session.ts).
 //
-// A cena não é mexida; dois nós criados junto com o app fazem o trabalho:
-// - `rig`: pai da câmera. A pose dos óculos se compõe com ele, então andar
-//   (analógico) e virar (snap turn) movem o rig.
-// - `stage`: pai do splat. Ao entrar, ele escala a cena para uma maquete de
-//   ~1,4 m em pé na frente do usuário, virada para o lado que o vídeo filmou;
-//   ao sair, volta à identidade para a câmera orbital.
+// The scene itself is untouched; two nodes created with the app do the work:
+// - `rig`: the camera's parent. The headset pose is composed with it, so
+//   moving (thumbstick) and turning (snap turn) move the rig.
+// - `stage`: the splat's parent. On enter it scales the scene into a ~1.4 m
+//   diorama standing in front of the user, turned toward the side the video
+//   covered; on exit it goes back to identity for the orbit camera.
 //
-// Diferente do WebGaussian (um objeto isolado), aqui a cena tem fundo e
-// splats soltos em volta das câmeras. No óculos isso pesa: splats grandes
-// cobrindo a visão inteira, duas vezes (um olho cada), são o que mais custa
-// num Quest, e de perto viram manchas de cor. Por isso, só durante a sessão,
-// o que fica fora de uma esfera em volta do sujeito é descartado no shader
-// (`crop`), além da ordenação radial e da foveação (ver `XrOptions`).
+// Unlike WebGaussian (a single isolated object), here the scene has a
+// background and stray splats around the cameras. On a headset that hurts:
+// large splats covering the whole view, twice (once per eye), are the biggest
+// cost on a Quest, and up close they turn into color blotches. So, only during
+// the session, everything outside a sphere around the subject is discarded in
+// the shader (`crop`), on top of radial sorting and foveation (see `XrOptions`).
 
 import {
   Application,
@@ -34,47 +34,47 @@ import {
 
 export type XrMode = "vr" | "ar";
 
-/** Ajustes de desempenho do XR (padrões em main.ts, sobrepostos pela URL). */
+/** XR performance settings (defaults in main.ts, overridable from the URL). */
 export interface XrOptions {
-  /** Resolução do framebuffer do XR (1 = a recomendada pelo aparelho). */
+  /** XR framebuffer resolution (1 = the device's recommended one). */
   framebufferScale: number;
-  /** Foveação fixa, 0–1: menos resolução nas bordas da lente. */
+  /** Fixed foveation, 0–1: lower resolution at the lens edges. */
   foveation: number;
-  /** Ordena os splats pela distância à cabeça, não pela direção do olhar:
-   *  menos artefatos ao virar a cabeça (recomendação do PlayCanvas). */
+  /** Sorts splats by distance to the head rather than along the view direction:
+   *  fewer artifacts when turning the head (PlayCanvas recommendation). */
   radialSort: boolean;
 }
 
-/** O que vira maquete, no espaço do `stage`. */
+/** What becomes the diorama, in `stage` space. */
 export interface XrContent {
   center: Vec3;
-  /** Raio que vira `STAGE_RADIUS`. */
+  /** Radius that maps to `STAGE_RADIUS`. */
   radius: number;
-  /** Giro (graus, em torno de +Y) que deixa o lado filmado de frente. */
+  /** Yaw (degrees, around +Y) that turns the filmed side to face the user. */
   yaw: number;
-  /** Raio além do qual os splats somem durante a sessão; 0 não recorta. */
+  /** Radius beyond which splats are hidden during the session; 0 disables cropping. */
   crop: number;
 }
 
-/** Raio da maquete no XR (metros). */
+/** Diorama radius in XR (meters). */
 const STAGE_RADIUS = 0.7;
-/** Altura do centro da cena acima do chão (espaços `local-floor`). */
+/** Height of the scene center above the floor (`local-floor` spaces). */
 const STAGE_CENTER_HEIGHT = 1.3;
-/** Folga entre o usuário e a borda mais próxima da maquete (metros). */
+/** Gap between the user and the nearest edge of the diorama (meters). */
 const STAGE_CLEARANCE = 0.8;
-/** Velocidade do analógico e da subida/descida (m/s, já em escala humana). */
+/** Thumbstick and up/down speed (m/s, at human scale). */
 const MOVE_SPEED = 1.5;
 const LIFT_SPEED = 1.5;
 const MOVE_DEADZONE = 0.15;
-/** Snap turn: dispara no limiar de engate, rearma abaixo do de soltura. */
+/** Snap turn: fires at the engage threshold, re-arms below the release one. */
 const SNAP_TURN_DEGREES = 45;
 const SNAP_ENGAGE = 0.6;
 const SNAP_RELEASE = 0.3;
 
 export interface XrCallbacks {
-  /** Mudou a disponibilidade de immersive-vr / immersive-ar (também no início). */
+  /** immersive-vr / immersive-ar availability changed (also fired at startup). */
   onAvailability(vr: boolean, ar: boolean): void;
-  /** Sessão começou (true) ou terminou (false). */
+  /** Session started (true) or ended (false). */
   onSessionChange(active: boolean): void;
 }
 
@@ -111,7 +111,7 @@ export class XrSession {
         this.onEnd();
         callbacks.onSessionChange(false);
       }),
-      xr.on("error", (e: Error) => console.warn("[share] erro no XR", e)),
+      xr.on("error", (e: Error) => console.warn("[share] XR error", e)),
     ];
     this.detach.push(() => handles.forEach((h) => h.off()));
     emit();
@@ -121,8 +121,8 @@ export class XrSession {
     return this.xr?.active ?? false;
   }
 
-  /** Entra no XR; tem que ser chamado num gesto do usuário (clique). Prefere
-   *  `local-floor` (y = 0 no chão de verdade) e cai para `local`. */
+  /** Enters XR; must be called from a user gesture (click). Prefers
+   *  `local-floor` (y = 0 on the real floor) and falls back to `local`. */
   start(mode: XrMode) {
     if (!this.xr?.supported || this.xr.active) return;
     const type = mode === "ar" ? XRTYPE_AR : XRTYPE_VR;
@@ -133,27 +133,27 @@ export class XrSession {
     if (this.xr?.active) this.xr.end();
   }
 
-  /** O que vira maquete (ver `XrContent`). */
+  /** What becomes the diorama (see `XrContent`). */
   setContent(content: XrContent) {
     this.content = { ...content, center: content.center.clone() };
     if (this.active) this.placeStage();
   }
 
-  /** A entidade do splat, para o recorte durante a sessão. */
+  /** The splat entity, for cropping during the session. */
   setSplat(entity: Entity) {
     this.splat = entity;
     if (this.active) this.placeStage();
   }
 
-  /** Monta a maquete fora do XR, para conferir no navegador o que o óculos
-   *  vai mostrar (`?xrPreview=1`). Devolve onde fica a cabeça e o centro. */
+  /** Builds the diorama outside XR, to check in the browser what the headset
+   *  will show (`?xrPreview=1`). Returns the head position and the center. */
   preview() {
     this.app.scene.gsplat.radialSorting = this.options.radialSort;
     this.placeStage(STAGE_CENTER_HEIGHT);
     return { head: new Vec3(0, 1.6, 0), target: new Vec3(0, STAGE_CENTER_HEIGHT, -(STAGE_RADIUS + STAGE_CLEARANCE)) };
   }
 
-  /** Andar e virar com os controles; chamar a cada quadro durante a sessão. */
+  /** Move and turn with the controllers; call every frame during the session. */
   update(dt: number) {
     if (!this.xr?.active || dt <= 0) return;
     let moveX = 0;
@@ -163,7 +163,7 @@ export class XrSession {
     for (const source of this.xr.input.inputSources) {
       const axes = source.gamepad?.axes;
       if (!axes?.length) continue;
-      // O mapeamento padrão põe o analógico em [2,3]; quem só tem touchpad usa [0,1].
+      // The standard mapping puts the thumbstick at [2,3]; touchpad-only devices use [0,1].
       const x = axes[XRPAD_STICK_X] ?? axes[0] ?? 0;
       const y = axes[XRPAD_STICK_Y] ?? axes[1] ?? 0;
       if (source.handedness === XRHAND_RIGHT) {
@@ -192,13 +192,13 @@ export class XrSession {
       callback: (err) => {
         if (!err) return;
         if (onError) onError();
-        else console.warn("[share] não foi possível entrar no XR", err);
+        else console.warn("[share] could not enter XR", err);
       },
     });
   }
 
   private onStart() {
-    // O AR compõe sobre o mundo real: fundo transparente durante a sessão.
+    // AR composites over the real world: transparent background during the session.
     const camera = this.cameraEntity.camera;
     if (camera && this.xr?.type === XRTYPE_AR) {
       this.savedClearColor.copy(camera.clearColor);
@@ -206,7 +206,7 @@ export class XrSession {
     }
     this.snapArmed = true;
     this.app.scene.gsplat.radialSorting = this.options.radialSort;
-    // null: o aparelho não tem foveação fixa.
+    // null: the device has no fixed foveation.
     if (this.xr!.fixedFoveation !== null) this.xr!.fixedFoveation = this.options.foveation;
     this.placeStage();
   }
@@ -223,27 +223,27 @@ export class XrSession {
     this.rig.setLocalEulerAngles(0, 0, 0);
   }
 
-  /** Escala a cena para a maquete e a põe de pé na frente da pose inicial:
-   *  raio → `STAGE_RADIUS`, centro na altura do peito (com chão) e
-   *  `STAGE_CLEARANCE` além do alcance do braço, em -Z, com o lado filmado
-   *  virado para o usuário. */
+  /** Scales the scene into the diorama and stands it in front of the initial
+   *  pose: radius → `STAGE_RADIUS`, center at chest height (with a floor) and
+   *  `STAGE_CLEARANCE` beyond arm's reach, along -Z, with the filmed side
+   *  facing the user. */
   private placeStage(height = this.xr?.spaceType === XRSPACE_LOCALFLOOR ? STAGE_CENTER_HEIGHT : 0) {
     const c = this.content;
     if (!c) return;
     const scale = STAGE_RADIUS / (c.radius || 1);
     const target = new Vec3(0, height, -(STAGE_RADIUS + STAGE_CLEARANCE));
     const rotation = new Quat().setFromEulerAngles(0, c.yaw, 0);
-    // O centro do conteúdo tem que cair em `target`: pos = target − R·(c·s).
+    // The content center must land on `target`: pos = target − R·(c·s).
     const offset = rotation.transformVector(c.center.clone().mulScalar(scale));
     this.stage.setLocalScale(scale, scale, scale);
     this.stage.setLocalEulerAngles(0, c.yaw, 0);
     this.stage.setLocalPosition(target.clone().sub(offset));
-    // O recorte roda no buffer de trabalho do PlayCanvas, já em coordenadas
-    // de mundo: o centro do sujeito é `target` e o raio vem escalado.
+    // Cropping runs on PlayCanvas' work buffer, already in world coordinates:
+    // the subject's center is `target` and the radius is scaled.
     if (this.splat?.gsplat && c.crop > 0) this.splat.gsplat.setWorkBufferModifier(cropShader(target, c.crop * scale));
   }
 
-  /** Giro em degraus em volta da cabeça: vira sem enjoo. */
+  /** Stepped rotation around the head: turning without motion sickness. */
   private snapTurn(turn: number) {
     const m = Math.abs(turn);
     if (m < SNAP_RELEASE) {
@@ -253,7 +253,7 @@ export class XrSession {
     if (!this.snapArmed || m < SNAP_ENGAGE) return;
     this.snapArmed = false;
     const degrees = -Math.sign(turn) * SNAP_TURN_DEGREES;
-    // Gira o rig em torno da posição da cabeça, para ela ficar no lugar.
+    // Rotates the rig around the head position so the head stays in place.
     const head = this.cameraEntity.getPosition().clone();
     const offset = this.rig.getPosition().clone().sub(head);
     new Quat().setFromEulerAngles(0, degrees, 0).transformVector(offset, offset);
@@ -261,7 +261,7 @@ export class XrSession {
     this.rig.rotate(0, degrees, 0);
   }
 
-  /** Desliza no plano relativo à cabeça; o Y do analógico direito sobe/desce. */
+  /** Glides on the plane relative to the head; the right stick's Y moves up/down. */
   private glide(moveX: number, moveZ: number, lift: number, dt: number) {
     const moving = Math.hypot(moveX, moveZ) >= MOVE_DEADZONE;
     if (!moving && Math.abs(lift) < MOVE_DEADZONE) return;
@@ -270,7 +270,7 @@ export class XrSession {
     const step = MOVE_SPEED * dt;
     const vertical = Math.abs(lift) >= MOVE_DEADZONE ? -lift * LIFT_SPEED * dt : 0;
     const horizontal = moving && forward && right;
-    // Analógico para cima (Y negativo) vai para a frente.
+    // Stick up (negative Y) moves forward.
     this.rig.translate(
       horizontal ? (right.x * moveX - forward.x * moveZ) * step : 0,
       vertical,
@@ -279,7 +279,7 @@ export class XrSession {
   }
 }
 
-/** Descarta (escala e opacidade zero) os splats fora da esfera. */
+/** Discards (zero scale and opacity) the splats outside the sphere. */
 function cropShader(center: Vec3, radius: number) {
   const f = (x: number) => x.toFixed(6);
   const c = `${f(center.x)}, ${f(center.y)}, ${f(center.z)}`;
@@ -310,7 +310,7 @@ function cropShader(center: Vec3, radius: number) {
   };
 }
 
-/** Projeta a direção no plano XZ e normaliza (null se for vertical). */
+/** Projects the direction onto the XZ plane and normalizes it (null if vertical). */
 function flat(dir: Vec3): Vec3 | null {
   const v = new Vec3(dir.x, 0, dir.z);
   const l = v.length();

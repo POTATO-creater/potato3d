@@ -14,7 +14,7 @@ interface PackageState {
 
 const mb = (n: number) => `${(n / 1e6).toFixed(0)} MB`;
 
-/** Primeiro uso: lista o que falta e, no Windows, instala com um clique. */
+/** First run: lists what's missing and, on Windows, installs it in one click. */
 export function ToolsSetup({
   tools,
   missing,
@@ -23,13 +23,13 @@ export function ToolsSetup({
 }: {
   tools: Tools;
   missing: Missing;
-  /** O RMBG-1.4 foi escolhido: entra no plano de download. */
+  /** RMBG-1.4 was chosen: include it in the download plan. */
   rmbg: boolean;
   onInstalled: () => void;
 }) {
   const { t } = useI18n();
   const tt = t.setup;
-  /** Modelos têm rótulo traduzido; ferramentas usam o nome que vem do backend. */
+  /** Models have translated labels; tools use the name from the backend. */
   const pkgLabel = (id: string, label: string) => tt.packages[id] ?? label;
   const [plan, setPlan] = useState<InstallPlan | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
@@ -38,7 +38,7 @@ export function ToolsSetup({
   const [error, setError] = useState<string | null>(null);
 
   const modelMissing = missing.some((m) => m.key === "model");
-  // No macOS o app só baixa o RMBG; o resto vem do Homebrew.
+  // On macOS the app only downloads RMBG; the rest comes from Homebrew.
   const canInstall =
     (tools.os === "windows" && missing.some((m) => m.key !== "brush")) ||
     ((tools.os === "macos" || tools.os === "web") && rmbg && modelMissing);

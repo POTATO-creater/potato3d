@@ -1,37 +1,37 @@
-//! Leitura e escrita do .ply de Gaussian Splatting (layout do INRIA).
+//! Reading and writing the Gaussian Splatting .ply (INRIA layout).
 //!
-//! O Brush grava as propriedades numa ordem própria (f_dc, f_rest, opacity,
-//! rot, scale, xyz), então a leitura localiza cada coluna pelo nome. A escrita
-//! usa a ordem do INRIA, que todo visualizador entende.
+//! Brush writes the properties in its own order (f_dc, f_rest, opacity, rot,
+//! scale, xyz), so the reader locates each column by name. The writer uses the
+//! INRIA order, which every viewer understands.
 
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 
-/// Gaussianas em colunas (SoA), com os valores crus do .ply: escala em log,
-/// opacidade em logit e cor como coeficientes SH.
+/// Gaussians in columns (SoA), with the raw .ply values: log scale, logit
+/// opacity and color as SH coefficients.
 #[derive(Debug, Clone, Default)]
 pub struct Splats {
     pub count: usize,
-    /// Grau SH das bandas `f_rest` (0–3).
+    /// SH degree of the `f_rest` bands (0–3).
     pub sh_degree: u32,
     /// x, y, z
     pub pos: Vec<f32>,
-    /// log(σ) por eixo
+    /// log(σ) per axis
     pub scale: Vec<f32>,
-    /// (w, x, y, z), não necessariamente normalizado
+    /// (w, x, y, z), not necessarily normalized
     pub rot: Vec<f32>,
-    /// logit da opacidade
+    /// opacity logit
     pub opacity: Vec<f32>,
     /// f_dc_0..2
     pub dc: Vec<f32>,
-    /// f_rest_* por gaussiana, na ordem do .ply (canal maior: todos os
-    /// coeficientes do R, depois G, depois B).
+    /// f_rest_* per gaussian, in .ply order (channel-major: all R
+    /// coefficients, then G, then B).
     pub rest: Vec<f32>,
 }
 
-/// Coeficientes SH por canal além do DC, para cada grau.
+/// SH coefficients per channel beyond DC, for each degree.
 pub fn sh_coeffs(degree: u32) -> usize {
     [0, 3, 8, 15][degree.min(3) as usize]
 }
@@ -41,7 +41,7 @@ impl Splats {
         sh_coeffs(self.sh_degree) * 3
     }
 
-    /// Mantém só as gaussianas de `keep`, na ordem dada.
+    /// Keeps only the gaussians in `keep`, in the given order.
     pub fn select(&self, keep: &[u32]) -> Splats {
         let rl = self.rest_len();
         let mut out = Splats {
@@ -66,7 +66,7 @@ impl Splats {
         out
     }
 
-    /// Descarta as bandas SH acima de `degree`.
+    /// Drops the SH bands above `degree`.
     pub fn truncate_sh(&mut self, degree: u32) {
         if degree >= self.sh_degree {
             return;
@@ -148,7 +148,7 @@ fn read_header(r: &mut impl BufRead, path: &Path) -> Result<Header> {
     let mut line = String::new();
     r.read_line(&mut line)?;
     if line.trim_end() != "ply" {
-        bail!("{} não é um arquivo .ply", path.display());
+        bail!("{} is not a .ply file", path.display());
     }
     let mut count = None;
     let mut props: Vec<Prop> = Vec::new();
@@ -157,35 +157,35 @@ fn read_header(r: &mut impl BufRead, path: &Path) -> Result<Header> {
     loop {
         line.clear();
         if r.read_line(&mut line)? == 0 {
-            bail!("cabeçalho do .ply sem end_header");
+            bail!(".ply header has no end_header");
         }
         let t: Vec<&str> = line.split_whitespace().collect();
         match t.as_slice() {
             ["end_header"] => break,
             ["format", fmt, ..] if *fmt != "binary_little_endian" => {
-                bail!("formato .ply não suportado: {fmt} (só binary_little_endian)")
+                bail!("unsupported .ply format: {fmt} (only binary_little_endian)")
             }
             ["element", name, n] => {
                 if count.is_some() {
-                    // Elementos depois do vértice não interessam.
+                    // Elements after the vertex element are irrelevant.
                     in_vertex = false;
                 } else if *name == "vertex" {
                     count = Some(n.parse::<usize>()?);
                     in_vertex = true;
                 } else {
-                    bail!(".ply com o elemento \"{name}\" antes dos vértices (compactado?) não é suportado");
+                    bail!(".ply with element \"{name}\" before the vertices (compressed?) is not supported");
                 }
             }
-            ["property", "list", ..] if in_vertex => bail!("propriedade em lista nos vértices do .ply"),
+            ["property", "list", ..] if in_vertex => bail!("list property in the .ply vertices"),
             ["property", ty, name] if in_vertex => {
-                let ty = Ty::parse(ty).with_context(|| format!("tipo de propriedade desconhecido: {ty}"))?;
+                let ty = Ty::parse(ty).with_context(|| format!("unknown property type: {ty}"))?;
                 props.push(Prop { name: name.to_string(), ty, offset: stride });
                 stride += ty.size();
             }
             _ => {}
         }
     }
-    Ok(Header { count: count.context(".ply sem elemento vertex")?, props, stride })
+    Ok(Header { count: count.context(".ply has no vertex element")?, props, stride })
 }
 
 fn degree_from_rest(n: usize) -> Result<u32> {
@@ -194,20 +194,20 @@ fn degree_from_rest(n: usize) -> Result<u32> {
         9 => 1,
         24 => 2,
         45 => 3,
-        n => bail!("{n} coeficientes f_rest não correspondem a nenhum grau SH"),
+        n => bail!("{n} f_rest coefficients don't match any SH degree"),
     })
 }
 
-/// Quantidade de gaussianas e grau SH, lendo só o cabeçalho.
+/// Gaussian count and SH degree, reading only the header.
 pub fn info(path: &Path) -> Result<(usize, u32)> {
-    let mut r = BufReader::new(std::fs::File::open(path).with_context(|| format!("abrindo {}", path.display()))?);
+    let mut r = BufReader::new(std::fs::File::open(path).with_context(|| format!("opening {}", path.display()))?);
     let h = read_header(&mut r, path)?;
     let rest = h.props.iter().filter(|p| p.name.starts_with("f_rest_")).count();
     Ok((h.count, degree_from_rest(rest)?))
 }
 
 pub fn read(path: &Path) -> Result<Splats> {
-    let file = std::fs::File::open(path).with_context(|| format!("abrindo {}", path.display()))?;
+    let file = std::fs::File::open(path).with_context(|| format!("opening {}", path.display()))?;
     let mut r = BufReader::with_capacity(1 << 20, file);
     let Header { count, props, stride } = read_header(&mut r, path)?;
 
@@ -216,7 +216,7 @@ pub fn read(path: &Path) -> Result<Splats> {
             .iter()
             .find(|p| p.name == name)
             .map(|p| (p.ty, p.offset))
-            .with_context(|| format!(".ply sem a propriedade {name} (não parece um Gaussian Splat)"))
+            .with_context(|| format!(".ply is missing property {name} (doesn't look like a Gaussian Splat)"))
     };
     let pos = [col("x")?, col("y")?, col("z")?];
     let scale = [col("scale_0")?, col("scale_1")?, col("scale_2")?];
@@ -242,7 +242,7 @@ pub fn read(path: &Path) -> Result<Splats> {
     let get = |row: &[u8], (ty, off): (Ty, usize)| ty.read(&row[off..]);
     let mut row = vec![0u8; stride];
     for _ in 0..count {
-        r.read_exact(&mut row).context(".ply truncado")?;
+        r.read_exact(&mut row).context("truncated .ply")?;
         s.pos.extend(pos.iter().map(|&c| get(&row, c)));
         s.scale.extend(scale.iter().map(|&c| get(&row, c)));
         s.rot.extend(rot.iter().map(|&c| get(&row, c)));
@@ -290,7 +290,7 @@ pub(crate) mod tests {
 
     pub(crate) fn sample(n: usize, degree: u32) -> Splats {
         let rl = sh_coeffs(degree) * 3;
-        // splitmix64 → valor em [-0,5, 0,5), determinístico por (i, k).
+        // splitmix64 → value in [-0.5, 0.5), deterministic per (i, k).
         let f = |i: usize, k: usize| {
             let mut z = (i as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ (k as u64).wrapping_mul(0xbf58_476d_1ce4_e5b9);
             z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
@@ -327,7 +327,7 @@ pub(crate) mod tests {
         let mut t = back.clone();
         t.truncate_sh(1);
         assert_eq!(t.rest_len(), 9);
-        // Coeficiente 0 do canal G fica na posição 3 (antes estava em 8).
+        // Coefficient 0 of the G channel moves to index 3 (it was at 8).
         assert_eq!(t.rest[3], back.rest[8]);
         assert_eq!(t.rest[9 + 6], back.rest[24 + 16]);
         let _ = std::fs::remove_dir_all(dir);

@@ -1,43 +1,43 @@
-// Worker da versão web. Os assets do build (dist-web/) continuam servidos
-// direto pelo Cloudflare, sem acordar o Worker; ele só roda em:
+// Web version Worker. The build's assets (dist-web/) are still served directly
+// by Cloudflare without waking the Worker; it only runs on:
 //
-//   POST   /api/share            sobe um .sog/.ply exportado e devolve o link
-//   GET    /api/share/<id>       metadados (nome, tamanho, expiração, enquadramento)
-//   GET    /api/share/<id>/file  o arquivo
-//   DELETE /api/share/<id>       revoga antes da hora (precisa do deleteToken)
-//   GET    /s/<id>               página do visualizador (web/share.html)
+//   POST   /api/share            uploads an exported .sog/.ply and returns the link
+//   GET    /api/share/<id>       metadata (name, size, expiry, framing)
+//   GET    /api/share/<id>/file  the file
+//   DELETE /api/share/<id>       revokes early (requires the deleteToken)
+//   GET    /s/<id>               viewer page (web/share.html)
 //
-// Os compartilhamentos ficam no R2 (`SHARES`) com a expiração nos metadados.
-// Quem tem o link vê; o id tem ~71 bits aleatórios, então não dá para
-// adivinhar. Expirado é tratado como inexistente na hora; a limpeza de fato
-// é o cron (`scheduled`), com a regra de ciclo de vida do bucket como rede
-// de segurança (ver README).
+// Shares live in R2 (`SHARES`) with the expiry in their metadata. Anyone with
+// the link can view; the id has ~71 random bits, so it can't be guessed.
+// Expired shares are treated as missing immediately; actual cleanup is the
+// cron (`scheduled`), with the bucket lifecycle rule as a safety net (see
+// README).
 //
-// Com a chave de acesso (`SHARE_ADMIN_TOKEN`), o envio escolhe a validade em
-// `X-Share-TTL` (horas, ou `never`). Esses ficam em `p/`, fora da regra de
-// ciclo de vida de `s/`, que apagaria tudo em um dia; o cron continua
-// cuidando deles.
+// With the access key (`SHARE_ADMIN_TOKEN`), an upload picks its lifetime via
+// `X-Share-TTL` (hours, or `never`). Those live under `p/`, outside the `s/`
+// lifecycle rule, which would delete everything within a day; the cron still
+// handles them.
 
 export interface Env {
   ASSETS: { fetch(input: Request | string): Promise<Response> };
   SHARES: R2Bucket;
-  /** Validade de cada link, em horas (padrão 6). */
+  /** Lifetime of each link, in hours (default 6). */
   SHARE_TTL_HOURS?: string;
-  /** Segredo (`wrangler secret put`) que libera validade escolhida no envio,
-   *  inclusive sem expiração. Ausente, todo link vale `SHARE_TTL_HOURS`. */
+  /** Secret (`wrangler secret put`) that unlocks a lifetime chosen at upload,
+   *  including no expiry. When absent, every link lasts `SHARE_TTL_HOURS`. */
   SHARE_ADMIN_TOKEN?: string;
-  /** Tamanho máximo do arquivo, em MiB (padrão 95; o Cloudflare recusa
-   *  corpos acima de 100 MB nos planos Free e Pro). */
+  /** Max file size, in MiB (default 95; Cloudflare rejects bodies over
+   *  100 MB on the Free and Pro plans). */
   SHARE_MAX_MB?: string;
-  /** Origens extras com CORS liberado, separadas por vírgula (o app desktop
-   *  já está incluído). */
+  /** Extra CORS-allowed origins, comma-separated (the desktop app is
+   *  already included). */
   SHARE_ORIGINS?: string;
-  /** Limite de uploads por IP (binding `ratelimits`); ausente, não limita. */
+  /** Per-IP upload limit (`ratelimits` binding); when absent, no limit. */
   SHARE_LIMITER?: { limit(o: { key: string }): Promise<{ success: boolean }> };
 }
 
-/** O que o app manda para o visualizador abrir no mesmo enquadramento.
- *  Espelha `ShareView` de src/lib/share.ts. */
+/** What the app sends so the viewer opens with the same framing.
+ *  Mirrors `ShareView` in src/lib/share.ts. */
 interface ShareView {
   center: number[];
   up: number[];
@@ -52,20 +52,20 @@ const ID_LEN = 12;
 const ID_RE = /^[0-9A-Za-z]{12}$/;
 const FORMATS = { sog: "PK\x03\x04", ply: "ply\n" } as const;
 type Format = keyof typeof FORMATS;
-// Webview do app desktop no macOS/Linux e no Windows.
+// Desktop app webview on macOS/Linux and on Windows.
 const DESKTOP_ORIGINS = ["tauri://localhost", "http://tauri.localhost", "https://tauri.localhost"];
 
-/** `s/`: validade padrão, coberta pela regra de ciclo de vida do bucket.
- *  `p/`: validade escolhida com a chave de acesso. */
+/** `s/`: default lifetime, covered by the bucket lifecycle rule.
+ *  `p/`: lifetime chosen with the access key. */
 const PREFIXES = ["s/", "p/"] as const;
-/** Nos metadados, no lugar do epoch, para o link que não expira. */
+/** Stored in the metadata instead of an epoch for links that never expire. */
 const NEVER = "never";
-/** Teto do cache privado do arquivo: um link longo ainda pode ser revogado. */
+/** Cap on the file's private cache: a long-lived link can still be revoked. */
 const MAX_CACHE_S = 86_400;
-/** Maior validade com a chave, fora `never` (10 anos). */
+/** Longest lifetime with the key, other than `never` (10 years). */
 const MAX_TTL_HOURS = 24 * 3653;
 
-/** Acha o compartilhamento em qualquer prefixo (`s/` primeiro: é o comum). */
+/** Finds the share under any prefix (`s/` first: it's the common one). */
 async function findObject(env: Env, id: string, body: boolean) {
   for (const prefix of PREFIXES) {
     const key = prefix + id;
@@ -123,7 +123,7 @@ async function api(req: Request, env: Env, ctx: ExecutionContext, url: URL): Pro
       "Content-Type": "application/octet-stream",
       "Content-Length": String(obj.size),
       "Content-Disposition": `inline; filename="${meta.name}"`,
-      // Privado: não fica em cache compartilhado, e some junto com o link.
+      // Private: not kept in shared caches, and goes away with the link.
       "Cache-Control": `private, max-age=${maxAge}`,
       ETag: obj.httpEtag,
       "X-Robots-Tag": "noindex, nofollow",
@@ -152,7 +152,7 @@ async function create(req: Request, env: Env, url: URL): Promise<Response> {
     if (!view) return error(400, "bad_view");
   }
 
-  // Validade escolhida: só com a chave de acesso.
+  // Custom lifetime: only with the access key.
   let ttl: number | typeof NEVER = number(env.SHARE_TTL_HOURS, 6);
   const rawTtl = req.headers.get("X-Share-TTL");
   if (rawTtl !== null) {
@@ -179,8 +179,8 @@ async function create(req: Request, env: Env, url: URL): Promise<Response> {
     },
   });
 
-  // Confere a assinatura do arquivo depois de gravado (o corpo é um stream e
-  // só passa uma vez): o endpoint não serve para hospedar outra coisa.
+  // Check the file signature after writing (the body is a stream and can only
+  // be read once): the endpoint must not be usable to host anything else.
   const head = await env.SHARES.get(key, { range: { offset: 0, length: 4 } });
   const magic = head ? new TextDecoder("latin1").decode(await head.arrayBuffer()) : "";
   if (magic !== FORMATS[format]) {
@@ -193,27 +193,27 @@ async function create(req: Request, env: Env, url: URL): Promise<Response> {
 async function revoke(req: Request, env: Env, id: string): Promise<Response> {
   const token = req.headers.get("Authorization")?.replace(/^Bearer\s+/i, "") ?? "";
   const obj = await findObject(env, id, false);
-  // Já expirado ou removido: para quem revoga, dá no mesmo.
+  // Already expired or removed: same outcome for the revoker.
   if (!obj) return new Response(null, { status: 204 });
   if (!token || (await sha256(token)) !== obj.customMetadata?.del) return error(403, "forbidden");
   await env.SHARES.delete(obj.key);
   return new Response(null, { status: 204 });
 }
 
-/** A página do visualizador é a mesma para todo id: ela própria busca os
- *  metadados e mostra "expirado" quando for o caso. */
+/** The viewer page is the same for every id: it fetches the metadata itself
+ *  and shows "expired" when appropriate. */
 async function viewerPage(env: Env, url: URL): Promise<Response> {
-  // `/share` e não `/share.html`: o Cloudflare redireciona o .html.
+  // `/share`, not `/share.html`: Cloudflare redirects the .html.
   const page = await env.ASSETS.fetch(new Request(new URL("/share", url)));
   const headers = new Headers(page.headers);
   headers.set("Cache-Control", "no-store");
   headers.set("X-Robots-Tag", "noindex, nofollow");
-  // O link é a credencial: não pode vazar no Referer de nada que a página carregue.
+  // The link is the credential: it must not leak via the Referer of anything the page loads.
   headers.set("Referrer-Policy", "no-referrer");
   return new Response(page.body, { status: page.status, headers });
 }
 
-/** Apaga os vencidos. Roda pelo cron do wrangler.jsonc. */
+/** Deletes expired shares. Run by the cron in wrangler.jsonc. */
 export async function sweep(env: Env, now = Date.now()) {
   let removed = 0;
   for (const prefix of PREFIXES) {
@@ -243,7 +243,7 @@ function readMeta(obj: R2Object) {
   };
 }
 
-/** Valida e reescreve o enquadramento (só números finitos, tamanho fixo). */
+/** Validates and rewrites the framing (finite numbers only, fixed size). */
 function parseView(raw: string): string | null {
   try {
     const v = JSON.parse(raw) as Partial<ShareView>;
@@ -264,7 +264,7 @@ function parseView(raw: string): string | null {
   }
 }
 
-/** Nome de arquivo seguro para metadados e Content-Disposition. */
+/** Safe file name for metadata and Content-Disposition. */
 function safeName(name: string) {
   const base = name.split(/[\\/]/).pop() ?? "";
   return base.replace(/[^\w.-]+/g, "_").slice(-80) || "splat";
@@ -291,7 +291,7 @@ function json(status: number, body: unknown): Response {
   });
 }
 
-/** Erros com um código estável, que o app traduz (src/i18n, `share.errors`). */
+/** Errors with a stable code, which the app translates (src/i18n, `share.errors`). */
 const error = (status: number, code: string, extra?: object) => json(status, { error: code, ...extra });
 
 function fail(e: unknown): Response {
@@ -306,7 +306,7 @@ function number(raw: string | undefined, fallback: number) {
 
 const ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
-/** Base62 sem viés: descarta os bytes acima do maior múltiplo de 62. */
+/** Unbiased base62: discards bytes above the largest multiple of 62. */
 export function randomId(len: number) {
   let out = "";
   while (out.length < len) {
@@ -317,7 +317,7 @@ export function randomId(len: number) {
   return out;
 }
 
-/** Compara os hashes, não a chave: o tempo não diz quantos caracteres batem. */
+/** Compares hashes, not the key: timing doesn't reveal how many characters match. */
 async function isAdmin(req: Request, env: Env) {
   const token = req.headers.get("Authorization")?.replace(/^Bearer\s+/i, "") ?? "";
   return !!env.SHARE_ADMIN_TOKEN && !!token && (await sha256(token)) === (await sha256(env.SHARE_ADMIN_TOKEN));

@@ -24,7 +24,7 @@ export default defineConfig(() => ({
           port: 1421,
         }
       : undefined,
-    // O modo mock serve vídeos/.ply de qualquer pasta via /@fs.
+    // Mock mode serves videos/.ply files from any folder via /@fs.
     fs: { strict: process.env.VITE_MOCK !== "1" },
     watch: {
       // 3. tell Vite to ignore watching `src-tauri`

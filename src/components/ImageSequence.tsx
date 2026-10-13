@@ -5,7 +5,7 @@ import { withMarks } from "../lib/prompt";
 import { useI18n } from "../i18n";
 import { PromptLayer } from "./PromptLayer";
 
-/** Velocidade da prévia animada da órbita. */
+/** Speed of the animated orbit preview. */
 const PLAY_FPS = 12;
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
@@ -18,9 +18,9 @@ function Svg({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** Prévia das imagens usadas como frames, na ordem em que entram (a da
- *  órbita), com a mesma cara do player de vídeo. Com `onPrompt`, marca o
- *  sujeito para o SAM 2.1 numa das imagens, como no vídeo. */
+/** Preview of the images used as frames, in the order they are used (orbit
+ *  order), styled like the video player. With `onPrompt`, marks the subject
+ *  for SAM 2.1 on one of the images, as with video. */
 export function ImageSequence({
   paths,
   prompt,
@@ -91,7 +91,7 @@ export function ImageSequence({
             aspect={aspect}
             editing={editing}
             onChange={(m) => {
-              // Marcação em outra imagem recomeça do zero.
+              // Marking on another image starts from scratch.
               const base: SubjectPrompt = promptHere && prompt ? prompt : { time: null, image: name, box: null, points: [] };
               onPrompt!(withMarks(base, m));
             }}

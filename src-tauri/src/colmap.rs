@@ -1,14 +1,14 @@
-//! Etapa 2: poses de câmera com COLMAP 4.x.
+//! Step 2: camera poses with COLMAP 4.x.
 //!
-//! Otimizações para vídeo orbital:
-//! - câmera única pinhole (vídeo gerado não tem distorção de lente);
-//! - pares de matching circulares (cada frame casa com os vizinhos, com
-//!   "wrap-around" para fechar a órbita) em vez de exaustivo/vocab tree;
-//! - calibração do grafo de vistas + mapeador global (ex-GLOMAP);
-//! - se o SIFT comum registrar menos de 95% das câmeras, nova tentativa com
-//!   SIFT "reforçado" (texturas pobres: cabelo, pele, fundo desfocado);
-//! - fallback para o mapeador incremental se ainda assim registrar pouco;
-//! - opcional: órbita forçada num plano, para vídeos que giram em nível.
+//! Optimizations for orbit video:
+//! - single pinhole camera (generated video has no lens distortion);
+//! - circular matching pairs (each frame matches its neighbours, with
+//!   wrap-around to close the orbit) instead of exhaustive/vocab tree;
+//! - view graph calibration + global mapper (formerly GLOMAP);
+//! - if plain SIFT registers under 95% of the cameras, retry with
+//!   "enhanced" SIFT (poor textures: hair, skin, blurry background);
+//! - fall back to the incremental mapper if that still registers too few;
+//! - optional: orbit forced onto a plane, for videos that rotate level.
 
 use std::path::{Path, PathBuf};
 
@@ -24,14 +24,14 @@ use crate::msg::Msg;
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum Features {
-    /// SIFT padrão: o mais rápido na CPU.
+    /// Default SIFT: the fastest on CPU.
     Sift,
-    /// SIFT com limiar de detecção baixo, agrupamento de escalas e forma
-    /// afim. ~2x o custo do padrão; recupera regiões de pouca textura.
-    /// Num vídeo real de IA (volta atrás de uma cabeça): 83 → 107/107 câmeras.
+    /// SIFT with a low detection threshold, domain-size pooling and affine
+    /// shape. ~2x the cost of the default; recovers low-texture regions.
+    /// On a real AI video (orbit behind a head): 83 → 107/107 cameras.
     SiftPlus,
-    /// ALIKED + LightGlue: registra bem, mas ~10x mais lento que o
-    /// SiftPlus na CPU e com erro de reprojeção maior.
+    /// ALIKED + LightGlue: registers well, but ~10x slower than SiftPlus on
+    /// CPU and with higher reprojection error.
     Aliked,
 }
 
@@ -39,7 +39,7 @@ impl Features {
     fn label(self) -> &'static str {
         match self {
             Features::Sift => "SIFT",
-            Features::SiftPlus => "SIFT reforçado",
+            Features::SiftPlus => "enhanced SIFT",
             Features::Aliked => "ALIKED + LightGlue",
         }
     }
@@ -64,28 +64,28 @@ impl Features {
     }
 }
 
-/// Abaixo disso o SIFT padrão ganha uma segunda tentativa reforçada.
+/// Below this ratio, default SIFT gets a second, enhanced attempt.
 const RETRY_BELOW: f32 = 0.95;
-/// Vizinhos casados na tentativa reforçada. Com 10 o resultado variou entre
-/// 97 e 106/107 câmeras de uma execução para outra (pontes fracas na região
-/// pobre em textura); com 20 ficou estável em 106–107, por ~10% a mais de tempo.
+/// Neighbours matched in the enhanced attempt. With 10 the result varied
+/// between 97 and 106/107 cameras from run to run (weak bridges in the
+/// low-texture region); with 20 it held steady at 106–107, for ~10% more time.
 const RETRY_WINDOW: u32 = 20;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PoseOptions {
     pub features: Features,
-    /// "SIMPLE_PINHOLE" ou "PINHOLE".
+    /// "SIMPLE_PINHOLE" or "PINHOLE".
     pub camera_model: String,
-    /// Quantos vizinhos de cada lado são casados.
+    /// How many neighbours on each side are matched.
     pub match_window: u32,
-    /// A órbita dá a volta completa (casa o fim com o começo).
+    /// The orbit is a full loop (matches the end with the start).
     pub closed_loop: bool,
-    /// Força todas as câmeras no mesmo plano (vídeo que gira em nível).
+    /// Forces all cameras onto the same plane (video that rotates level).
     #[serde(default)]
     pub flat_orbit: bool,
-    /// Frames sem pose registrada ganham uma inferida pelos vizinhos
-    /// (`scene::fill_missing`, aplicada pelo pipeline).
+    /// Frames without a registered pose get one inferred from their
+    /// neighbours (`scene::fill_missing`, applied by the pipeline).
     #[serde(default)]
     pub fill_missing: bool,
 }
@@ -98,10 +98,10 @@ pub struct ModelStats {
     pub points: u64,
     pub reprojection_error: Option<f64>,
     pub mapper: String,
-    /// Poses inferidas pelos vizinhos (frames que o COLMAP não registrou).
+    /// Poses inferred from neighbours (frames COLMAP did not register).
     #[serde(default)]
     pub inferred: u32,
-    /// Dessas, as refinadas contra os pontos 3D.
+    /// Of those, the ones refined against the 3D points.
     #[serde(default)]
     pub refined: u32,
 }
@@ -110,14 +110,14 @@ pub struct Paths<'a> {
     pub colmap: &'a Path,
     pub images: &'a Path,
     pub work: &'a Path,
-    /// Destino final: `<dataset>/sparse/0`.
+    /// Final destination: `<dataset>/sparse/0`.
     pub model_out: &'a Path,
-    /// COLMAP com CUDA. O SIFT reforçado (forma afim/DSP) continua na CPU:
-    /// o próprio COLMAP faz esse fallback; o matching vai para a GPU.
+    /// COLMAP with CUDA. Enhanced SIFT (affine shape/DSP) stays on the CPU:
+    /// COLMAP does that fallback itself; matching goes to the GPU.
     pub use_gpu: bool,
-    /// Máscaras `<imagem>.png` (preto = ignorar features do fundo).
+    /// `<image>.png` masks (black = ignore background features).
     pub masks: Option<PathBuf>,
-    /// Instante de cada frame pelo nome, para `PoseOptions::fill_missing`.
+    /// Timestamp of each frame by name, for `PoseOptions::fill_missing`.
     pub times: &'a std::collections::HashMap<String, f64>,
 }
 
@@ -135,7 +135,7 @@ fn base(colmap: &Path, sub: &str) -> Command {
     cmd
 }
 
-/// Remove o prefixo do glog (`I20261004 16:45:25.417 0x… file.cc:294] `).
+/// Strips the glog prefix (`I20261004 16:45:25.417 0x… file.cc:294] `).
 fn strip_glog(line: &str) -> &str {
     match line.find("] ") {
         Some(i) if line.starts_with(['I', 'W', 'E', 'F']) => &line[i + 2..],
@@ -143,7 +143,7 @@ fn strip_glog(line: &str) -> &str {
     }
 }
 
-/// Extrai `[i/N]` de uma linha.
+/// Extracts `[i/N]` from a line.
 fn bracket_progress(line: &str) -> Option<(u32, u32)> {
     let s = line.find('[')?;
     let e = line[s..].find(']')? + s;
@@ -160,14 +160,14 @@ fn write_pairs(images: &Path, path: &Path, window: u32, closed: bool) -> Result<
     names.sort();
     let n = names.len();
     if n < 3 {
-        bail!("poucos frames para reconstruir ({n})");
+        bail!("too few frames to reconstruct ({n})");
     }
 
-    // Vizinhos próximos + alguns saltos longos (16, 32, 64) que ajudam a
-    // amarrar a geometria global sem o custo do matching exaustivo.
+    // Near neighbours + a few long jumps (16, 32, 64) that help tie down the
+    // global geometry without the cost of exhaustive matching.
     let mut offsets: Vec<usize> = (1..=window as usize).collect();
     offsets.extend([16, 32, 64].into_iter().filter(|&o| o > window as usize));
-    // Na órbita fechada, o salto `o` equivale a `n - o`; não passe da metade.
+    // On a closed orbit, jump `o` is equivalent to `n - o`; don't go past half.
     let limit = if closed { n / 2 } else { n - 1 };
     offsets.retain(|&o| o <= limit);
 
@@ -211,7 +211,7 @@ async fn analyze(colmap: &Path, model: &Path) -> Result<(u32, u64, Option<f64>)>
     Ok((reg, pts, err))
 }
 
-/// Entre os modelos gerados (`0/`, `1/`, …) escolhe o que registrou mais imagens.
+/// Among the generated models (`0/`, `1/`, …), picks the one that registered the most images.
 async fn best_model(colmap: &Path, dir: &Path) -> Result<Option<(PathBuf, u32, u64, Option<f64>)>> {
     let mut best: Option<(PathBuf, u32, u64, Option<f64>)> = None;
     let Ok(entries) = std::fs::read_dir(dir) else {
@@ -232,8 +232,8 @@ async fn best_model(colmap: &Path, dir: &Path) -> Result<Option<(PathBuf, u32, u
 
 type Best = (PathBuf, u32, u64, Option<f64>);
 
-/// Uma tentativa completa (features → matching → calibração → mapeador
-/// global) numa subpasta própria. Progresso local de 0 a 1.
+/// One full attempt (features → matching → calibration → global mapper) in
+/// its own subfolder. Local progress from 0 to 1.
 async fn attempt(
     colmap: &Path,
     images: &Path,
@@ -275,9 +275,9 @@ async fn attempt(
         }
     })
     .await
-    .context("falha na extração de features")?;
+    .context("feature extraction failed")?;
 
-    // 2. Matching circular
+    // 2. Circular matching
     let pairs_path = dir.join("pairs.txt");
     let n_pairs = write_pairs(images, &pairs_path, opts.match_window, opts.closed_loop)?;
     on_progress(0.4, msg!("poses.matching", pairs = n_pairs));
@@ -298,9 +298,9 @@ async fn attempt(
         on_log(l);
     })
     .await
-    .context("falha no matching")?;
+    .context("matching failed")?;
 
-    // 3. Calibração do grafo de vistas (melhora o foco inicial do mapeador global)
+    // 3. View graph calibration (improves the global mapper's initial focal length)
     on_progress(0.85, msg!("poses.calibrating"));
     let mut cmd = base(colmap, "view_graph_calibrator");
     cmd.arg("--database_path").arg(&db);
@@ -308,10 +308,10 @@ async fn attempt(
         if crate::proc::is_cancelled(&e) {
             return Err(e);
         }
-        on_log(&format!("calibração falhou, seguindo sem ela: {e:#}"));
+        on_log(&format!("calibration failed, continuing without it: {e:#}"));
     }
 
-    // 4. Mapeador global
+    // 4. Global mapper
     on_progress(0.9, msg!("poses.globalMapper"));
     let global_dir = dir.join("sparse_global");
     std::fs::create_dir_all(&global_dir)?;
@@ -325,15 +325,15 @@ async fn attempt(
         if crate::proc::is_cancelled(&e) {
             return Err(e);
         }
-        on_log(&format!("mapeador global falhou: {e:#}"));
+        on_log(&format!("global mapper failed: {e:#}"));
     }
     best_model(colmap, &global_dir).await
 }
 
-/// Achata a órbita (ver `scene::flatten_orbit`) e reajusta só os pontos 3D
-/// com as poses e a intrínseca fixas, para que continuem coerentes com as
-/// novas câmeras. Na falha, `model` fica intocado. Retorna o desvio corrigido
-/// (fração do raio) e o novo erro de reprojeção.
+/// Flattens the orbit (see `scene::flatten_orbit`) and re-adjusts only the 3D
+/// points with poses and intrinsics fixed, so they stay consistent with the
+/// new cameras. On failure, `model` is left untouched. Returns the corrected
+/// deviation (fraction of the radius) and the new reprojection error.
 async fn flatten(
     colmap: &Path,
     work: &Path,
@@ -356,7 +356,7 @@ async fn flatten(
         .args(["--BundleAdjustment.refine_rig_from_world", "0"])
         .args(["--BundleAdjustment.refine_focal_length", "0"])
         .args(["--BundleAdjustment.refine_extra_params", "0"]);
-    run_streaming(cmd, cancel, |l| on_log(strip_glog(l))).await.context("falha no bundle adjustment")?;
+    run_streaming(cmd, cancel, |l| on_log(strip_glog(l))).await.context("bundle adjustment failed")?;
     let (_, _, err) = analyze(colmap, &adjusted).await?;
     std::fs::remove_dir_all(model)?;
     std::fs::rename(&adjusted, model)?;
@@ -384,10 +384,10 @@ pub async fn run(
     let mut mapper = "global";
     let mut db_dir = work.join("attempt1");
 
-    // Segunda tentativa: SIFT reforçado quando o padrão deixou buracos na órbita.
+    // Second attempt: enhanced SIFT when the default left gaps in the orbit.
     if features == Features::Sift && ratio(&best) < RETRY_BELOW {
         let got = best.as_ref().map_or(0, |b| b.1);
-        let msg = format!("{got}/{total} câmeras; repetindo com SIFT reforçado");
+        let msg = format!("{got}/{total} cameras; retrying with enhanced SIFT");
         on_log(&msg);
         let dir = work.join("attempt2");
         let retry_opts = PoseOptions { match_window: opts.match_window.max(RETRY_WINDOW), ..opts.clone() };
@@ -411,7 +411,7 @@ pub async fn run(
         }
     }
 
-    // Fallback: incremental, mais lento porém mais tolerante.
+    // Fallback: incremental, slower but more tolerant.
     if ratio(&best) < 0.6 {
         on_progress(0.95, msg!("poses.incremental"));
         let inc_dir = work.join("sparse_incremental");
@@ -429,7 +429,7 @@ pub async fn run(
             on_log(l);
         })
         .await
-        .context("falha no mapeador incremental")?;
+        .context("incremental mapper failed")?;
         if let Some(inc) = best_model(colmap, &inc_dir).await? {
             if best.as_ref().map_or(true, |b| inc.1 > b.1) {
                 best = Some(inc);
@@ -440,8 +440,8 @@ pub async fn run(
 
     let Some((model, registered, points, err)) = best else {
         bail!(
-            "o COLMAP não conseguiu reconstruir a cena. Tente SIFT reforçado ou ALIKED, \
-             mais frames, ou um trecho mais estável do vídeo."
+            "COLMAP could not reconstruct the scene. Try enhanced SIFT or ALIKED, \
+             more frames, or a steadier part of the video."
         );
     };
 
@@ -457,35 +457,35 @@ pub async fn run(
         on_progress(0.98, msg!("poses.flattening"));
         match flatten(colmap, work, model_out, cancel, &mut on_log).await {
             Ok((dev, e)) => {
-                on_log(&format!("órbita plana: maior desvio de altura corrigido {:.2}% do raio", dev * 100.0));
-                label.push_str(" · órbita plana");
+                on_log(&format!("flat orbit: largest height deviation corrected {:.2}% of the radius", dev * 100.0));
+                label.push_str(" · flat orbit");
                 err = e.or(err);
             }
             Err(e) if crate::proc::is_cancelled(&e) => return Err(e),
-            Err(e) => on_log(&format!("órbita plana não aplicada: {e:#}")),
+            Err(e) => on_log(&format!("flat orbit not applied: {e:#}")),
         }
     }
 
     let (mut inferred, mut refined) = (0, 0);
     if opts.fill_missing {
-        // Correspondências dos frames que ficaram de fora, pelo banco da
-        // tentativa que gerou o modelo; sem elas, as poses só são inferidas.
+        // Correspondences for the frames left out, from the database of the
+        // attempt that produced the model; without them, poses are only inferred.
         let corr = correspondences(&db_dir.join("database.db"), model_out).unwrap_or_else(|e| {
-            on_log(&format!("sem correspondências para refinar as poses inferidas: {e:#}"));
+            on_log(&format!("no correspondences to refine the inferred poses: {e:#}"));
             Default::default()
         });
         let fill = crate::scene::FillOptions { flat: opts.flat_orbit, correspondences: &corr };
         match crate::scene::fill_missing(model_out, images, times, &fill) {
             Ok(f) => {
                 if !f.inferred.is_empty() {
-                    on_log(&format!("poses inferidas pelos vizinhos: {}", f.inferred.join(", ")));
+                    on_log(&format!("poses inferred from neighbours: {}", f.inferred.join(", ")));
                 }
                 for (name, inliers) in &f.refined {
-                    on_log(&format!("pose de {name} refinada contra {inliers} pontos 3D"));
+                    on_log(&format!("pose of {name} refined against {inliers} 3D points"));
                 }
                 (inferred, refined) = (f.inferred.len() as u32, f.refined.len() as u32);
             }
-            Err(e) => on_log(&format!("poses não inferidas: {e:#}")),
+            Err(e) => on_log(&format!("poses not inferred: {e:#}")),
         }
     }
 
@@ -501,14 +501,14 @@ pub async fn run(
     })
 }
 
-/// Correspondências 2D → 3D de cada imagem do banco que o modelo não
-/// registrou: seus matches geométricos (two_view_geometries) com imagens
-/// registradas, levados aos pontos 3D que essas imagens enxergam. Um ponto 2D
-/// casado com pontos 3D diferentes fica com o mais votado.
+/// 2D → 3D correspondences for each database image the model did not
+/// register: its geometric matches (two_view_geometries) with registered
+/// images, carried over to the 3D points those images see. A 2D point matched
+/// to several 3D points keeps the most voted one.
 pub fn correspondences(db: &Path, model: &Path) -> Result<std::collections::HashMap<String, crate::scene::Correspondences>> {
     use rusqlite::{Connection, OpenFlags};
     use std::collections::HashMap;
-    // pair_id = id1 · 2³¹−1 + id2 (id1 < id2), como no COLMAP.
+    // pair_id = id1 · 2³¹−1 + id2 (id1 < id2), as in COLMAP.
     const MAX_IMAGES: i64 = 2_147_483_647;
 
     let (tracks, points) = crate::scene::read_tracks(model)?;
@@ -526,12 +526,12 @@ pub fn correspondences(db: &Path, model: &Path) -> Result<std::collections::Hash
             conn.query_row("SELECT rows, cols, data FROM keypoints WHERE image_id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
         let f = |i: usize| f32::from_le_bytes(data[4 * i..4 * i + 4].try_into().unwrap()) as f64;
         let cols = cols as usize;
-        anyhow::ensure!(data.len() >= rows as usize * cols * 4 && cols >= 2, "keypoints da imagem {id} malformados");
+        anyhow::ensure!(data.len() >= rows as usize * cols * 4 && cols >= 2, "malformed keypoints for image {id}");
         Ok((0..rows as usize).map(|k| [f(k * cols), f(k * cols + 1)]).collect())
     };
 
-    // O ponto 2D k de uma imagem registrada é o keypoint k do banco: só vale
-    // quando as contagens batem.
+    // 2D point k of a registered image is keypoint k in the database: only
+    // valid when the counts match.
     let mut aligned = HashMap::new();
     let mut votes: HashMap<i64, HashMap<u32, HashMap<i64, u32>>> = HashMap::new();
     let mut st = conn.prepare("SELECT pair_id, rows, data FROM two_view_geometries WHERE rows > 0")?;
@@ -539,7 +539,7 @@ pub fn correspondences(db: &Path, model: &Path) -> Result<std::collections::Hash
         let (pair, rows, data) = row?;
         let (id1, id2) = (pair / MAX_IMAGES, pair % MAX_IMAGES);
         let (Some(n1), Some(n2)) = (names.get(&id1), names.get(&id2)) else { continue };
-        // Exatamente uma das duas fora do modelo.
+        // Exactly one of the two is outside the model.
         let (missing, reg, missing_first) = match (tracks.contains_key(n1), tracks.contains_key(n2)) {
             (false, true) => (id1, n2, true),
             (true, false) => (id2, n1, false),
@@ -580,9 +580,9 @@ pub fn correspondences(db: &Path, model: &Path) -> Result<std::collections::Hash
 mod tests {
     use super::*;
 
-    /// Num projeto real (poses calculadas pelo app), tira câmeras do modelo e
-    /// compara a pose inferida e a refinada com a que o COLMAP tinha achado:
-    ///   SPLATFORGE_TEST_PROJECT=<projeto> cargo test refine_real -- --ignored --nocapture
+    /// On a real project (poses computed by the app), drops cameras from the
+    /// model and compares the inferred and refined poses with COLMAP's:
+    ///   SPLATFORGE_TEST_PROJECT=<project> cargo test refine_real -- --ignored --nocapture
     #[test]
     #[ignore]
     fn refine_real_project() {
@@ -592,7 +592,7 @@ mod tests {
         let truth = crate::scene::read_poses(&model).unwrap();
         let mut names: Vec<&String> = truth.keys().collect();
         names.sort();
-        // Uma rajada no meio, perdas soltas e as duas pontas.
+        // A burst in the middle, isolated losses and both ends.
         let lost: Vec<String> = [0, 20, 21, 22, 23, 24, 50, 70, 71, names.len() - 1].iter().map(|&i| names[i].clone()).collect();
 
         let mut results = Vec::new();
@@ -617,14 +617,14 @@ mod tests {
                 .collect();
             for (n, (dc, da)) in lost.iter().zip(&errs) {
                 let k = corr.get(n).map_or(0, |c| c.len());
-                println!("{} {n}: centro {:.3}% do raio, rotação {:.3}°, {k} correspondências", if refine { "refinada" } else { "inferida" }, dc * 100.0, da);
+                println!("{} {n}: center {:.3}% of radius, rotation {:.3}°, {k} correspondences", if refine { "refined" } else { "inferred" }, dc * 100.0, da);
             }
-            println!("refinadas: {:?}", filled.refined);
+            println!("refined: {:?}", filled.refined);
             results.push(errs);
             let _ = std::fs::remove_dir_all(&dir);
         }
         let mean = |e: &[(f64, f64)]| e.iter().map(|x| x.0).sum::<f64>() / e.len() as f64;
-        println!("média: inferida {:.3}%, refinada {:.3}%", mean(&results[0]) * 100.0, mean(&results[1]) * 100.0);
+        println!("mean: inferred {:.3}%, refined {:.3}%", mean(&results[0]) * 100.0, mean(&results[1]) * 100.0);
         assert!(mean(&results[1]) <= mean(&results[0]));
     }
 
@@ -646,7 +646,7 @@ mod tests {
         let out = dir.join("pairs.txt");
         let closed = write_pairs(&imgs, &out, 2, true).unwrap();
         let open = write_pairs(&imgs, &out, 2, false).unwrap();
-        // fechado: 10 frames × 2 vizinhos = 20 pares; aberto perde os 3 que dão a volta.
+        // closed: 10 frames × 2 neighbours = 20 pairs; open loses the 3 that wrap around.
         assert_eq!(closed, 20);
         assert_eq!(open, 17);
         std::fs::remove_dir_all(dir).unwrap();

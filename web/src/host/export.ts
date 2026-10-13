@@ -1,5 +1,5 @@
-// Exportação no web: o mesmo pipeline do desktop (web/src/export/, port de
-// src-tauri/src/export) num worker.
+// Web export: the same pipeline as the desktop (web/src/export/, a port of
+// src-tauri/src/export) in a worker.
 
 import type { ExportOptions, ExportStats, Msg, SplatInfo } from "../../../src/lib/api";
 import type { ExportReply, ExportRequest } from "../export/export.worker";
@@ -25,9 +25,9 @@ export function exportSplat(
       else reject(new Error(m.message));
     };
     w.onerror = (e) => {
-      // Sem mensagem é o script do worker que não carregou: em geral uma aba
-      // aberta antes de um deploy, pedindo um arquivo que não existe mais.
-      reject(new Error(e.message ? `worker de exportação: ${e.message}` : "não foi possível carregar o worker de exportação; recarregue a página"));
+      // No message means the worker script failed to load: usually a tab opened
+      // before a deploy, requesting a file that no longer exists.
+      reject(new Error(e.message ? `export worker: ${e.message}` : "could not load the export worker; reload the page"));
     };
     w.postMessage({ input, options } satisfies ExportRequest);
   }).finally(() => w.terminate());

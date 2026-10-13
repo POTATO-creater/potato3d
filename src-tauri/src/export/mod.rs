@@ -1,8 +1,8 @@
-//! Exportação otimizada do splat treinado: poda por opacidade, corte de
-//! bandas SH, decimação por fusão e saída em .ply ou .sog comprimido.
+//! Optimized export of the trained splat: opacity pruning, SH band cutting,
+//! merge-based decimation, and output as .ply or compressed .sog.
 //!
-//! Roda sobre o `splat.ply` final, sem retreinar: dá para testar vários
-//! ajustes e comparar no visualizador.
+//! Runs on the final `splat.ply` without retraining, so several settings can
+//! be tried and compared in the viewer.
 
 pub mod decimate;
 pub mod ply;
@@ -28,11 +28,11 @@ pub enum Format {
 #[serde(rename_all = "camelCase")]
 pub struct ExportOptions {
     pub format: Format,
-    /// Fração das gaussianas a remover por fusão (0–0,9).
+    /// Fraction of gaussians to remove by merging (0–0.9).
     pub decimate: f32,
-    /// Remove gaussianas com opacidade abaixo disso (0–1; 0 = desliga).
+    /// Removes gaussians with opacity below this (0–1; 0 = off).
     pub min_opacity: f32,
-    /// Grau SH máximo na saída (`None` = o do treino).
+    /// Maximum SH degree in the output (`None` = the training one).
     pub sh_degree: Option<u32>,
 }
 
@@ -47,7 +47,7 @@ impl Default for ExportOptions {
 pub struct ExportStats {
     pub path: String,
     pub input_count: usize,
-    /// Depois da poda por opacidade.
+    /// After opacity pruning.
     pub pruned_count: usize,
     pub output_count: usize,
     pub input_bytes: u64,
@@ -69,8 +69,8 @@ pub fn info(path: &Path) -> Result<SplatInfo> {
     Ok(SplatInfo { count, sh_degree, bytes: std::fs::metadata(path)?.len() })
 }
 
-/// Nome do arquivo de saída, que muda com os ajustes para não sobrescrever
-/// exportações anteriores com outros parâmetros.
+/// Output file name; it changes with the settings so exports with other
+/// parameters are not overwritten.
 pub fn output_name(opts: &ExportOptions) -> String {
     let mut name = String::from("splat");
     if opts.decimate > 0.0 {
@@ -83,7 +83,7 @@ pub fn output_name(opts: &ExportOptions) -> String {
         name += &format!("_sh{d}");
     }
     if opts.format == Format::Ply && name == "splat" {
-        // Não sobrescreve o splat.ply do treino.
+        // Don't overwrite the training splat.ply.
         name += "_export";
     }
     name + match opts.format {
@@ -99,7 +99,7 @@ pub fn run(input: &Path, out_dir: &Path, opts: &ExportOptions, mut progress: imp
     let mut s = ply::read(input)?;
     let input_count = s.count;
 
-    // Poda: tira opacidades baixas e qualquer linha com NaN/∞.
+    // Pruning: drop low opacities and any row with NaN/∞.
     let min_logit = if opts.min_opacity > 0.0 {
         let p = opts.min_opacity.clamp(1e-6, 0.999) as f64;
         (p / (1.0 - p)).ln() as f32
@@ -121,14 +121,14 @@ pub fn run(input: &Path, out_dir: &Path, opts: &ExportOptions, mut progress: imp
     }
     let pruned_count = s.count;
     if pruned_count == 0 {
-        anyhow::bail!("a poda por opacidade removeu todas as gaussianas");
+        anyhow::bail!("opacity pruning removed every gaussian");
     }
 
     if let Some(d) = opts.sh_degree {
         s.truncate_sh(d);
     }
 
-    // Pesos de cada fase na barra de progresso.
+    // Weight of each phase in the progress bar.
     let (dec_span, write_start) = if opts.decimate > 0.0 { (0.55, 0.6) } else { (0.0, 0.1) };
     if opts.decimate > 0.0 {
         progress(0.05, &msg!("export.merging"));
@@ -174,7 +174,7 @@ mod tests {
         assert_eq!(output_name(&o), "splat_dec50_op20_sh0.sog");
     }
 
-    /// Mede com um splat real:
+    /// Benchmarks with a real splat:
     /// `SPLATFORGE_TEST_PLY=<splat.ply> cargo test --release export::tests::real -- --ignored --nocapture`
     #[test]
     #[ignore]

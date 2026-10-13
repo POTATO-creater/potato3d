@@ -1,36 +1,38 @@
 #!/usr/bin/env node
-// Roda a versão web num Chrome headless e mede, sem depender de uma janela
-// visível (abas ocultas sofrem throttling). Precisa do `pnpm web:dev`
-// rodando com `WEB_FS_ANY=1`, para abrir arquivos locais por /@fs.
+// Runs the web version in headless Chrome and benchmarks it without needing a
+// visible window (hidden tabs get throttled). Requires `pnpm web:dev` running
+// with `WEB_FS_ANY=1`, to open local files via /@fs.
 //
-//   node scripts/web-bench/headless.mjs video <url> [--mask chroma|rmbg|sam2] [--for-poses] [--no-train] [--runs N] [--out <pasta>]
+//   node scripts/web-bench/headless.mjs video <url> [--mask chroma|rmbg|sam2] [--for-poses] [--no-train] [--runs N] [--out <folder>]
 //   node scripts/web-bench/headless.mjs train <url> [--out splat.ply]
-//   node scripts/web-bench/headless.mjs poses <url> [--out <pasta>]
+//   node scripts/web-bench/headless.mjs poses <url> [--out <folder>]
 //   node scripts/web-bench/headless.mjs profile <url> [--seconds 10]
 //
-// <url>: http://localhost:1440/?video=/@fs/<vídeo>, mais &dataset=/@fs/<dataset
-// COLMAP> para train/poses/profile (o projeto do vídeo começa com esse
-// dataset: imagens e poses).
-// - video:   "Gerar splat" desde os frames, com o recorte de --mask (rmbg e sam2
-//            baixa o modelo se preciso); --no-train cancela ao fim das poses;
-//            --runs N repete na mesma página; --out copia o projeto do OPFS
-//            para <pasta>, mais um frames.json com o instante de cada frame;
-//            --export '{"format":"sog","decimate":0.5}' exporta pelo painel
-//            no fim e abre o resultado no 3D.
-// - train:   treina a partir da etapa Treino (poses do dataset); --out salva
-//            o .ply final.
-// - poses:   recalcula as poses a partir da etapa Poses e para; --out grava
-//            <pasta>/sparse/0 (e liga <pasta>/images às imagens do dataset).
-// - profile: perfil de CPU de alguns segundos de treino (após o passo 100).
-//            Use `pnpm web:wasm --profiling` para ter os nomes do WASM.
+// <url>: http://localhost:1440/?video=/@fs/<video>, plus &dataset=/@fs/<COLMAP
+// dataset> for train/poses/profile (the video's project starts from that
+// dataset: images and poses).
+// - video:   "Generate splat" from frames, masking with --mask (rmbg and sam2
+//            download the model if needed); --no-train cancels after poses;
+//            --runs N repeats on the same page; --out copies the project from
+//            OPFS to <folder>, plus a frames.json with each frame's timestamp;
+//            --export '{"format":"sog","decimate":0.5}' exports via the panel
+//            at the end and opens the result in 3D.
+// - train:   trains from the Training stage (dataset poses); --out saves the
+//            final .ply.
+// - poses:   recomputes poses from the Poses stage and stops; --out writes
+//            <folder>/sparse/0 (and links <folder>/images to the dataset images).
+// - profile: CPU profile of a few seconds of training (after step 100).
+//            Use `pnpm web:wasm --profiling` to get WASM function names.
 //
-// Ajustes (partem do preset Prévia): --preset preview|balanced|quality,
-// --frames N, --steps N, --max-res N, --flat (órbita plana), --fill (usar
-// todos os frames; com &sfmDrop=0,20,… na URL, simula câmeras perdidas),
-// --contrib N (poda por contribuição negativa, julgando quem contribuiu em ≥ N
-// vistas; --contrib-ratio R e --contrib-start F ajustam), --opac-solid W,
-// --opac-binary W e --volume W (regularização de opacidade e volume). O Chrome vem de CHROME (padrão: o do
-// macOS em /Applications).
+// Settings (starting from the Preview preset): --preset preview|balanced|quality,
+// --frames N, --steps N, --max-res N, --flat (flat orbit), --fill (use all
+// frames; with &sfmDrop=0,20,… in the URL, simulates lost cameras),
+// --contrib N (negative-contribution pruning, judging splats that contributed in
+// ≥ N views; tuned by --contrib-ratio R and --contrib-start F), --opac-solid W,
+// --opac-binary W and --volume W (opacity and volume regularization). Chrome
+// comes from CHROME (default: the macOS one in /Applications).
+//
+// The UI selectors below match pt-BR text, so the script forces the pt-BR locale.
 
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -46,7 +48,7 @@ const opt = (name, def) => {
 };
 const flag = (name) => rest.includes(`--${name}`);
 if (!["train", "poses", "profile", "video"].includes(mode) || !url) {
-  console.error("uso: headless.mjs video|train|poses|profile <url> [opções]  (ver o cabeçalho do arquivo)");
+  console.error("usage: headless.mjs video|train|poses|profile <url> [options]  (see the file header)");
   process.exit(2);
 }
 
@@ -70,8 +72,8 @@ const chrome = spawn(
   ],
   { stdio: "ignore" },
 );
-// Cada execução cria um perfil (com cópias dos modelos no OPFS): apaga ao sair,
-// senão eles acumulam gigabytes no disco.
+// Each run creates a profile (with copies of the models in OPFS): delete it on
+// exit, otherwise they pile up gigabytes on disk.
 process.on("exit", () => {
   chrome.kill("SIGKILL");
   try {
@@ -88,7 +90,7 @@ for (let i = 0; i < 100 && !target; i++) {
   } catch {}
 }
 if (!target) {
-  console.error("Chrome não abriu a porta de depuração.");
+  console.error("Chrome did not open the debugging port.");
   process.exit(1);
 }
 const ws = new WebSocket(target.webSocketDebuggerUrl);
@@ -114,7 +116,7 @@ const send = (method, params = {}) =>
   });
 const evaluate = async (expression) =>
   (await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true })).result?.result?.value;
-/** Bytes de um Uint8Array/Blob da página, via base64. */
+/** Bytes of a Uint8Array/Blob from the page, via base64. */
 const fetchBytes = async (expr) => {
   const b64 = await evaluate(`(async () => {
     let u = ${expr};
@@ -125,7 +127,7 @@ const fetchBytes = async (expr) => {
   })()`);
   return Buffer.from(b64, "base64");
 };
-/** Copia uma pasta do OPFS da página para o disco, recursivamente. */
+/** Recursively copies a folder from the page's OPFS to disk. */
 async function copyOut(handleExpr, dest) {
   const list = await evaluate(`(async () => {
     const out = [];
@@ -144,7 +146,7 @@ async function copyOut(handleExpr, dest) {
 
 const ui = {
   run: `[...document.querySelectorAll('.run .btn-primary')].find(b => b.textContent.includes('Gerar splat'))`,
-  // "Etapa: mensagem" de cada etapa da barra inferior
+  // "Stage: message" for each stage in the bottom bar
   stages: `[...document.querySelectorAll('.stage')].map(e => e.querySelector('.stage-title').textContent + ': ' + e.querySelector('.stage-msg').textContent.trim()).join(' | ')`,
   metrics: `[...document.querySelectorAll('.stage')].map(e => e.querySelector('.stage-title').textContent + ' ' + (e.querySelector('.stage-time')?.textContent ?? '—') + ' ' + [...e.querySelectorAll('.metric')].map(m => m.innerText.replace('\\n', ' ')).join(', ')).join(' | ')`,
   log: `document.querySelector('pre.log')?.innerText ?? ''`,
@@ -153,11 +155,11 @@ const ui = {
 };
 const click = (expr) => evaluate(`(${expr})?.click()`);
 const fail = (msg) => {
-  console.log("ERRO:", msg);
+  console.log("ERROR:", msg);
   process.exit(1);
 };
 
-// Ajustes guardados pela interface (localStorage da origem) antes de abrir.
+// Settings stored by the UI (origin localStorage), written before opening.
 const settings = structuredClone(presetById(opt("preset", "preview")).settings);
 if (opt("frames")) settings.frames.targetFrames = Number(opt("frames"));
 if (opt("steps")) settings.train.totalSteps = Number(opt("steps"));
@@ -183,55 +185,55 @@ await send("Runtime.enable");
 await send("Page.enable");
 await send("Page.navigate", { url: new URL(url).origin });
 await sleep(1000);
-// Os seletores abaixo usam os textos em pt-BR.
+// The selectors below rely on the pt-BR texts.
 await evaluate(`localStorage.setItem('splatforge.locale.v1', 'pt-BR');
   localStorage.setItem('splatforge.settings.v3', ${JSON.stringify(JSON.stringify({ preset: "custom", settings }))});
   localStorage.setItem('splatforge.masks.v1', ${JSON.stringify(JSON.stringify(masks))});
   localStorage.setItem('splatforge.export.v1', ${JSON.stringify(opt("export", "{}"))})`);
 await send("Page.navigate", { url });
 
-// Vídeo aberto, projeto carregado e Brush/WebGPU de pé.
+// Video open, project loaded and Brush/WebGPU up.
 for (let i = 0; ; i++) {
   await sleep(500);
   const ready = await evaluate(`!!document.querySelector('.meta-row') && !!document.querySelector('.stage-tool') && !document.body.innerText.includes('Verificando o que precisa')`);
   if (ready && (await evaluate(`!!document.querySelector('.setup') || !(${ui.run})?.disabled`))) break;
-  if (i > 120) fail(`timeout carregando a página: ${await evaluate("document.body.innerText.slice(0, 400)")}`);
+  if (i > 120) fail(`timeout loading the page: ${await evaluate("document.body.innerText.slice(0, 400)")}`);
 }
-// Primeiro uso do RMBG: o banner de ferramentas baixa o modelo.
+// First RMBG use: the tools banner downloads the model.
 if (await evaluate(`!!document.querySelector('.setup')`)) {
   if (!(await evaluate(`!!document.querySelector('.setup-btn')`))) fail(await evaluate(`document.querySelector('.setup').innerText`));
-  console.log("baixando o modelo de recorte…");
+  console.log("downloading the masking model…");
   await click(`document.querySelector('.setup-btn')`);
   for (let i = 0; await evaluate(`!!document.querySelector('.setup')`); i++) {
     await sleep(1000);
     const err = await evaluate(`document.querySelector('.setup-error')?.innerText`);
     if (err) fail(err);
-    if (i > 600) fail("timeout baixando o modelo");
+    if (i > 600) fail("timeout downloading the model");
   }
 }
 
 const from = { poses: "Poses", train: "Treino", profile: "Treino" }[mode];
-// O dataset de ?dataset= é copiado depois que o vídeo abre.
+// The ?dataset= dataset is copied after the video opens.
 const segment = `[...document.querySelectorAll('.run .segmented button')].find(b => b.textContent === '${from}')`;
 for (let i = 0; from && (await evaluate(`${segment}.disabled`)) && i < 240; i++) await sleep(500);
 if (from) await click(segment);
 await sleep(300);
 if (from && !(await evaluate(`[...document.querySelectorAll('.run .segmented button')].find(b => b.textContent === '${from}').classList.contains('active')`)))
-  fail(`a etapa ${from} não está disponível: o dataset tem poses?`);
+  fail(`stage ${from} is not available: does the dataset have poses?`);
 
 const stopAfterPoses = mode === "poses" || flag("no-train");
 const runs = mode === "video" ? Number(opt("runs", "1")) : 1;
 let shown = 0;
 const flushLog = async () => {
   const log = (await evaluate(ui.log)) ?? "";
-  if (log.length < shown) shown = 0; // nova execução limpa o log
+  if (log.length < shown) shown = 0; // a new run clears the log
   if (log.length > shown) console.log(log.slice(shown).trim());
   shown = log.length;
 };
 
 for (let run = 1; run <= runs; run++) {
   for (let i = 0; await evaluate(`(${ui.run})?.disabled ?? true`); i++) {
-    if (i > 120) fail("o botão Gerar splat não habilitou");
+    if (i > 120) fail("the Gerar splat button never became enabled");
     await sleep(500);
   }
   await click(ui.run);
@@ -258,10 +260,10 @@ for (let run = 1; run <= runs; run++) {
     const self = new Map();
     for (const s of samples) {
       const n = byId.get(s);
-      const k = n.callFrame.functionName || n.callFrame.url.split("/").pop() || "(anônima)";
+      const k = n.callFrame.functionName || n.callFrame.url.split("/").pop() || "(anonymous)";
       self.set(k, (self.get(k) ?? 0) + 1);
     }
-    console.log(`${samples.length} amostras; tempo próprio por função:`);
+    console.log(`${samples.length} samples; self time per function:`);
     for (const [k, v] of [...self].sort((a, b) => b[1] - a[1]).slice(0, 30))
       console.log(`${((100 * v) / samples.length).toFixed(1).padStart(5)}%  ${k.slice(0, 160)}`);
     process.exit(0);
@@ -287,7 +289,7 @@ for (let run = 1; run <= runs; run++) {
     if (await evaluate(`!!document.querySelector('.done-note')`)) break;
   }
   await flushLog();
-  console.log(`execução ${run}: ${((Date.now() - t0) / 1000).toFixed(1)} s\n  ${(await evaluate(ui.metrics)).replaceAll(" | ", "\n  ")}`);
+  console.log(`run ${run}: ${((Date.now() - t0) / 1000).toFixed(1)} s\n  ${(await evaluate(ui.metrics)).replaceAll(" | ", "\n  ")}`);
 }
 
 if (opt("export") && !stopAfterPoses) {
@@ -295,17 +297,17 @@ if (opt("export") && !stopAfterPoses) {
   await click(`[...document.querySelectorAll('.export-run')].find(b => b.textContent.startsWith('Exportar'))`);
   for (let i = 0; !(await evaluate(`!!document.querySelector('.export-result') && !document.querySelector('.export-progress')`)); i++) {
     const err = await evaluate(`document.querySelector('.export-error')?.textContent`);
-    if (err) fail(`exportação: ${err}`);
-    if (i > 600) fail("timeout na exportação");
+    if (err) fail(`export: ${err}`);
+    if (i > 600) fail("export timeout");
     await sleep(500);
   }
-  console.log(`exportação em ${((Date.now() - t0) / 1000).toFixed(1)} s: ${(await evaluate(`document.querySelector('.export-result').innerText`)).replace(/\n+/g, " · ")}`);
-  // A exportação já abre no 3D: espera o Spark carregar e confere o rótulo.
+  console.log(`export in ${((Date.now() - t0) / 1000).toFixed(1)} s: ${(await evaluate(`document.querySelector('.export-result').innerText`)).replace(/\n+/g, " · ")}`);
+  // The export opens in 3D right away: wait for Spark to load and check the label.
   await click(`[...document.querySelectorAll('.tabs button')].find(b => b.textContent === '3D')`);
   await sleep(4000);
   const viewer = await evaluate(`document.querySelector('.content').innerText`);
-  if (/erro|falh/i.test(viewer)) fail(`visualizador: ${viewer}`);
-  console.log(`visualizador: ${viewer.replace(/\n+/g, " · ").slice(0, 120)}`);
+  if (/erro|falh/i.test(viewer)) fail(`viewer: ${viewer}`);
+  console.log(`viewer: ${viewer.replace(/\n+/g, " · ").slice(0, 120)}`);
 }
 
 const project = await evaluate(ui.project);
@@ -316,8 +318,8 @@ const opfsFile = (path) => {
 };
 const out = opt("out");
 if (out && mode === "video") {
-  console.log(`${await copyOut(`await ${opfs(project)}`, out)} arquivos copiados para ${out}`);
-  // nome de cada frame e o instante do vídeo de onde saiu (para comparar com a verdade)
+  console.log(`${await copyOut(`await ${opfs(project)}`, out)} files copied to ${out}`);
+  // each frame's name and the video timestamp it came from (to compare with ground truth)
   const state = JSON.parse((await fetchBytes(`await ${opfsFile(`${project}/project.json`)}`)).toString());
   const frames = state.frames.map((f) => ({ name: f.path.split("/").pop(), time: f.time, sharpness: f.sharpness }));
   writeFileSync(join(out, "frames.json"), JSON.stringify(frames, null, 1));
@@ -328,10 +330,10 @@ if (out && mode === "poses") {
     writeFileSync(join(out, "sparse", "0", name), await fetchBytes(`await ${opfsFile(`${project}/dataset/sparse/0/${name}`)}`));
   const local = new URL(url).searchParams.get("dataset")?.replace(/^\/@fs/, "");
   if (local && !existsSync(join(out, "images"))) symlinkSync(join(local, "images"), join(out, "images"));
-  console.log("modelo salvo em", join(out, "sparse", "0"));
+  console.log("model saved to", join(out, "sparse", "0"));
 }
 if (out && mode === "train") {
   writeFileSync(out, await fetchBytes(`await ${opfsFile(`${project}/splat.ply`)}`));
-  console.log("salvo", out);
+  console.log("saved", out);
 }
 process.exit(0);

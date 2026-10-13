@@ -9,7 +9,7 @@ const fmtTime = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padS
 const toHex = (c: [number, number, number]) => `#${c.map((v) => v.toString(16).padStart(2, "0")).join("")}`;
 const fromHex = (h: string): [number, number, number] => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)) as never;
 
-/** Métodos de recorte disponíveis em cada sistema. */
+/** Masking methods available on each OS. */
 export function maskMethods(os: Os | undefined): MaskMethod[] {
   return os === "windows"
     ? ["people", "general", "rmbg", "chroma"]
@@ -36,15 +36,15 @@ export function MasksPanel({
   masks: MaskOptions;
   onMasks: (m: MaskOptions) => void;
   locked: boolean;
-  /** Quadro para a prévia do recorte (onde o host oferece prévia). */
+  /** Frame for the mask preview (where the host provides a preview). */
   preview: PreviewSource | null;
-  /** A marcação ficou fora do trecho (vai ser ignorada). */
+  /** The marking fell outside the trim range (it will be ignored). */
   promptOutside: boolean;
 }) {
   const { t } = useI18n();
   const tm = t.masks;
   const options = methods(t, os);
-  // Método salvo pode não existir neste sistema (ex.: "people" vindo do Windows).
+  // The saved method may not exist on this OS (e.g. "people" from Windows).
   const method = options.some((o) => o.value === masks.method) ? masks.method : options[0].value;
   const c = masks.chroma;
   const setChroma = (patch: Partial<ChromaOptions>) => onMasks({ ...masks, method, chroma: { ...c, ...patch } });
@@ -93,7 +93,7 @@ export function MasksPanel({
             </div>
           )}
 
-          {/* Como no job: marcação fora do trecho não vale. */}
+          {/* As in the job: a marking outside the trim range doesn't apply. */}
           <MaskPreview source={preview} masks={{ ...masks, method, prompt: promptOutside ? null : masks.prompt }} locked={locked} />
 
           {method === "chroma" && (

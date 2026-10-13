@@ -1,5 +1,5 @@
-//! Lê o modelo binário do COLMAP para enquadrar o visualizador: centro do
-//! objeto, eixo "para cima" da órbita e a trajetória das câmeras.
+//! Reads the binary COLMAP model to frame the viewer: object center, the
+//! orbit's "up" axis and the camera trajectory.
 
 use std::io::{BufReader, Read};
 use std::path::Path;
@@ -10,17 +10,17 @@ use serde::Serialize;
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SceneFrame {
-    /// Mediana dos pontos esparsos (robusta a outliers do fundo).
+    /// Median of the sparse points (robust to background outliers).
     pub center: [f64; 3],
-    /// Média do "para cima" das câmeras, normalizada.
+    /// Mean of the cameras' "up" vectors, normalized.
     pub up: [f64; 3],
-    /// Distância mediana câmera → centro.
+    /// Median camera → center distance.
     pub radius: f64,
-    /// Centros das câmeras registradas, na ordem dos frames.
+    /// Centers of the registered cameras, in frame order.
     pub cameras: Vec<[f64; 3]>,
-    /// Índice do frame de cada câmera (lacunas = frames que o COLMAP descartou).
+    /// Frame index of each camera (gaps = frames COLMAP dropped).
     pub frame_indices: Vec<u32>,
-    /// Lente do vídeo, para o visualizador enquadrar como a filmagem.
+    /// Video lens, so the viewer frames the scene like the footage.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lens: Option<Lens>,
 }
@@ -28,13 +28,13 @@ pub struct SceneFrame {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Lens {
-    /// Campo de visão vertical, em radianos.
+    /// Vertical field of view, in radians.
     pub fov_y: f64,
-    /// Largura / altura.
+    /// Width / height.
     pub aspect: f64,
 }
 
-/// Lente da primeira câmera do cameras.bin.
+/// Lens of the first camera in cameras.bin.
 fn read_lens(path: &Path) -> Result<Option<Lens>> {
     let mut r = open(path)?;
     if r.u64()? == 0 {
@@ -44,7 +44,7 @@ fn read_lens(path: &Path) -> Result<Option<Lens>> {
     let model = r.u32()?;
     let (w, h) = (r.u64()? as f64, r.u64()? as f64);
     let (f0, f1) = (r.f64()?, r.f64()?);
-    // Modelos com uma focal só (f, cx, cy, …); os demais começam com fx, fy.
+    // Models with a single focal length (f, cx, cy, …); the rest start with fx, fy.
     let fy = if matches!(model, 0 | 2 | 3 | 8 | 9) { f0 } else { f1 };
     if !(w > 0.0 && h > 0.0 && fy > 0.0) {
         return Ok(None);
@@ -90,7 +90,7 @@ fn open(p: &Path) -> Result<Bin<BufReader<std::fs::File>>> {
     Ok(Bin(BufReader::new(std::fs::File::open(p)?)))
 }
 
-/// Rotação mundo→câmera a partir do quatérnio (w, x, y, z) do COLMAP.
+/// World→camera rotation from COLMAP's (w, x, y, z) quaternion.
 fn rotation(q: [f64; 4]) -> [[f64; 3]; 3] {
     let [w, x, y, z] = q;
     [
@@ -109,7 +109,7 @@ fn median(mut v: Vec<f64>) -> f64 {
 }
 
 pub fn read(model: &Path) -> Result<SceneFrame> {
-    // images.bin: centro = -Rᵀt; "para cima" da câmera COLMAP = -Y → Rᵀ(0,-1,0).
+    // images.bin: center = -Rᵀt; COLMAP camera "up" = -Y → Rᵀ(0,-1,0).
     let mut r = open(&model.join("images.bin"))?;
     let n = r.u64()?;
     let mut cams: Vec<(String, [f64; 3])> = Vec::with_capacity(n as usize);
@@ -134,7 +134,7 @@ pub fn read(model: &Path) -> Result<SceneFrame> {
         cams.push((name, c));
     }
     cams.sort_by(|a, b| a.0.cmp(&b.0));
-    // Os frames são gravados como 00000.jpg, 00001.jpg, …
+    // Frames are written as 00000.jpg, 00001.jpg, …
     let frame_indices: Vec<u32> = cams
         .iter()
         .enumerate()
@@ -149,7 +149,7 @@ pub fn read(model: &Path) -> Result<SceneFrame> {
     let len = (up[0] * up[0] + up[1] * up[1] + up[2] * up[2]).sqrt().max(1e-9);
     let up = [up[0] / len, up[1] / len, up[2] / len];
 
-    // points3D.bin: só as coordenadas importam.
+    // points3D.bin: only the coordinates matter.
     let mut r = open(&model.join("points3D.bin"))?;
     let np = r.u64()?;
     let (mut xs, mut ys, mut zs) = (Vec::new(), Vec::new(), Vec::new());
@@ -158,7 +158,7 @@ pub fn read(model: &Path) -> Result<SceneFrame> {
         xs.push(r.f64()?);
         ys.push(r.f64()?);
         zs.push(r.f64()?);
-        r.skip(3 + 8)?; // rgb, erro
+        r.skip(3 + 8)?; // rgb, error
         let track = r.u64()?;
         r.skip(track * 8)?;
     }
@@ -182,8 +182,8 @@ pub fn read(model: &Path) -> Result<SceneFrame> {
     Ok(SceneFrame { center, up, radius, cameras, frame_indices, lens })
 }
 
-/// Copia `images.bin` trocando o nome de cada imagem (o resto é preservado
-/// byte a byte).
+/// Copies `images.bin` renaming each image (everything else is preserved
+/// byte for byte).
 pub fn rewrite_image_names(src: &Path, dst: &Path, rename: impl Fn(&str) -> String) -> Result<()> {
     use std::io::Write;
     let mut r = open(src)?;
@@ -234,7 +234,7 @@ fn apply(m: &M3, v: V3) -> V3 {
     [dot(m[0], v), dot(m[1], v), dot(m[2], v)]
 }
 
-/// Menor rotação que leva o vetor unitário `a` em `b` (Rodrigues).
+/// Smallest rotation taking unit vector `a` to `b` (Rodrigues).
 fn rotation_between(a: V3, b: V3) -> M3 {
     let v = cross(a, b);
     let k = [[0.0, -v[2], v[1]], [v[2], 0.0, -v[0]], [-v[1], v[0], 0.0]];
@@ -249,7 +249,7 @@ fn rotation_between(a: V3, b: V3) -> M3 {
     m
 }
 
-/// Quatérnio (w, x, y, z) de uma matriz de rotação (Shepperd).
+/// Quaternion (w, x, y, z) from a rotation matrix (Shepperd).
 fn quaternion(m: &M3) -> [f64; 4] {
     let tr = m[0][0] + m[1][1] + m[2][2];
     let q = if tr > 0.0 {
@@ -272,13 +272,13 @@ fn quaternion(m: &M3) -> [f64; 4] {
     }
 }
 
-/// Força a órbita plana: projeta o centro de cada câmera no plano da órbita
-/// e gira a câmera para que o sujeito continue no mesmo pixel. Subir a câmera
-/// e incliná-la para baixo dão imagens quase iguais de um objeto compacto, e
-/// essa é a troca que o COLMAP às vezes faz errado com pouca textura. Grava o
-/// modelo corrigido em `out`; os pontos 3D ficam como estão e devem passar
-/// por um bundle adjustment com as poses fixas. Retorna o maior desvio de
-/// altura removido, como fração do raio da órbita.
+/// Forces a flat orbit: projects each camera center onto the orbit plane and
+/// rotates the camera so the subject stays on the same pixel. Raising the
+/// camera and tilting it down give nearly identical images of a compact
+/// object, and that's the trade-off COLMAP sometimes gets wrong with little
+/// texture. Writes the corrected model to `out`; the 3D points are left as is
+/// and must go through a bundle adjustment with fixed poses. Returns the
+/// largest height deviation removed, as a fraction of the orbit radius.
 pub fn flatten_orbit(model: &Path, out: &Path) -> Result<f64> {
     use std::io::Write;
     let frame = read(model)?;
@@ -298,7 +298,7 @@ pub fn flatten_orbit(model: &Path, out: &Path) -> Result<f64> {
         poses.push((id, name, q, t));
     }
     if poses.len() < 3 {
-        anyhow::bail!("câmeras demais fora do modelo para ajustar um plano");
+        anyhow::bail!("too many cameras missing from the model to fit a plane");
     }
     poses.sort_by(|a, b| a.1.cmp(&b.1));
     let centers: Vec<V3> = poses
@@ -310,8 +310,8 @@ pub fn flatten_orbit(model: &Path, out: &Path) -> Result<f64> {
         .collect();
     let k = centers.len() as f64;
     let mean = centers.iter().fold([0.0; 3], |a, c| [a[0] + c[0] / k, a[1] + c[1] / k, a[2] + c[2] / k]);
-    // Normal de Newell: soma dos produtos vetoriais de câmeras consecutivas.
-    // Vale para arcos parciais e não precisa de decomposição em autovalores.
+    // Newell normal: sum of cross products of consecutive cameras.
+    // Works for partial arcs and needs no eigendecomposition.
     let mut normal = [0.0; 3];
     for w in centers.windows(2) {
         let c = cross(sub(w[0], mean), sub(w[1], mean));
@@ -320,7 +320,7 @@ pub fn flatten_orbit(model: &Path, out: &Path) -> Result<f64> {
     let area = dot(normal, normal).sqrt();
     let spread: f64 = centers.iter().map(|c| dot(sub(*c, mean), sub(*c, mean))).sum::<f64>() / k;
     if area < 1e-3 * spread * k {
-        anyhow::bail!("as câmeras quase não formam um arco; não dá para definir o plano da órbita");
+        anyhow::bail!("the cameras barely form an arc; cannot define the orbit plane");
     }
     let normal = unit(normal);
 
@@ -363,8 +363,8 @@ pub fn flatten_orbit(model: &Path, out: &Path) -> Result<f64> {
     }
     w.flush()?;
 
-    // No COLMAP 4 a pose que vale é a do frame (rig_from_world); com uma
-    // câmera por rig ela é a própria pose da imagem.
+    // In COLMAP 4 the authoritative pose is the frame's (rig_from_world);
+    // with one camera per rig it equals the image pose.
     let mut r = open(&model.join("frames.bin"))?;
     let mut w = std::io::BufWriter::new(std::fs::File::create(out.join("frames.bin"))?);
     let n = r.u64()?;
@@ -381,9 +381,9 @@ pub fn flatten_orbit(model: &Path, out: &Path) -> Result<f64> {
             data.push((kind, sensor, data_id));
         }
         let [(0, _, image_id)] = data[..] else {
-            anyhow::bail!("frame com mais de um sensor (rig); órbita plana não suportada");
+            anyhow::bail!("frame with more than one sensor (rig); flat orbit not supported");
         };
-        let pose = fixed.get(&(image_id as u32)).context("frame sem imagem correspondente")?;
+        let pose = fixed.get(&(image_id as u32)).context("frame has no matching image")?;
         w.write_all(&ids)?;
         w.write_all(&pose_bytes(pose))?;
         w.write_all(&nd.to_le_bytes())?;
@@ -407,7 +407,7 @@ fn scale(a: V3, s: f64) -> V3 {
     [a[0] * s, a[1] * s, a[2] * s]
 }
 
-/// Rotação de `th` em torno do eixo unitário `n` (Rodrigues).
+/// Rotation by `th` about unit axis `n` (Rodrigues).
 fn about(n: V3, th: f64) -> M3 {
     let k = [[0.0, -n[2], n[1]], [n[2], 0.0, -n[0]], [-n[1], n[0], 0.0]];
     let k2 = mul(&k, &k);
@@ -436,8 +436,8 @@ fn slerp(a: [f64; 4], b: [f64; 4], u: f64) -> [f64; 4] {
     q.map(|v| v / n)
 }
 
-/// Hermite cúbico com tangentes de Catmull-Rom não uniformes: segue a
-/// velocidade dos vizinhos dos dois lados da lacuna.
+/// Cubic Hermite with non-uniform Catmull-Rom tangents: follows the velocity
+/// of the neighbours on both sides of the gap.
 fn hermite(s: &[f64], y: &[f64], a: usize, b: usize, at: f64) -> f64 {
     let slope = |i: usize, j: usize| (y[j] - y[i]) / (s[j] - s[i]);
     let ma = if a > 0 { slope(a - 1, b) } else { slope(a, b) };
@@ -448,7 +448,7 @@ fn hermite(s: &[f64], y: &[f64], a: usize, b: usize, at: f64) -> f64 {
     (2.0 * u3 - 3.0 * u2 + 1.0) * y[a] + (u3 - 2.0 * u2 + u) * h * ma + (-2.0 * u3 + 3.0 * u2) * y[b] + (u3 - u2) * h * mb
 }
 
-/// Inclinação (mínimos quadrados) de y em s.
+/// Least-squares slope of y over s.
 fn fit_slope(s: &[f64], y: &[f64]) -> f64 {
     let n = s.len() as f64;
     let (ms, my) = (s.iter().sum::<f64>() / n, y.iter().sum::<f64>() / n);
@@ -461,9 +461,9 @@ fn fit_slope(s: &[f64], y: &[f64]) -> f64 {
     }
 }
 
-/// Instante de cada imagem, na ordem dos nomes; se faltar ou não crescer
-/// (frames de imagens soltas), o número no nome (00012.jpg → 12), que guarda
-/// os buracos dos frames recusados. Mesma regra de web/src/sfm/index.ts.
+/// Timestamp of each image, in name order; if missing or not increasing
+/// (frames from loose images), the number in the name (00012.jpg → 12), which
+/// keeps the gaps left by rejected frames. Same rule as web/src/sfm/index.ts.
 fn orbit_times(names: &[String], times: &std::collections::HashMap<String, f64>) -> Vec<f64> {
     let increasing = |v: &[f64]| v.windows(2).all(|w| w[1] > w[0]);
     let t: Option<Vec<f64>> = names.iter().map(|n| times.get(n).copied()).collect();
@@ -477,27 +477,28 @@ fn orbit_times(names: &[String], times: &std::collections::HashMap<String, f64>)
     idx.filter(|v| increasing(v)).unwrap_or_else(|| (0..names.len()).map(|i| i as f64).collect())
 }
 
-/// Correspondências 2D (pixels) → 3D de um frame, pelos matches com os
-/// vizinhos registrados.
+/// 2D (pixel) → 3D correspondences of a frame, from its matches with the
+/// registered neighbours.
 pub type Correspondences = Vec<([f64; 2], [f64; 3])>;
 
 pub struct FillOptions<'a> {
-    /// Órbita plana: a pose refinada volta para o plano da órbita.
+    /// Flat orbit: the refined pose is put back onto the orbit plane.
     pub flat: bool,
-    /// Por nome do frame não registrado; os que não têm ficam só inferidos.
+    /// Keyed by unregistered frame name; frames without an entry are only inferred.
     pub correspondences: &'a std::collections::HashMap<String, Correspondences>,
 }
 
 #[derive(Debug, Default)]
 pub struct Filled {
-    /// Frames que ganharam pose, na ordem dos nomes.
+    /// Frames that got a pose, in name order.
     pub inferred: Vec<String>,
-    /// Desses, os refinados contra os pontos 3D, com o número de inliers.
+    /// Of those, the ones refined against the 3D points, with their inlier count.
     pub refined: Vec<(String, usize)>,
 }
 
-/// Focais e centro (pixels) da primeira câmera do cameras.bin. A distorção
-/// radial dos modelos que a têm é ignorada (o app pede câmeras pinhole).
+/// Focal lengths and principal point (pixels) of the first camera in
+/// cameras.bin. Radial distortion, for models that have it, is ignored (the
+/// app requests pinhole cameras).
 struct Intrinsics {
     fx: f64,
     fy: f64,
@@ -507,7 +508,7 @@ struct Intrinsics {
 
 fn read_intrinsics(path: &Path) -> Result<Intrinsics> {
     let mut r = open(path)?;
-    anyhow::ensure!(r.u64()? > 0, "cameras.bin vazio");
+    anyhow::ensure!(r.u64()? > 0, "empty cameras.bin");
     let _id = r.u32()?;
     let model = r.u32()?;
     let (_w, _h) = (r.u64()?, r.u64()?);
@@ -520,7 +521,7 @@ fn read_intrinsics(path: &Path) -> Result<Intrinsics> {
     })
 }
 
-/// Erro de reprojeção (pixels) de uma correspondência na pose (r, t).
+/// Reprojection error (pixels) of a correspondence at pose (r, t).
 fn reproj(k: &Intrinsics, r: &M3, t: V3, (uv, x): &([f64; 2], V3)) -> f64 {
     let p = add(apply(r, *x), t);
     if p[2] <= 1e-9 {
@@ -529,7 +530,7 @@ fn reproj(k: &Intrinsics, r: &M3, t: V3, (uv, x): &([f64; 2], V3)) -> f64 {
     (k.fx * p[0] / p[2] + k.cx - uv[0]).hypot(k.fy * p[1] / p[2] + k.cy - uv[1])
 }
 
-/// Resolve o sistema 6×6 `a x = b` (eliminação com pivô parcial).
+/// Solves the 6×6 system `a x = b` (elimination with partial pivoting).
 fn solve6(mut a: [[f64; 6]; 6], mut b: [f64; 6]) -> Option<[f64; 6]> {
     for col in 0..6 {
         let piv = (col..6).max_by(|&i, &j| a[i][col].abs().total_cmp(&a[j][col].abs()))?;
@@ -553,22 +554,22 @@ fn solve6(mut a: [[f64; 6]; 6], mut b: [f64; 6]) -> Option<[f64; 6]> {
     Some(x)
 }
 
-/// Mínimo de inliers (≤ 4 px) para aceitar uma pose refinada.
+/// Minimum inliers (≤ 4 px) to accept a refined pose.
 const REFINE_MIN_INLIERS: usize = 15;
 
-/// Refina a pose inferida (mundo→câmera `m`, centro `c`) contra as
-/// correspondências, partindo dela: a cada rodada só entram as que a pose
-/// atual projeta perto (limiar de 32 px caindo até 4 px), num Gauss-Newton
-/// amortecido com perda de Huber. Assim, matches errados longe da pose
-/// inferida não puxam a câmera. O centro inferido entra como prior com
-/// desvio `sigma` (mesmas unidades do modelo): onde os pontos vistos deixam
-/// uma direção mal amarrada, vale a trajetória; onde amarram bem, os pontos.
-/// Devolve a pose e os inliers finais, ou None se sobrarem poucos. Mesmo
-/// algoritmo de web/src/sfm/orbit.ts: refinePose.
+/// Refines the inferred pose (world→camera `m`, center `c`) against the
+/// correspondences, starting from it: each round only uses those the current
+/// pose projects nearby (threshold 32 px down to 4 px), in a damped
+/// Gauss-Newton with Huber loss. That way, wrong matches far from the inferred
+/// pose don't pull the camera. The inferred center enters as a prior with
+/// std-dev `sigma` (model units): where the visible points leave a direction
+/// poorly constrained, the trajectory wins; where they constrain it well, the
+/// points win. Returns the pose and final inliers, or None if too few remain.
+/// Same algorithm as web/src/sfm/orbit.ts: refinePose.
 fn refine_pose(m: M3, c: V3, sigma: f64, corr: &[([f64; 2], V3)], k: &Intrinsics) -> Option<(M3, V3, usize)> {
     let mut r = m;
     let mut t = scale(apply(&m, c), -1.0);
-    // Custo em px²: o prior vira (σ_px/σ)²·|centro − c|².
+    // Cost in px²: the prior becomes (σ_px/σ)²·|center − c|².
     let prior = (KEYPOINT_SIGMA / sigma.max(1e-12)).powi(2);
     let center = |r: &M3, t: V3| scale(apply(&transpose(r), t), -1.0);
     for thr in [32.0, 16.0, 8.0, 4.0] {
@@ -602,7 +603,7 @@ fn refine_pose(m: M3, c: V3, sigma: f64, corr: &[([f64; 2], V3)], k: &Intrinsics
                 let e = [k.fx * p[0] * iz + k.cx - uv[0], k.fy * p[1] * iz + k.cy - uv[1]];
                 let norm = e[0].hypot(e[1]);
                 let w = if norm <= delta { 1.0 } else { delta / norm };
-                // d(pixel)/d(p) · [−[RX]× | I], com p = exp(δr)·RX + t + δt.
+                // d(pixel)/d(p) · [−[RX]× | I], with p = exp(δr)·RX + t + δt.
                 let jp = [[k.fx * iz, 0.0, -k.fx * p[0] * iz * iz], [0.0, k.fy * iz, -k.fy * p[1] * iz * iz]];
                 let skew = [[0.0, rx[2], -rx[1]], [-rx[2], 0.0, rx[0]], [rx[1], -rx[0], 0.0]];
                 let mut j = [[0.0; 6]; 2];
@@ -619,7 +620,7 @@ fn refine_pose(m: M3, c: V3, sigma: f64, corr: &[([f64; 2], V3)], k: &Intrinsics
                     }
                 }
             }
-            // Prior: centro = −Rᵀt; d(centro) = −Rᵀ[t]×·δr − Rᵀ·δt.
+            // Prior: center = −Rᵀt; d(center) = −Rᵀ[t]×·δr − Rᵀ·δt.
             let rt = transpose(&r);
             let d = sub(center(&r, t), c);
             let tx = [[0.0, -t[2], t[1]], [t[2], 0.0, -t[0]], [-t[1], t[0], 0.0]];
@@ -657,9 +658,10 @@ fn refine_pose(m: M3, c: V3, sigma: f64, corr: &[([f64; 2], V3)], k: &Intrinsics
     (inliers >= REFINE_MIN_INLIERS).then(|| (r, scale(apply(&transpose(&r), t), -1.0), inliers))
 }
 
-/// Ângulo, raio e altura da órbita no instante `t`: Hermite entre os
-/// registrados vizinhos; antes do primeiro ou depois do último, extrapola o
-/// ângulo com a velocidade dos 4 da ponta e usa o raio e a altura médios deles.
+/// Orbit angle, radius and height at time `t`: Hermite between the
+/// neighbouring registered frames; before the first or after the last,
+/// extrapolates the angle with the velocity of the 4 end frames and uses
+/// their mean radius and height.
 fn orbit_at(s: &[f64], th: &[f64], rad: &[f64], hgt: &[f64], t: f64) -> [f64; 3] {
     match s.iter().position(|&v| v > t) {
         Some(b) if b > 0 => [th, rad, hgt].map(|y| hermite(s, y, b - 1, b, t)),
@@ -673,26 +675,26 @@ fn orbit_at(s: &[f64], th: &[f64], rad: &[f64], hgt: &[f64], t: f64) -> [f64; 3]
     }
 }
 
-/// Ruído típico de um ponto 2D casado (pixels): pesa as correspondências
-/// contra a confiança na trajetória (`refine_pose`).
+/// Typical noise of a matched 2D point (pixels): weighs the correspondences
+/// against the confidence in the trajectory (`refine_pose`).
 const KEYPOINT_SIGMA: f64 = 0.5;
 
-/// Ângulo (radianos) da rotação relativa entre duas orientações.
+/// Angle (radians) of the relative rotation between two orientations.
 fn rotation_angle(a: &M3, b: &M3) -> f64 {
     let m = mul(a, &transpose(b));
     ((m[0][0] + m[1][1] + m[2][2] - 1.0) / 2.0).clamp(-1.0, 1.0).acos()
 }
 
-/// Dá pose aos frames de `images` que o modelo não registrou, a partir dos
-/// vizinhos: em coordenadas da órbita (ângulo em torno do eixo, raio e
-/// altura), por Hermite cúbico no instante de cada frame, ou seja, seguindo a
-/// velocidade e o espaçamento da câmera; a orientação relativa à órbita vem
-/// por slerp. Nas pontas, extrapola com a velocidade angular dos últimos
-/// frames. Sem arco definido, interpola os centros em linha reta. Depois,
-/// a pose inferida é refinada contra os pontos 3D que o frame enxerga
-/// (`refine_pose`), se houver correspondências suficientes e o resultado não
-/// se afastar demais dela. As imagens novas entram sem pontos 2D (só o treino
-/// as usa). Mesmo algoritmo de web/src/sfm/orbit.ts: fillMissing.
+/// Gives a pose to the frames in `images` the model did not register, from
+/// their neighbours: in orbit coordinates (angle about the axis, radius and
+/// height), by cubic Hermite at each frame's timestamp, i.e. following the
+/// camera's speed and spacing; orientation relative to the orbit comes from
+/// slerp. At the ends, extrapolates with the angular velocity of the last
+/// frames. Without a defined arc, interpolates centers in a straight line.
+/// Then the inferred pose is refined against the 3D points the frame sees
+/// (`refine_pose`), if there are enough correspondences and the result doesn't
+/// stray too far from it. New images are added without 2D points (only
+/// training uses them). Same algorithm as web/src/sfm/orbit.ts: fillMissing.
 pub fn fill_missing(
     model: &Path,
     images: &Path,
@@ -708,7 +710,7 @@ pub fn fill_missing(
         .collect();
     names.sort();
 
-    // images.bin inteiro: as entradas existentes são copiadas byte a byte.
+    // Whole images.bin: existing entries are copied byte for byte.
     let images_bin = std::fs::read(model.join("images.bin"))?;
     let mut r = Bin(&images_bin[..]);
     let count = r.u64()?;
@@ -730,7 +732,7 @@ pub fn fill_missing(
     }
     let reg: Vec<usize> = (0..names.len()).filter(|&i| known.contains_key(&names[i])).collect();
     if reg.len() < 3 {
-        anyhow::bail!("poucas câmeras registradas para inferir as outras");
+        anyhow::bail!("too few registered cameras to infer the others");
     }
     let at = orbit_times(&names, times);
     let s: Vec<f64> = reg.iter().map(|&i| at[i]).collect();
@@ -745,7 +747,7 @@ pub fn fill_missing(
     let intrinsics = read_intrinsics(&model.join("cameras.bin")).ok();
     let mut refined = Vec::new();
 
-    // Normal de Newell (como em flatten_orbit); sem arco, interpolação linear.
+    // Newell normal (as in flatten_orbit); without an arc, linear interpolation.
     let k = centers.len() as f64;
     let mean = scale(centers.iter().fold([0.0; 3], |a, c| add(a, *c)), 1.0 / k);
     let mut normal = [0.0; 3];
@@ -756,7 +758,7 @@ pub fn fill_missing(
     let linear = dot(normal, normal).sqrt() < 1e-3 * spread * k;
     let n = unit(normal);
 
-    // Base do plano: e1 aponta para a primeira câmera.
+    // Plane basis: e1 points at the first camera.
     let d0 = sub(centers[0], o);
     let e1 = unit(sub(d0, scale(n, dot(d0, n))));
     let e2 = cross(n, e1);
@@ -766,7 +768,7 @@ pub fn fill_missing(
         let h = dot(d, n);
         let p = sub(d, scale(n, h));
         let mut a = dot(p, e2).atan2(dot(p, e1));
-        // Desenrola: passo de menos de meia volta entre registrados vizinhos.
+        // Unwrap: less than half a turn between neighbouring registered frames.
         if let Some(&prev) = th.last() {
             a += std::f64::consts::TAU * ((prev - a) / std::f64::consts::TAU).round();
         }
@@ -774,7 +776,7 @@ pub fn fill_missing(
         rad.push(dot(p, p).sqrt());
         hgt.push(h);
     }
-    // Orientação "na órbita": a câmera girada de volta para θ = 0.
+    // Orientation "in the orbit": the camera rotated back to θ = 0.
     let mut q0: Vec<[f64; 4]> = Vec::new();
     for (m, a) in rots.iter().zip(&th) {
         let mut q = quaternion(&if linear { *m } else { mul(m, &about(n, *a)) });
@@ -786,8 +788,9 @@ pub fn fill_missing(
         q0.push(q);
     }
 
-    // Confiança na trajetória, medida nos próprios registrados: cada um
-    // previsto sem ele (no meio, pelos vizinhos; nas pontas, extrapolado).
+    // Trajectory confidence, measured on the registered frames themselves:
+    // each one predicted without it (in the middle, from neighbours; at the
+    // ends, extrapolated).
     let at_center = |[theta, r, h]: [f64; 3]| add(o, add(add(scale(e1, r * theta.cos()), scale(e2, r * theta.sin())), scale(n, h)));
     let without = |k: usize| -> [Vec<f64>; 4] {
         [&s, &th, &rad, &hgt].map(|y| y.iter().enumerate().filter(|&(j, _)| j != k).map(|(_, v)| *v).collect())
@@ -805,9 +808,9 @@ pub fn fill_missing(
         (median((1..last).map(loo).collect()), loo(0).max(loo(last)))
     };
     let floor = 1e-4 * frame.radius;
-    // A partir do erro medido com um frame só de fora: no meio, cresce com
-    // a lacuna (≈ linear numa órbita suave); na ponta, com o quadrado da
-    // distância extrapolada.
+    // From the error measured with a single frame left out: in the middle, it
+    // grows with the gap (≈ linear on a smooth orbit); at the ends, with the
+    // square of the extrapolated distance.
     let sigma_at = |t: f64| -> f64 {
         match s.iter().position(|&v| v > t) {
             Some(b) if b > 0 => err_mid * ((s[b] - s[b - 1]) / (2.0 * step)).max(1.0),
@@ -829,7 +832,7 @@ pub fn fill_missing(
                 (slerp(q0[b - 1], q0[b], u), add(centers[b - 1], scale(sub(centers[b], centers[b - 1]), u)))
             }
             _ => {
-                // Antes do primeiro ou depois do último registrado.
+                // Before the first or after the last registered frame.
                 let end = if b == Some(0) { 0 } else { last };
                 let ks = if end == 0 { (0, 3.min(last)) } else { (last.saturating_sub(3), last) };
                 let v = scale(sub(centers[ks.1], centers[ks.0]), 1.0 / (s[ks.1] - s[ks.0]));
@@ -843,14 +846,14 @@ pub fn fill_missing(
         let corr = opts.correspondences.get(&names[i]);
         if let Some((k, corr)) = intrinsics.as_ref().zip(corr) {
             match refine_pose(m, c, sigma_at(t), corr, k) {
-                // Longe demais da trajetória: matches ruins, fica a inferida.
+                // Too far from the trajectory: bad matches, keep the inferred pose.
                 Some((m2, c2, inliers))
                     if dot(sub(c2, c), sub(c2, c)).sqrt() <= 0.2 * frame.radius
                         && rotation_angle(&m2, &m) <= 15f64.to_radians() =>
                 {
                     (m, c) = (m2, c2);
                     if opts.flat && !linear {
-                        // De volta ao plano, com o sujeito no mesmo pixel.
+                        // Back onto the plane, with the subject on the same pixel.
                         let flat = sub(c, scale(n, dot(sub(c, o), n) - h));
                         m = mul(&m, &rotation_between(unit(sub(o, flat)), unit(sub(o, c))));
                         c = flat;
@@ -863,7 +866,7 @@ pub fn fill_missing(
         added.push((names[i].clone(), m, c));
     }
 
-    // images.bin: entradas antigas + as novas, sem pontos 2D.
+    // images.bin: old entries + the new ones, without 2D points.
     let pose_bytes = |m: &M3, c: V3| -> Vec<u8> {
         let t = scale(apply(m, c), -1.0);
         quaternion(m).iter().chain(t.iter()).flat_map(|v| v.to_le_bytes()).collect()
@@ -880,7 +883,7 @@ pub fn fill_missing(
         out.extend_from_slice(&0u64.to_le_bytes());
     }
 
-    // COLMAP 4: cada imagem nova também precisa do seu frame (rig de uma câmera).
+    // COLMAP 4: each new image also needs its own frame (single-camera rig).
     let frames_path = model.join("frames.bin");
     let frames_out = if frames_path.exists() {
         let bin = std::fs::read(&frames_path)?;
@@ -904,7 +907,7 @@ pub fn fill_missing(
             out.extend_from_slice(&rig.unwrap_or(1).to_le_bytes());
             out.extend(pose_bytes(m, *c));
             out.extend_from_slice(&1u32.to_le_bytes());
-            out.extend_from_slice(&0i32.to_le_bytes()); // sensor: câmera
+            out.extend_from_slice(&0i32.to_le_bytes()); // sensor: camera
             out.extend_from_slice(&camera_id.to_le_bytes());
             out.extend_from_slice(&((max_id + 1 + k as u32) as u64).to_le_bytes());
         }
@@ -920,7 +923,7 @@ pub fn fill_missing(
     Ok(Filled { inferred: added.into_iter().map(|(name, _, _)| name).collect(), refined })
 }
 
-/// Pose (mundo→câmera, centro) de cada imagem do modelo, pelo nome.
+/// Pose (world→camera, center) of each image in the model, by name.
 #[cfg(test)]
 pub(crate) fn read_poses(model: &Path) -> Result<std::collections::HashMap<String, (M3, V3)>> {
     let mut out = std::collections::HashMap::new();
@@ -939,13 +942,13 @@ pub(crate) fn read_poses(model: &Path) -> Result<std::collections::HashMap<Strin
     Ok(out)
 }
 
-/// Erro de centro (fração de `radius`) e de rotação (graus) entre duas poses.
+/// Center error (fraction of `radius`) and rotation error (degrees) between two poses.
 #[cfg(test)]
 pub(crate) fn pose_error(a: &(M3, V3), b: &(M3, V3), radius: f64) -> (f64, f64) {
     (dot(sub(a.1, b.1), sub(a.1, b.1)).sqrt() / radius, rotation_angle(&a.0, &b.0).to_degrees())
 }
 
-/// Cópia do images.bin sem as imagens de `names` (simula câmeras não registradas).
+/// Copy of images.bin without the images in `names` (simulates unregistered cameras).
 #[cfg(test)]
 pub(crate) fn drop_images(src: &Path, dst: &Path, names: &[String]) -> Result<()> {
     let mut r = open(src)?;
@@ -972,8 +975,8 @@ pub(crate) fn drop_images(src: &Path, dst: &Path, names: &[String]) -> Result<()
     Ok(())
 }
 
-/// Para cada imagem do modelo, o id do ponto 3D de cada ponto 2D (−1 = sem
-/// ponto), e as coordenadas dos pontos 3D.
+/// For each image in the model, the 3D point id of each 2D point (−1 = no
+/// point), plus the 3D point coordinates.
 pub type Tracks = (std::collections::HashMap<String, Vec<i64>>, std::collections::HashMap<u64, V3>);
 
 pub fn read_tracks(model: &Path) -> Result<Tracks> {
@@ -1006,15 +1009,15 @@ pub fn read_tracks(model: &Path) -> Result<Tracks> {
 mod tests {
     use super::*;
 
-    /// Câmera em `c` olhando para a origem, "para cima" ≈ +z.
+    /// Camera at `c` looking at the origin, "up" ≈ +z.
     fn look_at(c: V3) -> M3 {
         let z = unit(scale(c, -1.0));
         let x = unit(cross(z, [0.0, 0.0, -1.0]));
         [x, cross(z, x), z]
     }
 
-    /// Mesma órbita de web/src/sfm/orbit.test.ts: 96 frames a 24 fps,
-    /// velocidade angular variando, raio 4, altura 1.
+    /// Same orbit as web/src/sfm/orbit.test.ts: 96 frames at 24 fps,
+    /// varying angular velocity, radius 4, height 1.
     fn truth(i: usize) -> V3 {
         let s = i as f64 / 24.0;
         let th = std::f64::consts::TAU * 0.85 * (s / 4.0) * (0.8 + 0.2 * (s / 4.0));
@@ -1026,8 +1029,8 @@ mod tests {
         let k = Intrinsics { fx: 800.0, fy: 800.0, cx: 480.0, cy: 360.0 };
         let c_true = truth(30);
         let m_true = look_at(c_true);
-        // Pontos espalhados perto da origem, vistos pela câmera verdadeira,
-        // com ruído de ~0,5 px e 20% de matches errados.
+        // Points scattered near the origin, seen by the true camera, with
+        // ~0.5 px noise and 20% wrong matches.
         let mut seed = 12345u64;
         let mut rnd = move || {
             seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
@@ -1045,16 +1048,16 @@ mod tests {
                 (uv, x)
             })
             .collect();
-        // Palpite a 3% do raio e ~1,5° da verdade.
+        // Initial guess 3% of the radius and ~1.5° off the truth.
         let c0 = add(c_true, [0.08, -0.06, 0.05]);
         let m0 = mul(&about(unit([1.0, 2.0, 0.5]), 1.5f64.to_radians()), &look_at(c0));
-        // Prior fraco (palpite incerto): valem os pontos.
-        let (m, c, inliers) = refine_pose(m0, c0, 1.0, &corr, &k).expect("refina");
+        // Weak prior (uncertain guess): the points win.
+        let (m, c, inliers) = refine_pose(m0, c0, 1.0, &corr, &k).expect("refines");
         let err = dot(sub(c, c_true), sub(c, c_true)).sqrt() / 4.0;
-        assert!(err < 0.002, "centro a {:.3}% do raio", err * 100.0);
+        assert!(err < 0.002, "center off by {:.3}% of radius", err * 100.0);
         assert!(rotation_angle(&m, &m_true) < 0.1f64.to_radians());
         assert!(inliers >= 150, "{inliers} inliers");
-        // Sem correspondências boas suficientes, não inventa.
+        // Without enough good correspondences, it doesn't make one up.
         assert!(refine_pose(m0, c0, 1.0, &corr[..10], &k).is_none());
     }
 
@@ -1096,7 +1099,7 @@ mod tests {
         let with_count = |body: Vec<u8>| [count.to_le_bytes().to_vec(), body].concat();
         std::fs::write(model.join("images.bin"), with_count(img)).unwrap();
         std::fs::write(model.join("frames.bin"), with_count(frames)).unwrap();
-        // Um ponto na origem: é para onde as câmeras olham.
+        // One point at the origin: where the cameras look.
         let mut pts = 1u64.to_le_bytes().to_vec();
         pts.extend_from_slice(&1u64.to_le_bytes());
         pts.extend([0f64; 3].iter().flat_map(|v| v.to_le_bytes()));
@@ -1114,20 +1117,20 @@ mod tests {
         for &i in &lost {
             let c = frame.cameras[i];
             let err = dot(sub(c, truth(i)), sub(c, truth(i))).sqrt() / 4.0;
-            assert!(err < 0.005, "frame {i}: centro a {:.3}% do raio", err * 100.0);
+            assert!(err < 0.005, "frame {i}: center off by {:.3}% of radius", err * 100.0);
         }
-        // frames.bin ganhou um frame por imagem nova.
+        // frames.bin gained one frame per new image.
         let fb = std::fs::read(model.join("frames.bin")).unwrap();
         assert_eq!(u64::from_le_bytes(fb[..8].try_into().unwrap()), 96);
         assert_eq!(fb.len(), 8 + 96 * (8 + 56 + 4 + 16));
-        // Rodar de novo não muda nada.
+        // Running again changes nothing.
         assert!(fill_missing(&model, &images, &times, &opts).unwrap().inferred.is_empty());
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// Roda com `SPLATFORGE_TEST_MODEL=<dataset>/sparse/0 cargo test -- --ignored`.
-    /// Numa órbita a altura constante, todas as câmeras devem ficar na mesma
-    /// "altura" ao longo do eixo `up` estimado.
+    /// Run with `SPLATFORGE_TEST_MODEL=<dataset>/sparse/0 cargo test -- --ignored`.
+    /// On a constant-height orbit, all cameras should sit at the same
+    /// "height" along the estimated `up` axis.
     #[test]
     #[ignore]
     fn orbit_cameras_share_height() {
@@ -1144,8 +1147,8 @@ mod tests {
         assert!(spread < 0.05 * f.radius, "spread {spread} vs radius {}", f.radius);
     }
 
-    /// Mesmo modelo de teste: achatar de novo um modelo já achatado não
-    /// encontra mais desvio de altura. Grava em `SPLATFORGE_FLAT_OUT` se definido.
+    /// Same test model: flattening an already flattened model finds no more
+    /// height deviation. Writes to `SPLATFORGE_FLAT_OUT` if set.
     #[test]
     #[ignore]
     fn flatten_orbit_levels_cameras() {
@@ -1155,7 +1158,7 @@ mod tests {
             .unwrap_or_else(|_| std::env::temp_dir().join("splatforge_flat_test"));
         let dev = super::flatten_orbit(std::path::Path::new(&model), &out).unwrap();
         let again = super::flatten_orbit(&out, &out.with_extension("again")).unwrap();
-        println!("desvio corrigido={:.3}% raio; residual={again:.2e}", dev * 100.0);
+        println!("corrected deviation={:.3}% radius; residual={again:.2e}", dev * 100.0);
         assert!(again < 1e-9);
     }
 }

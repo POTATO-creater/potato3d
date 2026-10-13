@@ -1,8 +1,8 @@
-// Álgebra linear densa e pequena para o SfM: matrizes como Float64Array
-// linha a linha, 3×3 como `Mat3` (9 números).
+// Small dense linear algebra for the SfM: matrices as row-major Float64Array,
+// 3×3 as `Mat3` (9 numbers).
 
 export type Vec3 = [number, number, number];
-export type Mat3 = Float64Array; // 9, linha a linha
+export type Mat3 = Float64Array; // 9, row-major
 
 export const mat3 = (...v: number[]): Mat3 => Float64Array.from(v);
 export const eye3 = (): Mat3 => mat3(1, 0, 0, 0, 1, 0, 0, 0, 1);
@@ -49,7 +49,7 @@ export function det3(a: Mat3) {
   );
 }
 
-/** exp([w]×): rotação a partir do vetor eixo·ângulo. */
+/** exp([w]×): rotation from an axis·angle vector. */
 export function expSO3(w: ArrayLike<number>): Mat3 {
   const th = Math.hypot(w[0], w[1], w[2]);
   const K = skew(w);
@@ -61,7 +61,7 @@ export function expSO3(w: ArrayLike<number>): Mat3 {
   return R;
 }
 
-/** Quatérnio (w, x, y, z) de uma rotação, como o COLMAP grava. */
+/** Quaternion (w, x, y, z) of a rotation, as COLMAP stores it. */
 export function quatFromMat(R: Mat3): [number, number, number, number] {
   const tr = R[0] + R[4] + R[8];
   let w, x, y, z;
@@ -94,7 +94,7 @@ export function quatFromMat(R: Mat3): [number, number, number, number] {
   return w < 0 ? [-w / n, -x / n, -y / n, -z / n] : [w / n, x / n, y / n, z / n];
 }
 
-/** Rotação mais próxima de M (decomposição polar via SVD). */
+/** Nearest rotation to M (polar decomposition via SVD). */
 export function nearestRotation(M: Mat3): Mat3 {
   const { U, V } = svd3(M);
   let R = mul3(U, transpose3(V));
@@ -106,8 +106,8 @@ export function nearestRotation(M: Mat3): Mat3 {
 }
 
 /**
- * Autovalores/autovetores de uma matriz simétrica n×n (Jacobi cíclico).
- * Retorna autovalores em ordem crescente e os vetores como colunas de `V`.
+ * Eigenvalues/eigenvectors of a symmetric n×n matrix (cyclic Jacobi).
+ * Returns eigenvalues in ascending order and the vectors as columns of `V`.
  */
 export function symEig(A: Float64Array, n: number): { values: Float64Array; V: Float64Array } {
   const a = Float64Array.from(A);
@@ -153,7 +153,7 @@ export function symEig(A: Float64Array, n: number): { values: Float64Array; V: F
   return { values, V: Vs };
 }
 
-/** Autovetor do menor autovalor de AᵀA (A com `cols` colunas, linha a linha). */
+/** Eigenvector of the smallest eigenvalue of AᵀA (A with `cols` columns, row-major). */
 export function nullVector(A: ArrayLike<number>, rows: number, cols: number): Float64Array {
   const AtA = new Float64Array(cols * cols);
   for (let r = 0; r < rows; r++)
@@ -169,11 +169,11 @@ export function nullVector(A: ArrayLike<number>, rows: number, cols: number): Fl
   return v;
 }
 
-/** SVD 3×3: M = U diag(S) Vᵀ, S decrescente. */
+/** 3×3 SVD: M = U diag(S) Vᵀ, S descending. */
 export function svd3(M: Mat3): { U: Mat3; S: Vec3; V: Mat3 } {
   const MtM = mul3(transpose3(M), M);
   const { values, V: Ve } = symEig(MtM, 3);
-  // ordem decrescente
+  // descending order
   const V = mat3(Ve[2], Ve[1], Ve[0], Ve[5], Ve[4], Ve[3], Ve[8], Ve[7], Ve[6]);
   const S: Vec3 = [Math.sqrt(Math.max(values[2], 0)), Math.sqrt(Math.max(values[1], 0)), Math.sqrt(Math.max(values[0], 0))];
   const cols: Vec3[] = [];
@@ -187,7 +187,7 @@ export function svd3(M: Mat3): { U: Mat3; S: Vec3; V: Mat3 } {
   return { U, S, V };
 }
 
-/** Resolve A x = b com A simétrica definida positiva (Cholesky, in-place em cópia). */
+/** Solves A x = b for symmetric positive-definite A (Cholesky, in place on a copy). */
 export function choleskySolve(A: Float64Array, b: Float64Array, n: number): Float64Array | null {
   const L = Float64Array.from(A);
   for (let j = 0; j < n; j++) {
@@ -217,7 +217,7 @@ export function choleskySolve(A: Float64Array, b: Float64Array, n: number): Floa
   return y;
 }
 
-/** Inversa de uma 3×3 simétrica (blocos de ponto no BA). */
+/** Inverse of a symmetric 3×3 (point blocks in BA). */
 export function inv3(a: ArrayLike<number>): Mat3 | null {
   const d = a[0] * (a[4] * a[8] - a[5] * a[7]) - a[1] * (a[3] * a[8] - a[5] * a[6]) + a[2] * (a[3] * a[7] - a[4] * a[6]);
   if (!(Math.abs(d) > 1e-300)) return null;

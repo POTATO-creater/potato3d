@@ -1,4 +1,4 @@
-// Carrega o libwebp vendorado (ver README.md) e expõe o encoder sem perdas.
+// Loads the vendored libwebp (see README.md) and exposes the lossless encoder.
 
 import factory from "./webp.mjs";
 import wasmUrl from "./webp.wasm?url";
@@ -22,7 +22,7 @@ export async function webpEncoder() {
     try {
       m.HEAPU8.set(rgba, input);
       if (!m._webp_encode_lossless_rgba(input, width, height, width * 4, outPtr, outSize))
-        throw new Error("falha ao codificar WebP");
+        throw new Error("WebP encoding failed");
       const ptr = m.HEAPU32[outPtr >> 2], size = m.HEAPU32[outSize >> 2];
       const bytes = m.HEAPU8.slice(ptr, ptr + size);
       m._webp_free(ptr);

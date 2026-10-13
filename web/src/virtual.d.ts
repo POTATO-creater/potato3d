@@ -1,8 +1,8 @@
-/** URL do .wasm gzipado do ONNX Runtime no build; `null` no dev (web/ort-wasm-plugin.ts). */
+/** URL of the gzipped ONNX Runtime .wasm in the build; `null` in dev (web/ort-wasm-plugin.ts). */
 declare module "virtual:ort-wasm-gz" {
   const url: string | null;
   export default url;
 }
 
-/** Versão do app (package.json), definida no web/vite.config.ts. */
+/** App version (package.json), defined in web/vite.config.ts. */
 declare const __APP_VERSION__: string;

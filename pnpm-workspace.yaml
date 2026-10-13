@@ -1,8 +1,8 @@
 allowBuilds:
-  # postinstall do protobufjs (dependência do onnxruntime-web) só confere versões
+  # protobufjs postinstall (an onnxruntime-web dependency) only checks versions
   protobufjs: false
-  # canvas (dependência opcional do playcanvas, só para Node): o navegador não usa
+  # canvas (optional playcanvas dependency, Node only): unused in the browser
   canvas: false
-  # wrangler (deploy da versão web): instalam o binário de cada plataforma
+  # wrangler (web deploy): these install the per-platform binary
   esbuild: true
   workerd: true

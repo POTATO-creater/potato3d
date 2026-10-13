@@ -1,18 +1,18 @@
 #!/usr/bin/env node
-// Baixa e verifica (SHA-256) as ferramentas externas do Gausify Orbit.
+// Downloads and verifies (SHA-256) Gausify Orbit's external tools.
 //
-//   pnpm setup:tools            instala o que falta
-//   pnpm setup:tools --force    baixa tudo de novo
-//   pnpm setup:tools --cpu      (Windows) COLMAP sem CUDA mesmo com GPU NVIDIA
-//   pnpm setup:tools --only bundle   só o que vai dentro do instalador (CI)
+//   pnpm setup:tools            installs whatever is missing
+//   pnpm setup:tools --force    downloads everything again
+//   pnpm setup:tools --cpu      (Windows) COLMAP without CUDA even with an NVIDIA GPU
+//   pnpm setup:tools --only bundle   only what ships inside the installer (CI)
 //
-// - Brush (todas as plataformas): sidecar do Tauri em src-tauri/binaries/,
-//   compilado do código-fonte por scripts/build-brush-web.mjs --native.
-// - Windows: DirectML.dll 1.15.4 (NuGet da Microsoft), usado pelo ONNX
-//   Runtime no recorte; vai junto do .exe no instalador.
-// - Windows: COLMAP (com CUDA se houver GPU NVIDIA) e ffmpeg na pasta de
-//   ferramentas do app, onde o backend procura (ver src-tauri/src/tools.rs).
-// - macOS/Linux: COLMAP e ffmpeg vêm do gerenciador de pacotes.
+// - Brush (all platforms): Tauri sidecar in src-tauri/binaries/, built from
+//   source by scripts/build-brush-web.mjs --native.
+// - Windows: DirectML.dll 1.15.4 (Microsoft's NuGet), used by ONNX Runtime
+//   for masking; ships next to the .exe in the installer.
+// - Windows: COLMAP (with CUDA if there's an NVIDIA GPU) and ffmpeg in the
+//   app's tools folder, where the backend looks (see src-tauri/src/tools.rs).
+// - macOS/Linux: COLMAP and ffmpeg come from the package manager.
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -22,8 +22,8 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// URLs e SHA-256 fixos: não depende da API do GitHub, cujo limite anônimo
-// (60/h por IP) estoura nos runners compartilhados do CI.
+// Pinned URLs and SHA-256: no dependency on the GitHub API, whose anonymous
+// limit (60/h per IP) runs out on shared CI runners.
 const COLMAP_ASSETS = {
   cuda: ["colmap-x64-windows-cuda.zip", 414666626, "e9c5cbd84c2ea986d2e970a2473fc2d2e6b34a2cdcf5d3df2765c319a63af881"],
   cpu: ["colmap-x64-windows-nocuda.zip", 127731595, "c493d88cb4a43f21afba42cb55bf786e5434a0420e73db0ba1454c5d8b3686ae"],
@@ -35,7 +35,7 @@ const pinned = (repo, tag, [name, size, sha256]) => ({
   sha256,
   url: `https://github.com/${repo}/releases/download/${tag}/${name}`,
 });
-// Mesma versão que o ONNX Runtime 1.28 (crate `ort`) espera; hashes conferidos.
+// Same version ONNX Runtime 1.28 (`ort` crate) expects; hashes verified.
 const DIRECTML = {
   url: "https://api.nuget.org/v3-flatcontainer/microsoft.ai.directml/1.15.4/microsoft.ai.directml.1.15.4.nupkg",
   name: "microsoft.ai.directml.1.15.4.nupkg",
@@ -44,8 +44,8 @@ const DIRECTML = {
   dllSha256: "9c9e6d822561c6c41b90e6994b3e8857cf1d66dbfb1e0c4c799c7c89b4e92da1",
 };
 const COLMAP = { repo: "colmap/colmap", tag: "4.2.1" };
-// Só o ffmpeg ("latest", refeito todo dia) ainda consulta a API; no CI o
-// GITHUB_TOKEN eleva o limite.
+// Only ffmpeg ("latest", rebuilt daily) still queries the API; in CI the
+// GITHUB_TOKEN raises the limit.
 const ghHeaders = {
   Accept: "application/vnd.github+json",
   "User-Agent": "gausify-orbit-setup",
@@ -53,7 +53,7 @@ const ghHeaders = {
     Authorization: `Bearer ${process.env.GITHUB_TOKEN || process.env.GH_TOKEN}`,
   }),
 };
-// BtbN publica builds estáveis do ffmpeg na tag "latest"; o nome inclui a versão.
+// BtbN publishes stable ffmpeg builds under the "latest" tag; the name includes the version.
 const FFMPEG = { repo: "BtbN/FFmpeg-Builds", tag: "latest", pattern: /^ffmpeg-n([\d.]+)-latest-win64-lgpl-[\d.]+\.zip$/ };
 
 const args = new Set(process.argv.slice(2));
@@ -76,11 +76,11 @@ function has(cmd, argv = ["-version"]) {
 async function releaseAsset(repo, tag, match) {
   const url = `https://api.github.com/repos/${repo}/releases/tags/${tag}`;
   const res = await fetch(url, { headers: ghHeaders });
-  if (!res.ok) throw new Error(`GitHub respondeu ${res.status} para ${url}`);
+  if (!res.ok) throw new Error(`GitHub answered ${res.status} for ${url}`);
   const release = await res.json();
   const assets = release.assets.filter((a) => (typeof match === "string" ? a.name === match : match.test(a.name)));
-  if (!assets.length) throw new Error(`nenhum arquivo de ${repo}@${tag} corresponde a ${match}`);
-  // Para padrões (ffmpeg), pega a maior versão.
+  if (!assets.length) throw new Error(`no file in ${repo}@${tag} matches ${match}`);
+  // For patterns (ffmpeg), take the highest version.
   assets.sort((a, b) => b.name.localeCompare(a.name, undefined, { numeric: true }));
   const asset = assets[0];
   let sha256 = asset.digest?.startsWith("sha256:") ? asset.digest.slice(7) : null;
@@ -88,14 +88,14 @@ async function releaseAsset(repo, tag, match) {
     const side = release.assets.find((a) => a.name === `${asset.name}.sha256`);
     if (side) sha256 = (await (await fetch(side.browser_download_url)).text()).trim().split(/\s+/)[0];
   }
-  if (!sha256) throw new Error(`sem checksum publicado para ${asset.name}; abortando por segurança`);
+  if (!sha256) throw new Error(`no published checksum for ${asset.name}; aborting for safety`);
   return { name: asset.name, url: asset.browser_download_url, size: asset.size, sha256 };
 }
 
 async function download(asset, dir) {
   const dest = join(dir, asset.name);
   const res = await fetch(asset.url);
-  if (!res.ok) throw new Error(`download falhou (${res.status}): ${asset.url}`);
+  if (!res.ok) throw new Error(`download failed (${res.status}): ${asset.url}`);
   const hash = createHash("sha256");
   const out = createWriteStream(dest);
   let done = 0;
@@ -107,20 +107,20 @@ async function download(asset, dir) {
     const pct = Math.floor((done / asset.size) * 100);
     if (pct !== lastPct && pct % 5 === 0) {
       lastPct = pct;
-      process.stdout.write(`\r  ${asset.name}: ${pct}% de ${(asset.size / 1e6).toFixed(0)} MB`);
+      process.stdout.write(`\r  ${asset.name}: ${pct}% of ${(asset.size / 1e6).toFixed(0)} MB`);
     }
   }
   await new Promise((r, j) => out.end((e) => (e ? j(e) : r())));
   process.stdout.write("\n");
   const got = hash.digest("hex");
-  if (got !== asset.sha256) throw new Error(`SHA-256 não confere para ${asset.name}\n  esperado ${asset.sha256}\n  obtido   ${got}`);
+  if (got !== asset.sha256) throw new Error(`SHA-256 mismatch for ${asset.name}\n  expected ${asset.sha256}\n  got      ${got}`);
   return dest;
 }
 
 function extract(archive, into) {
-  // bsdtar (macOS e Windows 10+) abre .zip e .tar.xz.
+  // bsdtar (macOS and Windows 10+) opens .zip and .tar.xz.
   const r = spawnSync("tar", ["-xf", archive, "-C", into], { stdio: "inherit" });
-  if (r.status !== 0) throw new Error(`não foi possível extrair ${archive}`);
+  if (r.status !== 0) throw new Error(`could not extract ${archive}`);
 }
 
 async function findFile(dir, name) {
@@ -145,12 +145,12 @@ async function withTemp(fn) {
   }
 }
 
-// O Brush é compilado do mesmo commit e patches da versão web (as releases
-// não têm as opções de treino que o app usa); recompila só quando mudam.
+// Brush is built from the same commit and patches as the web version (the
+// releases lack the training options the app uses); rebuilds only when they change.
 function setupBrush() {
   const script = join(root, "scripts", "build-brush-web.mjs");
   const r = spawnSync(process.execPath, [script, "--native", ...(force ? [] : ["--if-stale"])], { stdio: "inherit" });
-  if (r.status !== 0) throw new Error("falha ao compilar o Brush");
+  if (r.status !== 0) throw new Error("failed to build Brush");
 }
 
 async function sha256File(path) {
@@ -163,7 +163,7 @@ async function sha256File(path) {
 async function setupDirectML() {
   const dest = join(root, "src-tauri", "binaries", "DirectML.dll");
   if (existsSync(dest) && !force && (await sha256File(dest)) === DIRECTML.dllSha256) {
-    return console.log(`✓ DirectML.dll já presente (${dest})`);
+    return console.log(`✓ DirectML.dll already present (${dest})`);
   }
   console.log("→ DirectML 1.15.4 (NuGet)");
   await withTemp(async (tmp) => {
@@ -172,17 +172,17 @@ async function setupDirectML() {
     await mkdir(out);
     extract(pkg, out);
     const dll = join(out, "bin", "x64-win", "DirectML.dll");
-    if ((await sha256File(dll)) !== DIRECTML.dllSha256) throw new Error("SHA-256 do DirectML.dll não confere");
+    if ((await sha256File(dll)) !== DIRECTML.dllSha256) throw new Error("DirectML.dll SHA-256 mismatch");
     await mkdir(dirname(dest), { recursive: true });
     await copyFile(dll, dest);
   });
-  console.log(`✓ DirectML.dll em ${dest}`);
+  console.log(`✓ DirectML.dll at ${dest}`);
 }
 
-/** Instala um pacote cujo conteúdo tem `bin/<exe>` em `<toolsRoot>/<name>`. */
+/** Installs a package containing `bin/<exe>` into `<toolsRoot>/<name>`. */
 async function setupWinPackage(name, label, asset, exe) {
   const target = join(toolsRoot(), name);
-  if (existsSync(join(target, "bin", exe)) && !force) return console.log(`✓ ${label} já instalado (${target})`);
+  if (existsSync(join(target, "bin", exe)) && !force) return console.log(`✓ ${label} already installed (${target})`);
   console.log(`→ ${label} (${asset.name})`);
   await withTemp(async (tmp) => {
     const archive = await download(asset, tmp);
@@ -190,32 +190,32 @@ async function setupWinPackage(name, label, asset, exe) {
     await mkdir(out);
     extract(archive, out);
     const bin = await findFile(out, exe);
-    if (!bin) throw new Error(`${exe} não encontrado no pacote`);
-    const pkgRoot = dirname(dirname(bin)); // .../<pacote>/bin/<exe>
+    if (!bin) throw new Error(`${exe} not found in the package`);
+    const pkgRoot = dirname(dirname(bin)); // .../<package>/bin/<exe>
     await rm(target, { recursive: true, force: true });
     await mkdir(dirname(target), { recursive: true });
     await rename(pkgRoot, target).catch(async () => {
-      // rename entre volumes falha; copia recursivamente.
+      // rename across volumes fails; copy recursively.
       spawnSync("robocopy", [pkgRoot, target, "/E", "/NFL", "/NDL", "/NJH", "/NJS"], { stdio: "inherit" });
       await stat(join(target, "bin", exe));
     });
   });
-  console.log(`✓ ${label} em ${target}`);
+  console.log(`✓ ${label} at ${target}`);
 }
 
 async function setupWindowsTools() {
   const cuda = !args.has("--cpu") && has("nvidia-smi", ["-L"]);
   const colmapAsset = pinned(COLMAP.repo, COLMAP.tag, COLMAP_ASSETS[cuda ? "cuda" : "cpu"]);
-  console.log(cuda ? "GPU NVIDIA detectada: COLMAP com CUDA." : "Sem GPU NVIDIA (ou --cpu): COLMAP sem CUDA.");
+  console.log(cuda ? "NVIDIA GPU detected: COLMAP with CUDA." : "No NVIDIA GPU (or --cpu): COLMAP without CUDA.");
   await setupWinPackage("colmap", `COLMAP ${COLMAP.tag}`, colmapAsset, "colmap.exe");
   await setupWinPackage("ffmpeg", "ffmpeg", await releaseAsset(FFMPEG.repo, FFMPEG.tag, FFMPEG.pattern), "ffmpeg.exe");
 }
 
 function checkPackageManagerTools() {
   const missing = [["ffmpeg", ["-version"]], ["colmap", ["help"]]].filter(([c, a]) => !has(c, a)).map(([c]) => c);
-  if (!missing.length) return console.log("✓ ffmpeg e COLMAP encontrados");
-  const cmd = isMac ? `brew install ${missing.join(" ")}` : `instale pelo gerenciador de pacotes: ${missing.join(", ")}`;
-  console.log(`! Faltam: ${missing.join(", ")} → ${cmd}`);
+  if (!missing.length) return console.log("✓ ffmpeg and COLMAP found");
+  const cmd = isMac ? `brew install ${missing.join(" ")}` : `install via your package manager: ${missing.join(", ")}`;
+  console.log(`! Missing: ${missing.join(", ")} → ${cmd}`);
 }
 
 try {

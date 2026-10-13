@@ -1,5 +1,5 @@
-# Versão web: verificação a cada push e PR; publicação na Cloudflare
-# (wrangler.jsonc) quando a `main` anda. O app desktop sai pelo release.yml.
+# Web version: checks on every push and PR; deploys to Cloudflare
+# (wrangler.jsonc) when `main` moves. The desktop app ships via release.yml.
 
 name: web
 
@@ -8,8 +8,8 @@ on:
     branches: [main]
   pull_request:
 
-# Dois pushes seguidos na `main` não podem publicar fora de ordem: o segundo
-# cancela o primeiro, e o que fica no ar é o commit mais novo.
+# Two back-to-back pushes to `main` must not deploy out of order: the second
+# cancels the first, so the newest commit is what ends up live.
 concurrency:
   group: web-${{ github.ref }}
   cancel-in-progress: true
@@ -20,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Versão do pnpm vem do `packageManager` do package.json.
+      # pnpm version comes from `packageManager` in package.json.
       - uses: pnpm/action-setup@v6
 
       - uses: actions/setup-node@v7
@@ -30,9 +30,9 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # Brush em WASM (web/pkg, fora do git). Compilar do zero leva ~25 min,
-      # então só acontece quando o commit fixo do Brush ou os patches mudam; o
-      # script instala sozinho o toolchain Rust que ele exige.
+      # Brush as WASM (web/pkg, not in git). A clean build takes ~25 min, so it
+      # only runs when the pinned Brush commit or the patches change; the
+      # script installs the Rust toolchain it needs by itself.
       - id: brush
         uses: actions/cache/restore@v6
         with:
@@ -47,8 +47,8 @@ jobs:
       - if: steps.brush.outputs.cache-hit != 'true'
         run: pnpm web:wasm
 
-      # Salva já, não no fim do job: o `actions/cache` só salvava se tudo
-      # passasse, e uma falha depois (ex.: o deploy) jogava fora a compilação.
+      # Save right away, not at the end of the job: `actions/cache` only saved
+      # when everything passed, so a later failure (e.g. the deploy) threw the build away.
       - if: steps.brush.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
         with:
@@ -57,22 +57,22 @@ jobs:
 
       - run: pnpm exec tsc --noEmit -p web
 
-      # Worker dos links de compartilhamento (worker/index.ts).
+      # Share-link Worker (worker/index.ts).
       - run: pnpm exec tsc --noEmit -p worker
 
       - run: pnpm test:web
 
-      # Compilar aqui é o que impede um build quebrado de só aparecer na hora
-      # de publicar, e numa PR não há publicação para descobrir.
+      # Building here keeps a broken build from only surfacing at deploy time,
+      # and PRs never deploy, so this is where it would be caught.
       - run: pnpm web:build
 
-      # O Workers recusa arquivos acima de 25 MiB. O .wasm do ONNX Runtime
-      # (~27 MB) sai gzipado (web/ort-wasm-plugin.ts); se uma atualização
-      # trouxer outro arquivo grande, o erro aparece aqui, não no deploy.
-      - name: Nenhum arquivo acima de 25 MiB
+      # Workers rejects files over 25 MiB. The ONNX Runtime .wasm (~27 MB)
+      # ships gzipped (web/ort-wasm-plugin.ts); if an update brings another
+      # large file, the error shows up here, not at deploy time.
+      - name: No file over 25 MiB
         run: |
           big=$(find dist-web -type f -size +25M)
-          if [ -n "$big" ]; then echo "Arquivos grandes demais para o Workers:"; echo "$big"; exit 1; fi
+          if [ -n "$big" ]; then echo "Files too large for Workers:"; echo "$big"; exit 1; fi
 
       - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: cloudflare/wrangler-action@v4

@@ -1,7 +1,7 @@
-// Bundle adjustment: Levenberg–Marquardt com complemento de Schur.
-// Câmera SIMPLE_PINHOLE compartilhada (focal f, centro fixo), poses
-// mundo→câmera com atualização à esquerda R ← exp(δr) R, t ← t + δt.
-// Perda de Huber (IRLS) em pixels.
+// Bundle adjustment: Levenberg–Marquardt with a Schur complement.
+// Shared SIMPLE_PINHOLE camera (focal f, fixed principal point), world→camera
+// poses with left update R ← exp(δr) R, t ← t + δt.
+// Huber loss (IRLS) in pixels.
 
 import { choleskySolve, expSO3, inv3, type Mat3, mul3, type Vec3 } from "./linalg.ts";
 
@@ -11,9 +11,9 @@ export interface BAProblem {
   cy: number;
   R: (Mat3 | null)[];
   t: (Vec3 | null)[];
-  /** Imagens cujas poses variam; as demais observadas ficam fixas. */
+  /** Images whose poses vary; the other observed ones stay fixed. */
   varCams: number[];
-  /** 3 por ponto; todos os pontos observados variam (alterado no lugar). */
+  /** 3 per point; all observed points vary (modified in place). */
   points: Float64Array;
   obsImg: Int32Array;
   obsPt: Int32Array;
@@ -43,7 +43,7 @@ export function bundleAdjust(p: BAProblem): BAResult {
   const nC = 6 * nc + (p.refineFocal ? 1 : 0);
   const fIdx = 6 * nc;
 
-  // pontos variáveis e suas observações
+  // variable points and their observations
   const ptIdx = new Map<number, number>();
   const ptList: number[] = [];
   for (let o = 0; o < nObs; o++) {
@@ -87,7 +87,7 @@ export function bundleAdjust(p: BAProblem): BAResult {
   let lambda = 1e-4;
   let it = 0;
 
-  // buffers por observação
+  // per-observation buffers
   const Jc = new Float64Array(nObs * 12); // 2×6
   const Jf = new Float64Array(nObs * 2);
   const Jp = new Float64Array(nObs * 6); // 2×3
@@ -95,7 +95,7 @@ export function bundleAdjust(p: BAProblem): BAResult {
   const wts = new Float64Array(nObs);
 
   for (; it < p.iters; it++) {
-    // --- Jacobianos ---
+    // --- Jacobians ---
     for (let o = 0; o < nObs; o++) {
       const i = p.obsImg[o], j = p.obsPt[o];
       const Ri = R[i]!, ti = t[i]!;
@@ -143,12 +143,12 @@ export function bundleAdjust(p: BAProblem): BAResult {
       Jp[q + 5] = P11 * Ri[5] + P12 * Ri[8];
     }
 
-    // --- sistema normal ---
+    // --- normal equations ---
     const U = new Float64Array(nC * nC);
     const gc = new Float64Array(nC);
     const V = new Float64Array(np * 9);
     const gp = new Float64Array(np * 3);
-    // W por observação: (6 linhas da câmera + linha da focal) × 3
+    // W per observation: (6 camera rows + focal row) × 3
     const Wc = new Float64Array(nObs * 18);
     const Wf = new Float64Array(nObs * 3);
     for (let o = 0; o < nObs; o++) {
@@ -158,7 +158,6 @@ export function bundleAdjust(p: BAProblem): BAResult {
       const jp = ptIdx.get(p.obsPt[o])!;
       const r0 = res[2 * o], r1 = res[2 * o + 1];
       const q = o * 6;
-      // V e gp
       for (let a = 0; a < 3; a++) {
         gp[jp * 3 + a] += w * (Jp[q + a] * r0 + Jp[q + 3 + a] * r1);
         for (let c = 0; c < 3; c++) V[jp * 9 + a * 3 + c] += w * (Jp[q + a] * Jp[q + c] + Jp[q + 3 + a] * Jp[q + 3 + c]);
@@ -186,7 +185,7 @@ export function bundleAdjust(p: BAProblem): BAResult {
       }
     }
 
-    // --- passo LM (tenta, ajusta λ) ---
+    // --- LM step (try, adjust λ) ---
     let accepted = false;
     for (let tries = 0; tries < 8 && !accepted; tries++) {
       const S = Float64Array.from(U);
@@ -201,7 +200,7 @@ export function bundleAdjust(p: BAProblem): BAResult {
         Vinv[jp] = Vi;
         if (!Vi) continue;
         const obs = obsByPt[jp];
-        // Y_o = W_o V⁻¹ (7×3 por observação: 6 da câmera + 1 da focal)
+        // Y_o = W_o V⁻¹ (7×3 per observation: 6 camera + 1 focal)
         const rows: { row: number; Y: Float64Array; W: Float64Array }[] = [];
         for (const o of obs) {
           if (wts[o] === 0) continue;
@@ -215,7 +214,7 @@ export function bundleAdjust(p: BAProblem): BAResult {
             rows.push({ row: 6 * k, Y, W: Wb });
           }
         }
-        // linha da focal: soma das contribuições do ponto
+        // focal row: sum of the point's contributions
         let Wfj: Float64Array | null = null;
         let Yf: Float64Array | null = null;
         if (p.refineFocal) {
@@ -225,8 +224,8 @@ export function bundleAdjust(p: BAProblem): BAResult {
           for (let c = 0; c < 3; c++) Yf[c] = Wfj[0] * Vi[c] + Wfj[1] * Vi[3 + c] + Wfj[2] * Vi[6 + c];
         }
         const g = gp.subarray(jp * 3, jp * 3 + 3);
-        // S −= Y Wᵀ ;  b += Y g  (pois b = −gc + W V⁻¹ gp)
-        // várias observações da mesma câmera no mesmo ponto não ocorrem (tracks únicos por imagem)
+        // S −= Y Wᵀ ;  b += Y g  (since b = −gc + W V⁻¹ gp)
+        // multiple observations of the same point by the same camera don't occur (tracks are unique per image)
         for (const A of rows) {
           for (let a = 0; a < 6; a++) bvec[A.row + a] += A.Y[a * 3] * g[0] + A.Y[a * 3 + 1] * g[1] + A.Y[a * 3 + 2] * g[2];
           for (const B of rows) {
@@ -253,7 +252,7 @@ export function bundleAdjust(p: BAProblem): BAResult {
         lambda *= 10;
         continue;
       }
-      // pontos: dp = V⁻¹ (−gp − Wᵀ dc)
+      // points: dp = V⁻¹ (−gp − Wᵀ dc)
       const Xn = Float64Array.from(X);
       for (let jp = 0; jp < np; jp++) {
         const Vi = Vinv[jp];

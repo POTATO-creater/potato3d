@@ -1,4 +1,4 @@
-// Roda a reconstrução (síncrona e pesada) fora da thread da interface.
+// Runs the (synchronous, heavy) reconstruction off the UI thread.
 
 import type { Msg } from "../../../src/lib/api";
 import type { PairMatches } from "./matcher";

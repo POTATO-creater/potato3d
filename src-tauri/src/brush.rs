@@ -1,8 +1,8 @@
-//! Etapa 3: treino do Gaussian Splatting com o Brush (Rust + wgpu/Metal).
+//! Stage 3: Gaussian Splatting training with Brush (Rust + wgpu/Metal).
 //!
-//! O Brush não imprime progresso fora de um TTY, então ligamos o log
-//! `info` dos módulos de processo e lemos as linhas de refinamento
-//! ("Refine iter N, X splats.") e de avaliação ("Eval iter N: PSNR …").
+//! Brush prints no progress outside a TTY, so we enable `info` logging for
+//! its process modules and parse the refine lines ("Refine iter N, X splats.")
+//! and eval lines ("Eval iter N: PSNR …").
 
 use std::path::{Path, PathBuf};
 
@@ -17,26 +17,26 @@ use crate::proc::run_streaming;
 #[serde(rename_all = "camelCase")]
 pub struct TrainOptions {
     pub total_steps: u32,
-    /// 0–3. Vídeo de IA tem iluminação incoerente: graus baixos evitam decorar ruído.
+    /// 0–3. AI-generated video has inconsistent lighting: low degrees avoid memorizing noise.
     pub sh_degree: u32,
     pub max_splats: u32,
     pub max_resolution: u32,
-    /// Exporta um .ply intermediário a cada N passos (visualização ao vivo).
+    /// Exports an intermediate .ply every N steps (live preview).
     pub export_every: u32,
-    /// Separa 1 a cada N imagens para medir PSNR (0 = desliga).
+    /// Holds out 1 of every N images to measure PSNR (0 = off).
     pub eval_split_every: u32,
-    /// Peso da perda SSIM (0 = desliga). No Metal ela triplica o custo do
-    /// passo; no mesmo tempo, sem SSIM e com mais passos deu PSNR maior
-    /// (32,6 dB em 15k passos vs 31,8 dB em 7k, ambos ~9 min).
+    /// SSIM loss weight (0 = off). On Metal it triples the per-step cost; in
+    /// the same wall time, no SSIM with more steps gave a higher PSNR
+    /// (32.6 dB at 15k steps vs 31.8 dB at 7k, both ~9 min).
     #[serde(default = "default_ssim")]
     pub ssim_weight: f32,
-    /// Penalizava splats grandes/alongados no Brush 0.3. O Brush fixado
-    /// (scripts/build-brush-web.mjs) não tem mais essa perda: é ignorada,
-    /// como no web.
+    /// Penalized large/elongated splats in Brush 0.3. The pinned Brush
+    /// (scripts/build-brush-web.mjs) no longer has this loss: it is ignored,
+    /// as on the web.
     #[serde(default)]
     pub scale_loss_weight: Option<f32>,
-    /// Poda por contribuição negativa e regularização do DeG (web/brush/deg.patch);
-    /// ver `TrainOptions` em src/lib/api.ts. Omitido ou 0 = desligado.
+    /// Negative-contribution pruning and DeG regularization (web/brush/deg.patch);
+    /// see `TrainOptions` in src/lib/api.ts. Omitted or 0 = off.
     #[serde(default)]
     pub contrib_prune_min_views: Option<u32>,
     #[serde(default)]
@@ -55,14 +55,14 @@ fn default_ssim() -> f32 {
     0.2
 }
 
-/// Fundo do treino com máscara: cor uniforme sorteada a cada passo
-/// (0,5 ± 0,5). No preto ± 0,1 do Brush, camadas escuras e semitransparentes
-/// fora da silhueta quase não custam nada e viram uma silhueta fantasma em
-/// volta do sujeito; com o fundo variando, qualquer transparência indevida
-/// pesa na perda. Mesmos valores de `MASKED_BACKGROUND` em web/src/brush.ts.
+/// Background for masked training: a uniform color drawn at random every step
+/// (0.5 ± 0.5). With Brush's black ± 0.1, dark semi-transparent layers outside
+/// the silhouette cost almost nothing and turn into a ghost silhouette around
+/// the subject; with a varying background, any stray transparency shows up in
+/// the loss. Same values as `MASKED_BACKGROUND` in web/src/brush.ts.
 const MASKED_BACKGROUND: ([f32; 3], f32) = ([0.5, 0.5, 0.5], 0.5);
 
-/// Argumentos de treino do `brush-cli` (sem o dataset e a saída).
+/// Training arguments for `brush-cli` (without the dataset and output).
 fn train_args(opts: &TrainOptions, masked: bool, export_every: u32) -> Vec<String> {
     let mut a: Vec<String> = Vec::new();
     let mut push = |k: &str, v: &[String]| {
@@ -130,7 +130,7 @@ fn parse_eval(line: &str) -> Option<(u32, f64, f64)> {
     Some((iter.trim().parse().ok()?, psnr.parse().ok()?, ssim.parse().ok()?))
 }
 
-/// Remove o prefixo `[2026-10-04T19:51:15Z INFO  modulo] `.
+/// Strips the `[2026-10-04T19:51:15Z INFO  module] ` prefix.
 fn strip_env_logger(line: &str) -> &str {
     if line.starts_with('[') {
         if let Some(i) = line.find("] ") {
@@ -140,7 +140,7 @@ fn strip_env_logger(line: &str) -> &str {
     line
 }
 
-/// `masked`: as imagens do dataset têm o alpha das máscaras (dataset_alpha).
+/// `masked`: the dataset images carry the mask alpha (dataset_alpha).
 pub async fn run(
     brush: &Path,
     dataset: &Path,
@@ -165,12 +165,12 @@ pub async fn run(
         .arg(out_dir)
         .args(["--export-name", "splat_{iter}.ply"]);
     if opts.scale_loss_weight.is_some() {
-        on_log("Opção \"suavizar\" (scale-loss-weight) não existe nesta versão do Brush; ignorada.");
+        on_log("Option \"smooth\" (scale-loss-weight) does not exist in this Brush version; ignored.");
     }
 
-    // O Brush preenche `{iter}` com zeros conforme o nº de dígitos do total
-    // (splat_02500.ply com 20000 passos), então varremos a pasta em vez de
-    // montar o nome.
+    // Brush zero-pads `{iter}` to the digit count of the total
+    // (splat_02500.ply with 20000 steps), so we scan the folder instead of
+    // building the name.
     let mut last_reported = 0u32;
     let mut check_snapshots = |on_event: &mut dyn FnMut(TrainEvent)| {
         let snaps = list_snapshots(out_dir);
@@ -179,8 +179,8 @@ pub async fn run(
             last_reported = iter;
             on_event(TrainEvent::Snapshot { iter, path: path.to_string_lossy().into_owned() });
         }
-        // Cada .ply pode ter centenas de MB: guarda só os dois últimos
-        // (o penúltimo ainda pode estar sendo lido pelo visualizador).
+        // Each .ply can be hundreds of MB: keep only the last two
+        // (the second-to-last may still be being read by the viewer).
         for (_, old) in snaps.iter().rev().skip(2) {
             let _ = std::fs::remove_file(old);
         }
@@ -198,18 +198,18 @@ pub async fn run(
         }
     })
     .await
-    .context("falha no treino do Brush")?;
+    .context("Brush training failed")?;
 
     check_snapshots(&mut on_event);
 
-    // O último export é o resultado.
+    // The last export is the result.
     list_snapshots(out_dir)
         .pop()
         .map(|(_, p)| p)
-        .context("o Brush terminou sem exportar nenhum .ply")
+        .context("Brush finished without exporting any .ply")
 }
 
-/// Snapshots `splat_<iter>.ply` em ordem crescente de iteração.
+/// `splat_<iter>.ply` snapshots in ascending iteration order.
 fn list_snapshots(dir: &Path) -> Vec<(u32, PathBuf)> {
     let mut v: Vec<(u32, PathBuf)> = std::fs::read_dir(dir)
         .into_iter()
@@ -256,7 +256,7 @@ mod tests {
         let dir = std::env::temp_dir().join("splatforge_snap_test");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        for name in ["splat_02500.ply", "splat_10000.ply", "splat_05000.ply", "outro.ply"] {
+        for name in ["splat_02500.ply", "splat_10000.ply", "splat_05000.ply", "other.ply"] {
             std::fs::write(dir.join(name), b"").unwrap();
         }
         let iters: Vec<u32> = list_snapshots(&dir).into_iter().map(|(i, _)| i).collect();

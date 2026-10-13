@@ -1,5 +1,5 @@
-// Testes do Worker de compartilhamento com um R2 em memória.
-// `pnpm test:web` (node --test, que lê TypeScript direto).
+// Share Worker tests against an in-memory R2.
+// `pnpm test:web` (node --test, which runs TypeScript directly).
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -7,7 +7,7 @@ import worker, { sweep, type Env } from "./index.ts";
 
 type Stored = { bytes: Uint8Array; customMetadata: Record<string, string> };
 
-/** O pedaço da API do R2 que o Worker usa. */
+/** The slice of the R2 API the Worker uses. */
 function fakeBucket() {
   const objects = new Map<string, Stored>();
   const object = (key: string, o: Stored, bytes?: Uint8Array) => ({
@@ -81,14 +81,14 @@ function upload(call: ReturnType<typeof setup>["call"], bytes: Uint8Array = SOG,
   });
 }
 
-test("sobe, lê os metadados e baixa o arquivo", async () => {
+test("uploads, reads metadata and downloads the file", async () => {
   const { call } = setup();
   const res = await upload(call);
   assert.equal(res.status, 201);
   const link = (await res.json()) as { id: string; url: string; expiresAt: number; deleteToken: string };
   assert.match(link.id, /^[0-9A-Za-z]{12}$/);
   assert.equal(link.url, `https://orbit.test/s/${link.id}`);
-  // Validade padrão: 6 h.
+  // Default lifetime: 6 h.
   assert.ok(Math.abs(link.expiresAt - (Date.now() + 6 * 3600_000)) < 5000);
 
   const meta = (await (await call(`/api/share/${link.id}`)).json()) as Record<string, unknown>;
@@ -100,7 +100,7 @@ test("sobe, lê os metadados e baixa o arquivo", async () => {
   assert.match(file.headers.get("Cache-Control")!, /^private, max-age=\d+$/);
 });
 
-test("validade e tamanho máximo vêm das variáveis", async () => {
+test("lifetime and max size come from the vars", async () => {
   const { call } = setup({ SHARE_TTL_HOURS: "0.5", SHARE_MAX_MB: "0.000006" });
   assert.equal((await upload(call)).status, 413);
   const small = new Uint8Array([0x70, 0x6c, 0x79, 0x0a]); // "ply\n"
@@ -110,14 +110,14 @@ test("validade e tamanho máximo vêm das variáveis", async () => {
   assert.ok(Math.abs(expiresAt - (Date.now() + 1800_000)) < 5000);
 });
 
-test("validade escolhida com a chave de acesso", async () => {
-  const { call, bucket, env } = setup({ SHARE_ADMIN_TOKEN: "segredo" });
-  const admin = (ttl: string, token = "segredo") =>
+test("custom lifetime with the access key", async () => {
+  const { call, bucket, env } = setup({ SHARE_ADMIN_TOKEN: "secret" });
+  const admin = (ttl: string, token = "secret") =>
     upload(call, SOG, "splat.sog", { "X-Share-TTL": ttl, Authorization: `Bearer ${token}` });
 
   const month = (await (await admin("720")).json()) as { id: string; expiresAt: number; deleteToken: string };
   assert.ok(Math.abs(month.expiresAt - (Date.now() + 720 * 3600_000)) < 5000);
-  // Fora de `s/`: a regra de ciclo de vida do bucket apagaria em um dia.
+  // Outside `s/`: the bucket lifecycle rule would delete it within a day.
   assert.ok(bucket.objects.has(`p/${month.id}`));
   assert.equal((await call(`/api/share/${month.id}/file`)).status, 200);
 
@@ -128,31 +128,31 @@ test("validade escolhida com a chave de acesso", async () => {
   const file = await call(`/api/share/${never.id}/file`);
   assert.equal(file.headers.get("Cache-Control"), "private, max-age=86400");
 
-  // O cron não apaga o que não expira, mas apaga o vencido em `p/`.
+  // The cron keeps never-expiring shares but deletes expired ones under `p/`.
   bucket.objects.get(`p/${month.id}`)!.customMetadata.expiresAt = String(Date.now() - 1);
   assert.equal(await sweep(env), 1);
   assert.ok(bucket.objects.has(`p/${never.id}`));
 
-  // Revogar acha o link em `p/`.
+  // Revoking finds the link under `p/`.
   const { id, deleteToken } = (await (await admin("24")).json()) as { id: string; deleteToken: string };
   const del = await call(`/api/share/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${deleteToken}` } });
   assert.equal(del.status, 204);
   assert.equal(bucket.objects.has(`p/${id}`), false);
 
-  assert.equal((await admin("720", "errado")).status, 403);
+  assert.equal((await admin("720", "wrong")).status, 403);
   assert.equal((await upload(call, SOG, "splat.sog", { "X-Share-TTL": "720" })).status, 403);
   assert.equal((await admin("0")).status, 400);
   assert.equal((await admin("abc")).status, 400);
 });
 
-test("sem a chave configurada, ninguém escolhe a validade", async () => {
+test("without a configured key, nobody picks the lifetime", async () => {
   const { call, bucket } = setup();
   const res = await upload(call, SOG, "splat.sog", { "X-Share-TTL": "never", Authorization: "Bearer " });
   assert.equal(res.status, 403);
   assert.equal(bucket.objects.size, 0);
 });
 
-test("recusa o que não é .sog/.ply de verdade", async () => {
+test("rejects anything that is not a real .sog/.ply", async () => {
   const { call, bucket } = setup();
   assert.equal((await upload(call, SOG, "x.zip")).status, 400);
   assert.equal((await upload(call, new TextEncoder().encode("<html>"), "x.sog")).status, 400);
@@ -160,7 +160,7 @@ test("recusa o que não é .sog/.ply de verdade", async () => {
   assert.equal(bucket.objects.size, 0);
 });
 
-test("expirado some na hora e no cron", async () => {
+test("expired shares vanish immediately and in the cron", async () => {
   const { call, bucket, env } = setup();
   const { id } = (await (await upload(call)).json()) as { id: string };
   const { id: other } = (await (await upload(call)).json()) as { id: string };
@@ -173,17 +173,17 @@ test("expirado some na hora e no cron", async () => {
   assert.equal(bucket.objects.size, 0);
 });
 
-test("revogar exige o token", async () => {
+test("revoking requires the token", async () => {
   const { call } = setup();
   const { id, deleteToken } = (await (await upload(call)).json()) as { id: string; deleteToken: string };
   const del = (token: string) => call(`/api/share/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
-  assert.equal((await del("errado")).status, 403);
+  assert.equal((await del("wrong")).status, 403);
   assert.equal((await del(deleteToken)).status, 204);
   assert.equal((await call(`/api/share/${id}`)).status, 404);
   assert.equal((await del(deleteToken)).status, 204);
 });
 
-test("CORS só para o app desktop e origens configuradas", async () => {
+test("CORS only for the desktop app and configured origins", async () => {
   const { call } = setup({ SHARE_ORIGINS: "http://localhost:1420" });
   const pre = (origin: string) => call("/api/share", { method: "OPTIONS", headers: { Origin: origin } });
   assert.equal((await pre("tauri://localhost")).headers.get("Access-Control-Allow-Origin"), "tauri://localhost");
@@ -191,7 +191,7 @@ test("CORS só para o app desktop e origens configuradas", async () => {
   assert.equal((await pre("https://evil.example")).headers.get("Access-Control-Allow-Origin"), null);
 });
 
-test("rotas fora da API", async () => {
+test("routes outside the API", async () => {
   const { call, assetsHit } = setup();
   const page = await call("/s/abcdefABCDEF");
   assert.equal(await page.text(), "asset /share");

@@ -1,5 +1,5 @@
-// SfM incremental para vídeo orbital: verificação geométrica, tracks,
-// par inicial, registro por PnP, triangulação e bundle adjustment.
+// Incremental SfM for orbit video: geometric verification, tracks, initial
+// pair, PnP registration, triangulation and bundle adjustment.
 
 import type { Msg } from "../../../src/lib/api";
 import { bundleAdjust } from "./ba";
@@ -44,7 +44,7 @@ export interface SfmModel {
 }
 
 const MAX_ERR = 4; // px
-const MIN_ANGLE = 1.5; // graus
+const MIN_ANGLE = 1.5; // degrees
 const MIN_PNP = 20;
 
 export function reconstruct(
@@ -57,9 +57,9 @@ export function reconstruct(
   const N = imgs.length;
   const { width: W, height: H } = imgs[0];
   const cx = W / 2, cy = H / 2;
-  const f0 = 1.2 * Math.max(W, H); // mesmo chute inicial do COLMAP
+  const f0 = 1.2 * Math.max(W, H); // same initial guess as COLMAP
 
-  // ---- 1. verificação geométrica ----
+  // ---- 1. geometric verification ----
   const t0 = performance.now();
   const verified: { a: number; b: number; ia: Uint32Array; ib: Uint32Array }[] = [];
   for (const m of matches) {
@@ -82,7 +82,7 @@ export function reconstruct(
       }
     verified.push({ a: m.a, b: m.b, ia: Uint32Array.from(ia), ib: Uint32Array.from(ib) });
   }
-  log(`Verificação geométrica: ${verified.length}/${matches.length} pares em ${((performance.now() - t0) / 1000).toFixed(1)} s`);
+  log(`Geometric verification: ${verified.length}/${matches.length} pairs in ${((performance.now() - t0) / 1000).toFixed(1)} s`);
 
   // ---- 2. tracks (union-find) ----
   const off: number[] = [];
@@ -118,8 +118,8 @@ export function reconstruct(
   let dropped = 0;
   for (const g0 of groups.values()) {
     if (g0.length < 2) continue;
-    // Duas features da mesma imagem no mesmo track: um match errado encadeou
-    // pontos diferentes. Saem só essas observações, não o track inteiro.
+    // Two features from the same image in the same track: a wrong match chained
+    // different points. Only those observations are dropped, not the whole track.
     const count = new Map<number, number>();
     for (const x of g0) count.set(nodeImg[x], (count.get(nodeImg[x]) ?? 0) + 1);
     const g = g0.filter((x) => count.get(nodeImg[x]) === 1);
@@ -130,15 +130,16 @@ export function reconstruct(
     for (const x of g) featTrack[nodeImg[x]][x - off[nodeImg[x]]] = id;
   }
   const pairInliers = new Map(verified.map((v) => [`${v.a},${v.b}`, v.ia.length]));
-  log(`Tracks: ${trackObs.length} (${dropped} observações ambíguas descartadas)`);
+  log(`Tracks: ${trackObs.length} (${dropped} ambiguous observations dropped)`);
 
-  // ---- 3. pares iniciais candidatos ----
-  // Paralaxe (ângulo mediano de triangulação ≥ 2°) e número de pontos, não a
-  // distância em frames: num vídeo com poucos frames, 3 frames já são 27°.
+  // ---- 3. initial pair candidates ----
+  // Parallax (median triangulation angle ≥ 2°) and point count, not distance
+  // in frames: in a video with few frames, 3 frames can already be 27°.
   const uv0 = (img: number, feat: number): [number, number] => [imgs[img].xy[2 * feat], imgs[img].xy[2 * feat + 1]];
-  // Os pares com mais matches são quase sempre vizinhos imediatos, com pouca
-  // paralaxe (numa teleobjetiva, < 1° entre frames). Avalia os melhores de cada
-  // faixa de distância (√2 entre faixas, até N/4), não só os de mais matches.
+  // The pairs with the most matches are almost always immediate neighbours with
+  // little parallax (on a telephoto lens, < 1° between frames). Evaluate the
+  // best of each distance band (√2 between bands, up to N/4), not just the ones
+  // with the most matches.
   const candidates: InitPair[] = [];
   const bands = new Map<number, typeof verified>();
   for (const v of verified) {
@@ -171,26 +172,26 @@ export function reconstruct(
     if (med >= 2 && rel.good >= 25) candidates.push({ a: v.a, b: v.b, pose: rel.pose, score: rel.good * Math.min(med, 6) });
   }
   candidates.sort((x, y) => y.score - x.score);
-  // tentativas seguintes em outras regiões da órbita: sem repetir imagens
+  // further attempts in other regions of the orbit: no repeated images
   const tries: InitPair[] = [];
   for (const c of candidates) {
     if (tries.some((t) => [t.a, t.b].includes(c.a) || [t.a, t.b].includes(c.b))) continue;
     tries.push(c);
     if (tries.length === 3) break;
   }
-  if (!tries.length) throw new Error("Nenhum par inicial com paralaxe suficiente.");
+  if (!tries.length) throw new Error("No initial pair with enough parallax.");
 
-  /** Uma reconstrução completa a partir de um par inicial. */
+  /** A full reconstruction from one initial pair. */
   const attempt = (init: InitPair): SfmModel => {
     let f = f0;
-    // ---- estado ----
+    // ---- state ----
     const R: (Mat3 | null)[] = new Array(N).fill(null);
     const T: (Vec3 | null)[] = new Array(N).fill(null);
     const pose = (i: number): Pose | null => (R[i] ? { R: R[i]!, t: T[i]! } : null);
     const trackPoint = new Int32Array(trackObs.length).fill(-1);
-    const ptX: number[] = []; // 3 por ponto
+    const ptX: number[] = []; // 3 per point
     const ptTrack: number[] = [];
-    const order: number[] = []; // ordem de registro
+    const order: number[] = []; // registration order
     const uv = (img: number, feat: number): [number, number] => [imgs[img].xy[2 * feat], imgs[img].xy[2 * feat + 1]];
     const reprojErr = (img: number, feat: number, X: ArrayLike<number>) => {
       const c = toCam(pose(img)!, X);
@@ -203,7 +204,7 @@ export function reconstruct(
       return [(u - cx) / f, (v - cy) / f];
     };
 
-    /** Triangula tracks sem ponto que tenham ≥2 observações registradas. */
+    /** Triangulates point-less tracks that have ≥2 registered observations. */
     const triangulateTracks = (tracks: Iterable<number>, maxErr = MAX_ERR) => {
       let added = 0;
       for (const tr of tracks) {
@@ -229,7 +230,7 @@ export function reconstruct(
       return added;
     };
 
-    /** Monta e roda o BA. `maxErr` filtra observações muito fora antes. */
+    /** Builds and runs the BA. `maxErr` filters out far-off observations first. */
     const runBA = (varCams: number[], refineFocal: boolean, iters: number, maxErr: number) => {
       const pts = new Set<number>();
       if (varCams.length === order.length - 1 || varCams.length === order.length) {
@@ -263,7 +264,7 @@ export function reconstruct(
       return r;
     };
 
-    /** Remove pontos com <2 observações boas ou ângulo pequeno. */
+    /** Removes points with <2 good observations or a small angle. */
     const filterPoints = () => {
       let removed = 0;
       for (let p = 0; p < ptTrack.length; p++) {
@@ -282,8 +283,8 @@ export function reconstruct(
           removed++;
         }
       }
-      // compacta no lugar (um push(...arr) com centenas de milhares de
-      // coordenadas estoura a pilha de chamadas)
+      // compact in place (a push(...arr) with hundreds of thousands of
+      // coordinates overflows the call stack)
       let w = 0;
       for (let p = 0; p < ptTrack.length; p++) {
         const tr = ptTrack[p];
@@ -307,13 +308,13 @@ export function reconstruct(
     for (let k = 0; k < imgs[init.a].n; k++) if (featTrack[init.a][k] >= 0) initTracks.add(featTrack[init.a][k]);
     triangulateTracks(initTracks);
     runBA([init.b], false, 20, 1e9);
-    log(`Par inicial ${imgs[init.a].name} + ${imgs[init.b].name}: ${ptTrack.length} pontos`);
+    log(`Initial pair ${imgs[init.a].name} + ${imgs[init.b].name}: ${ptTrack.length} points`);
 
-    // ---- 4. registro incremental ----
+    // ---- 4. incremental registration ----
     const failed = new Set<number>();
     let lastGlobal = 2;
     while (true) {
-      // próxima imagem: a com mais correspondências 2D–3D
+      // next image: the one with the most 2D–3D correspondences
       let next = -1, bestCount = 0;
       for (let i = 0; i < N; i++) {
         if (R[i] || failed.has(i)) continue;
@@ -329,7 +330,7 @@ export function reconstruct(
       }
       if (next < 0 || bestCount < MIN_PNP) break;
 
-      const corr: [number, number][] = []; // (feat, ponto)
+      const corr: [number, number][] = []; // (feat, point)
       for (let k = 0; k < imgs[next].n; k++) {
         const tr = featTrack[next][k];
         if (tr >= 0 && trackPoint[tr] >= 0) corr.push([k, trackPoint[tr]]);
@@ -339,50 +340,50 @@ export function reconstruct(
         X.set(ptX.slice(3 * p, 3 * p + 3), 3 * j);
         x.set(norm(next, k), 2 * j);
       });
-      // pose inicial: a do vizinho registrado mais próximo na sequência
+      // initial pose: that of the nearest registered neighbour in the sequence
       let neighbor: Pose | null = null;
       for (let d = 1; d < N && !neighbor; d++) neighbor = pose((next + d) % N) ?? pose((next - d + N) % N);
       const r = solvePnP(X, x, corr.length, MAX_ERR / f, neighbor, next + 1);
       if (!r || r.inliers.length < MIN_PNP) {
         failed.add(next);
-        log(`PnP falhou em ${imgs[next].name} (${r?.inliers.length ?? 0}/${corr.length} inliers)`);
+        log(`PnP failed on ${imgs[next].name} (${r?.inliers.length ?? 0}/${corr.length} inliers)`);
         continue;
       }
       R[next] = r.pose.R;
       T[next] = r.pose.t;
       order.push(next);
-      // novas triangulações com tracks desta imagem
+      // new triangulations from this image's tracks
       const tracks = new Set<number>();
       for (let k = 0; k < imgs[next].n; k++) if (featTrack[next][k] >= 0) tracks.add(featTrack[next][k]);
       triangulateTracks(tracks);
 
-      // BA local: últimas câmeras registradas (exceto a primeira, fixa)
+      // local BA: last registered cameras (except the first, which is fixed)
       const local = order.slice(-8).filter((i) => i !== order[0]);
       runBA(local, false, 6, MAX_ERR * 2);
       if (order.length >= lastGlobal * 1.25 && order.length >= 8) {
-        // Com poucas câmeras o BA é barato: itera até a focal assentar. Em
-        // teleobjetiva (focal ~10× a largura) o vale focal × profundidade é
-        // quase plano e 15 iterações por rodada deixam a focal subindo aos
-        // poucos; as câmeras registradas com ela curta saem com passos de
-        // ângulo encolhidos e a órbita não fecha (abre um "buraco").
+        // With few cameras BA is cheap: iterate until the focal length settles.
+        // On a telephoto lens (focal ~10× the width) the focal × depth valley is
+        // nearly flat and 15 iterations per round leave the focal creeping up;
+        // cameras registered while it is short end up with shrunken angle steps
+        // and the orbit doesn't close (a "hole" opens).
         const g = runBA(order.slice(1), true, order.length < 20 ? 150 : 15, MAX_ERR * 2);
         filterPoints();
         lastGlobal = order.length;
-        log(`BA global com ${order.length} câmeras: ${g.rmsBefore.toFixed(2)} → ${g.rmsAfter.toFixed(2)} px, f = ${f.toFixed(1)}`);
+        log(`Global BA with ${order.length} cameras: ${g.rmsBefore.toFixed(2)} → ${g.rmsAfter.toFixed(2)} px, f = ${f.toFixed(1)}`);
       }
       progress(order.length / N, { key: "poses.webRegistered", args: { i: order.length, n: N } });
-      // uma imagem que falhou pode ter mais pontos agora
+      // an image that failed may have more points now
       if (failed.size && order.length % 5 === 0) failed.clear();
     }
 
-    // ---- 5. fecha a órbita ----
-    // O registro cresce para os dois lados do par inicial e cada lado encolhe
-    // um pouco os passos de ângulo (focal × profundidade × rotação quase se
-    // compensam). Onde as frentes se encontram sobra um salto de dezenas de
-    // graus, e as observações que atravessam o salto ficam fora de qualquer
-    // limiar do BA, que não consegue fechar sozinho. Gira cada câmera em torno
-    // do eixo da órbita para espalhar o excesso por todos os passos e
-    // retriangula; o BA abaixo assenta a focal com a órbita já fechada.
+    // ---- 5. close the orbit ----
+    // Registration grows on both sides of the initial pair and each side
+    // shrinks the angle steps a little (focal × depth × rotation nearly
+    // compensate each other). Where the fronts meet, a jump of tens of degrees
+    // is left, and the observations spanning it fall outside any BA threshold,
+    // so BA can't close it alone. Rotate each camera about the orbit axis to
+    // spread the excess across all steps and re-triangulate; the BA below
+    // settles the focal with the orbit already closed.
     const closeOrbit = () => {
       const ring = [...Array(N).keys()].filter((i) => R[i]);
       if (ring.length < Math.max(12, 0.8 * N)) return;
@@ -392,11 +393,11 @@ export function reconstruct(
       for (const c of C)
         for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) cov[a * 3 + b] += (c[a] - m[a]) * (c[b] - m[b]);
       const { values, V } = symEig(cov, 3);
-      if (values[0] > 0.2 * values[1]) return; // centros longe de um plano: não é órbita
+      if (values[0] > 0.2 * values[1]) return; // centers far from a plane: not an orbit
       const axis: Vec3 = [V[0], V[3], V[6]];
       const e1: Vec3 = [V[2], V[5], V[8]];
       const e2 = cross(axis, e1);
-      // círculo por mínimos quadrados no plano: x² + y² = 2ax + 2by + c
+      // least-squares circle in the plane: x² + y² = 2ax + 2by + c
       const P = C.map((c) => {
         const d = [c[0] - m[0], c[1] - m[1], c[2] - m[2]];
         return [d[0] * e1[0] + d[1] * e1[1] + d[2] * e1[2], d[0] * e2[0] + d[1] * e2[1] + d[2] * e2[2]];
@@ -420,7 +421,7 @@ export function reconstruct(
       const dir = Math.sign(sorted[sorted.length >> 1]) || 1;
       steps = steps.map((d) => d * dir);
       const total = steps.reduce((s, d) => s + d, 0);
-      if (Math.abs(total - 2 * Math.PI) > 0.2) return; // não dá uma volta só
+      if (Math.abs(total - 2 * Math.PI) > 0.2) return; // not exactly one turn
       let seam = 0;
       steps.forEach((d, k) => d > steps[seam] && (seam = k));
       const around: number[] = [];
@@ -430,12 +431,13 @@ export function reconstruct(
       const excess = steps[seam] - expected;
       const deg = (r: number) => (r * 180) / Math.PI;
       if (excess < (2 * Math.PI) / 180 || steps[seam] < 3 * Math.max(expected, sorted[sorted.length >> 1] * dir)) return;
-      // Só fecha se o par do salto casa tão bem quanto vizinhos de verdade:
-      // num vídeo que não dá a volta inteira o salto é real e casa pouco.
+      // Only close if the pair across the jump matches as well as real
+      // neighbours: in a video that doesn't go all the way around, the jump is
+      // real and matches poorly.
       const inliers = (i: number, j: number) => pairInliers.get(`${Math.min(i, j)},${Math.max(i, j)}`) ?? 0;
       const consecutive = ring.map((i, k) => inliers(i, ring[(k + 1) % ring.length])).sort((x, y) => x - y);
       if (inliers(ring[seam], ring[(seam + 1) % ring.length]) < 0.5 * consecutive[consecutive.length >> 1]) return;
-      // novo ângulo de cada câmera, a partir da que vem logo depois do salto
+      // new angle for each camera, starting from the one right after the jump
       const scale = (total - expected) / (total - steps[seam]);
       const delta = new Float64Array(ring.length);
       let cum = 0;
@@ -444,7 +446,7 @@ export function reconstruct(
         delta[k] = (scale - 1) * cum;
         cum += steps[k];
       }
-      const ref = delta[ring.indexOf(order[0])]; // a primeira câmera fica fixa no BA
+      const ref = delta[ring.indexOf(order[0])]; // the first camera stays fixed in BA
       ring.forEach((i, k) => {
         const Q = expSO3(axis.map((a) => a * dir * (delta[k] - ref)));
         const c = C[k];
@@ -454,27 +456,27 @@ export function reconstruct(
         const t = mulVec3(R[i]!, cNew);
         T[i] = [-t[0], -t[1], -t[2]];
       });
-      // os pontos antigos seguem a geometria sem o fechamento: refaz todos
+      // the old points follow the pre-closure geometry: redo them all
       trackPoint.fill(-1);
       ptX.length = 0;
       ptTrack.length = 0;
       triangulateTracks(trackObs.keys(), 24);
       log(
-        `Órbita fechada: salto de ${deg(steps[seam]).toFixed(1)}° entre ${imgs[ring[seam]].name} e ` +
-          `${imgs[ring[(seam + 1) % ring.length]].name} espalhado (passos ×${scale.toFixed(3)}), ${ptTrack.length} pontos`,
+        `Orbit closed: ${deg(steps[seam]).toFixed(1)}° jump between ${imgs[ring[seam]].name} and ` +
+          `${imgs[ring[(seam + 1) % ring.length]].name} spread out (steps ×${scale.toFixed(3)}), ${ptTrack.length} points`,
       );
     };
     if (closedLoop) closeOrbit();
 
-    // ---- 6. fechamento: reaproveita observações com limiar decrescente ----
+    // ---- 6. wrap-up: recover observations with a decreasing threshold ----
     for (const thr of [24, 12, 6, MAX_ERR]) {
       triangulateTracks(trackObs.keys());
       const g = runBA(order.slice(1), true, 25, thr);
       filterPoints();
-      log(`BA final (limiar ${thr} px): ${g.rmsBefore.toFixed(2)} → ${g.rmsAfter.toFixed(2)} px, f = ${f.toFixed(1)}`);
+      log(`Final BA (threshold ${thr} px): ${g.rmsBefore.toFixed(2)} → ${g.rmsAfter.toFixed(2)} px, f = ${f.toFixed(1)}`);
     }
 
-    // ---- saída ----
+    // ---- output ----
     const points: SfmModel["points"] = [];
     let errSum = 0, nObs = 0;
     for (let p = 0; p < ptTrack.length; p++) {
@@ -504,7 +506,7 @@ export function reconstruct(
 
   let best: SfmModel | null = null;
   for (const init of tries) {
-    if (best) log(`Só ${best.stats.registered}/${N} câmeras: tentando outro par inicial`);
+    if (best) log(`Only ${best.stats.registered}/${N} cameras: trying another initial pair`);
     const m = attempt(init);
     if (!best || Number(m.stats.registered) > Number(best.stats.registered)) best = m;
     if (Number(best.stats.registered) >= 0.9 * N) break;

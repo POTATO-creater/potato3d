@@ -1,21 +1,21 @@
-// Modo de desenvolvimento só da interface (`pnpm dev:mock`): roda no navegador,
-// sem Tauri, reproduzindo os eventos JSON gravados pela CLI
-// (`cargo run --example cli -- config.json > eventos.jsonl`).
+// UI-only development mode (`pnpm dev:mock`): runs in the browser without
+// Tauri, replaying the JSON events recorded by the CLI
+// (`cargo run --example cli -- config.json > events.jsonl`).
 //
-// Variáveis (em .env.local):
-//   VITE_MOCK_VIDEO   caminho de um vídeo de teste
-//   VITE_MOCK_IMAGES  imagens de teste separadas por vírgula (escolher arquivos
-//                     ou pasta abre esse conjunto)
-//   VITE_MOCK_EVENTS  arquivo .jsonl com os eventos gravados
-//   VITE_MOCK_SCENE   JSON de `cli scene <projeto>`
+// Variables (in .env.local):
+//   VITE_MOCK_VIDEO   path to a test video
+//   VITE_MOCK_IMAGES  comma-separated test images (picking files or a folder
+//                     opens this set)
+//   VITE_MOCK_EVENTS  .jsonl file with the recorded events
+//   VITE_MOCK_SCENE   JSON from `cli scene <project>`
 //
-// `?project=<pasta>` abre um projeto real (project.json); a exportação é
-// simulada e devolve o `lastExport` gravado nele (`cli export <projeto>`).
+// `?project=<folder>` opens a real project (project.json); export is
+// simulated and returns the `lastExport` saved in it (`cli export <project>`).
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import type { Channel } from "@tauri-apps/api/core";
 import type { JobEvent } from "../lib/api";
 
-// `?events=…&scene=…&video=…` na URL sobrepõe o .env.local (comparar resultados).
+// `?events=…&scene=…&video=…` in the URL overrides .env.local (to compare results).
 const params = new URLSearchParams(location.search);
 const env = {
   VITE_MOCK_VIDEO: params.get("video") ?? import.meta.env.VITE_MOCK_VIDEO,
@@ -41,7 +41,7 @@ async function readEvents(): Promise<JobEvent[]> {
     .map((l) => JSON.parse(l));
 }
 
-/** Cabeçalho de um .ply servido pelo Vite: contagem e grau SH. */
+/** Header of a .ply served by Vite: count and SH degree. */
 async function plyInfo(path: string) {
   const r = await fetch(fsUrl(path));
   const bytes = new Uint8Array(await r.arrayBuffer());
@@ -58,14 +58,14 @@ async function fakeExport(channel: Channel<any>, projectDir: string) {
     channel.onmessage({ fraction: i / 20, message: { key: steps[Math.min(steps.length - 1, Math.floor(i / 6))] } });
     await new Promise((r) => setTimeout(r, 70));
   }
-  if (!project?.lastExport) throw new Error("projeto sem lastExport (rode `cli export` antes)");
+  if (!project?.lastExport) throw new Error("project has no lastExport (run `cli export` first)");
   return project.lastExport;
 }
 
 let cancelled = false;
-// `?missing=1` simula o primeiro uso (ferramentas ausentes até "instalar").
+// `?missing=1` simulates first run (tools missing until "installed").
 let toolsInstalled = params.get("missing") !== "1";
-// `?rmbg=0`: o modelo RMBG-1.4 ainda não foi baixado.
+// `?rmbg=0`: the RMBG-1.4 model has not been downloaded yet.
 let rmbgInstalled = params.get("rmbg") !== "0";
 
 async function fakeInstall(channel: Channel<any>) {
@@ -116,11 +116,11 @@ async function replay(channel: Channel<JobEvent>, from: string, to = "train") {
     await new Promise((r) => setTimeout(r, delay));
     channel.onmessage(e);
   }
-  // Gravações completas terminam no treino: o fim de um job parcial é sintético.
+  // Full recordings end with training: the end of a partial job is synthetic.
   if (to !== "train") channel.onmessage({ type: "finished", ply: null, seconds: 1 });
 }
 
-/** Projeto aberto, para simular a recusa de frames sem mexer no disco. */
+/** Open project, to simulate frame rejection without touching the disk. */
 let project: any = null;
 
 export function installMock() {
@@ -147,7 +147,7 @@ export function installMock() {
           return { width: 960, height: 540, fps: 24, duration: 10, codec: "h264" };
         case "probe_images": {
           const paths = (env.VITE_MOCK_IMAGES?.split(",") ?? args.paths).filter((p: string) => /\.(jpe?g|png|webp)$/i.test(p));
-          if (!paths.length) throw new Error("nenhuma imagem (jpg, jpeg, png, webp) encontrada");
+          if (!paths.length) throw new Error("no images (jpg, jpeg, png, webp) found");
           return { paths, dir: paths[0].replace(/\/[^/]*$/, ""), width: 960, height: 540 };
         }
         case "load_project":
@@ -160,7 +160,7 @@ export function installMock() {
               lastPsnr: null,
             });
         case "set_frames_rejected": {
-          // Os caminhos ficam onde estão: só a marca muda.
+          // Paths stay where they are: only the flag changes.
           const names = new Set<string>(args.names);
           let changed = false;
           project = {
@@ -182,7 +182,7 @@ export function installMock() {
           return fakeExport(args.onProgress, args.projectDir);
         case "scene_frame": {
           const f = await readJson(env.VITE_MOCK_SCENE);
-          if (!f) throw new Error("sem poses");
+          if (!f) throw new Error("no poses");
           return f;
         }
         case "start_job":
@@ -191,10 +191,10 @@ export function installMock() {
         case "install_plan":
           if (params.get("os") !== "windows")
             return {
-              packages: args.rmbg ? [{ id: "rmbg", label: "Recorte RMBG-1.4", file: "model.onnx", size: 176_153_355 }] : [],
+              packages: args.rmbg ? [{ id: "rmbg", label: "RMBG-1.4 masking", file: "model.onnx", size: 176_153_355 }] : [],
               totalBytes: args.rmbg ? 176_153_355 : 0,
               cuda: false,
-              note: "No macOS instale pelo Homebrew: brew install ffmpeg colmap",
+              note: "On macOS, install via Homebrew: brew install ffmpeg colmap",
             };
           return {
             packages: [
@@ -215,13 +215,13 @@ export function installMock() {
           cancelled = true;
           return null;
         case "plugin:dialog|open":
-          if (args.options?.directory) return env.VITE_MOCK_IMAGES ? "/tmp/frames" : "/tmp/projeto";
+          if (args.options?.directory) return env.VITE_MOCK_IMAGES ? "/tmp/frames" : "/tmp/project";
           return args.options?.multiple ? [env.VITE_MOCK_IMAGES ? env.VITE_MOCK_IMAGES.split(",")[0] : env.VITE_MOCK_VIDEO] : env.VITE_MOCK_VIDEO;
         case "plugin:opener|reveal_item_in_dir":
-          console.info("[mock] revelar", args);
+          console.info("[mock] reveal", args);
           return null;
         default:
-          console.warn("[mock] comando sem mock:", cmd, args);
+          console.warn("[mock] unmocked command:", cmd, args);
           return null;
       }
     },

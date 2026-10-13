@@ -1,5 +1,5 @@
-// Retoque na versão web: clipes (trajetória renderizada do splat e o vídeo
-// restaurado pelo ComfyUI) guardados no OPFS e o treino incremental.
+// Web retouch: clips (a trajectory rendered from the splat and the video
+// restored by ComfyUI) stored in OPFS, plus incremental training.
 
 import type { Msg, ProjectState, RetouchApi, RetouchClip, RetouchEvent } from "../../../src/lib/api";
 import { appendCameras, appendImages, type NewImage } from "../../../src/lib/retouch/colmap";
@@ -14,16 +14,16 @@ import { IMAGE_EXT, layout, readState, saveState } from "./project";
 
 const clipDir = (root: string, id: string) => `${layout(root).retouch}/${id}`;
 
-/** Ids viram nomes de pasta: só letras, dígitos e hífen. */
+/** Ids become folder names: letters, digits and hyphens only. */
 const safeId = (id: string) => {
-  if (!/^[\w-]+$/.test(id)) throw new Error(`id de clipe inválido: ${id}`);
+  if (!/^[\w-]+$/.test(id)) throw new Error(`invalid clip id: ${id}`);
   return id;
 };
 
 async function readClip(root: string, id: string): Promise<RetouchClip | null> {
   try {
     const clip = JSON.parse(await (await readFile(`${clipDir(root, id)}/clip.json`)).text()) as RetouchClip;
-    // Os vídeos ganham URL para os <video> da revisão.
+    // Videos get URLs for the review <video> elements.
     for (const p of [clip.reference, clip.restored]) if (p) publish(p, await readFile(p));
     return clip;
   } catch {
@@ -36,7 +36,7 @@ async function clipIds(root: string): Promise<string[]> {
   try {
     for await (const [name, h] of (await dirAt(layout(root).retouch)).entries()) if (h.kind === "directory") ids.push(name);
   } catch {
-    /* ainda sem clipes */
+    /* no clips yet */
   }
   return ids;
 }
@@ -47,7 +47,7 @@ export const retouchApi: RetouchApi = {
   async cameras(projectDir) {
     const l = layout(projectDir);
     const lens = readIntrinsics(await (await readFile(`${l.model}/cameras.bin`)).arrayBuffer());
-    if (!lens) throw new Error("cameras.bin sem câmera legível");
+    if (!lens) throw new Error("cameras.bin has no readable camera");
     return { lens, cameras: readPoses(await (await readFile(`${l.model}/images.bin`)).arrayBuffer()) };
   },
 
@@ -60,7 +60,7 @@ export const retouchApi: RetouchApi = {
     const dir = clipDir(projectDir, safeId(clip.id));
     const saved = { ...clip };
     for (const [rel, blob] of Object.entries(files)) {
-      if (rel.includes("..")) throw new Error(`caminho inválido: ${rel}`);
+      if (rel.includes("..")) throw new Error(`invalid path: ${rel}`);
       const path = `${dir}/${rel}`;
       const file = await writeFile(path, blob);
       if (rel === "reference.mp4") saved.reference = path;
@@ -76,7 +76,7 @@ export const retouchApi: RetouchApi = {
   },
 
   async apply(projectDir, clipIds, options, onEvent) {
-    if (applying && !applying.signal.aborted) throw new Error("já existe um retoque em andamento");
+    if (applying && !applying.signal.aborted) throw new Error("a retouch is already running");
     const ctl = new AbortController();
     applying = ctl;
     try {
@@ -103,14 +103,14 @@ export const retouchApi: RetouchApi = {
   },
 };
 
-/** Frames alpha de um clipe, em ordem. */
+/** A clip's alpha frames, in order. */
 export const clipAlphaFiles = (root: string, id: string) =>
   listFiles(`${clipDir(root, id)}/alpha`, /^\d+\.png$/).then((names) => names.map((n) => `${clipDir(root, id)}/alpha/${n}`));
 
-const cancelled = () => new DOMException("cancelado", "AbortError");
+const cancelled = () => new DOMException("cancelled", "AbortError");
 
-/** Erosão de 1 px (mínimo 3×3) do alpha binarizado, como os frames reais
- *  (masks.rs, ALPHA_ERODE): a borda do render mistura o fundo. */
+/** 1 px erosion (3×3 min) of the binarized alpha, like the real frames
+ *  (masks.rs, ALPHA_ERODE): the render's edge blends in the background. */
 function erodedAlpha(src: Uint8ClampedArray, w: number, h: number): Uint8Array {
   const bin = new Uint8Array(w * h);
   for (let i = 0; i < bin.length; i++) bin[i] = src[i * 4] > 127 ? 255 : 0;
@@ -139,9 +139,9 @@ async function imageDataOf(blob: Blob, w: number, h: number): Promise<Uint8Clamp
   return g.getImageData(0, 0, w, h).data;
 }
 
-/** Treino incremental: o splat de antes (base) é ajustado com as fotos e os
- *  frames restaurados, num dataset à parte (dataset_retouch). Reaplicar
- *  parte sempre da mesma base, então os ajustes não se acumulam. */
+/** Incremental training: the previous splat (base) is fine-tuned on the photos
+ *  and the restored frames, in a separate dataset (dataset_retouch). Reapplying
+ *  always starts from the same base, so adjustments don't accumulate. */
 async function applyRetouch(
   projectDir: string,
   clipIds: string[],
@@ -151,14 +151,14 @@ async function applyRetouch(
 ): Promise<ProjectState> {
   const l = layout(projectDir);
   let state = await readState(projectDir);
-  if (!state.finalPly) throw new Error("o projeto ainda não tem splat treinado");
+  if (!state.finalPly) throw new Error("the project has no trained splat yet");
   const progress = (fraction: number, message: Msg) => {
     if (signal.aborted) throw cancelled();
     onEvent({ kind: "progress", fraction, message });
   };
   const log = (line: string) => onEvent({ kind: "log", line });
 
-  // Base: o splat antes do primeiro retoque.
+  // Base: the splat before the first retouch.
   if (!state.retouch || !(await exists(l.retouchBase))) await writeFile(l.retouchBase, await readFile(l.finalPly));
   const base = await readFile(l.retouchBase);
   publish(l.retouchBase, base);
@@ -166,13 +166,13 @@ async function applyRetouch(
   const clips = (await Promise.all(clipIds.map((id) => readClip(projectDir, safeId(id))))).filter(
     (c): c is RetouchClip => !!c?.restored,
   );
-  if (!clips.length) throw new Error("nenhum clipe restaurado para aplicar");
+  if (!clips.length) throw new Error("no restored clips to apply");
 
   const ds = l.retouchDataset;
   await remove(ds);
   const out = await dirAt(`${ds}/images`, true);
 
-  // Fotos reais, como no treino normal (com fundo transparente se houve recorte).
+  // Real photos, as in normal training (with a transparent background if masked).
   const realImages = await listFiles(l.images, IMAGE_EXT);
   if (options.masks) {
     await buildAlpha(await dirAt(l.images), await dirAt(l.masks), out, options.masks, log, (f, msg) => progress(0.3 * f, msg));
@@ -183,11 +183,11 @@ async function applyRetouch(
     }
   }
 
-  // Frames restaurados: no tamanho em que o restaurador os devolveu (não
-  // reduz o que veio maior que a referência), com o alpha do render ampliado.
+  // Restored frames: at the size the restorer returned them (anything larger
+  // than the reference is not downscaled), with the render's alpha upscaled.
   const newImages: NewImage[] = [];
-  // Só uma parte dos frames entra (restaurados demais tiram a nitidez do que
-  // as fotos veem); o vídeo é lido inteiro, frame a frame, de qualquer jeito.
+  // Only a subset of frames is used (too many restored frames blur what the
+  // photos see); the video is decoded in full, frame by frame, either way.
   const picked = pickRestoredFrames(
     clips.map((c) => c.poses.length),
     options.maxRestored ?? Infinity,
@@ -218,14 +218,14 @@ async function applyRetouch(
       done++;
       progress(0.3 + (0.2 * done) / total, { key: "retouch.restoredFrames", args: { i: done, n: total } });
     }
-    if (i !== clip.poses.length) throw new Error(`o vídeo restaurado de "${clip.label}" tem ${i} frames; esperava ${clip.poses.length}`);
+    if (i !== clip.poses.length) throw new Error(`the restored video of "${clip.label}" has ${i} frames; expected ${clip.poses.length}`);
   }
 
-  // Modelo: as câmeras e imagens do projeto mais as dos clipes.
+  // Model: the project's cameras and images plus the clips'.
   const cams = appendCameras(
     await (await readFile(`${l.model}/cameras.bin`)).arrayBuffer(),
     clips.map((c) => {
-      // Intrínsecos na escala do tamanho de treino (a proporção é a mesma).
+      // Intrinsics scaled to the training size (same aspect ratio).
       const [w, h] = trainSize(c);
       const sx = w / c.size[0], sy = h / c.size[1];
       const k = c.intrinsics;
@@ -237,13 +237,13 @@ async function applyRetouch(
   await writeFile(`${ds}/sparse/0/cameras.bin`, cams.bin);
   await writeFile(`${ds}/sparse/0/images.bin`, appendImages(images, newImages, cams.ids));
   await writeFile(`${ds}/sparse/0/points3D.bin`, await readFile(`${l.model}/points3D.bin`));
-  // O Brush começa do splat que achar em init.ply, em vez dos pontos do COLMAP.
+  // Brush starts from the splat it finds in init.ply instead of the COLMAP points.
   await writeFile(`${ds}/init.ply`, base);
   log(
-    `retoque: ${realImages.length} fotos + ${newImages.length} de ${clips.reduce((n, c) => n + c.poses.length, 0)} frames restaurados de ${clips.length} clipe(s)`,
+    `retouch: ${realImages.length} photos + ${newImages.length} of ${clips.reduce((n, c) => n + c.poses.length, 0)} restored frames from ${clips.length} clip(s)`,
   );
 
-  // Ajuste curto, sem avaliação (as vistas novas cairiam no conjunto de teste).
+  // Short fine-tune, no eval (the new views would land in the test set).
   const steps = Math.max(options.steps, 1);
   const snapshots = `${l.root}/training_retouch`;
   let snapshot: string | null = null;
@@ -261,7 +261,7 @@ async function applyRetouch(
     !!options.masks,
     {
       status: (msg) => progress(0.5, msg),
-      dataset: (n) => log(`retoque: ${n} vistas de treino`),
+      dataset: (n) => log(`retouch: ${n} training views`),
       step: (iter, splats) => onEvent({ kind: "train", event: { kind: "step", iter, splats } }),
       eval: () => {},
       snapshot: (iter, data) => {

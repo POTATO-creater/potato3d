@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { appendCameras, appendImages } from "./colmap.ts";
 
-/** cameras.bin com uma SIMPLE_PINHOLE (id 1, 960×1920, f 1600). */
+/** cameras.bin with one SIMPLE_PINHOLE (id 1, 960×1920, f 1600). */
 function camerasBin() {
   const b = new ArrayBuffer(8 + 24 + 24);
   const v = new DataView(b);
@@ -15,7 +15,7 @@ function camerasBin() {
   return b;
 }
 
-/** images.bin com duas imagens; a segunda tem um ponto 2D. */
+/** images.bin with two images; the second has one 2D point. */
 function imagesBin() {
   const enc = new TextEncoder();
   const parts: number[] = [];
@@ -39,7 +39,7 @@ function imagesBin() {
   return new Uint8Array(parts).buffer;
 }
 
-/** Leitura completa para conferir (mesmo formato do images.bin). */
+/** Full read-back for checking (same format as images.bin). */
 function readImages(b: ArrayBuffer) {
   const v = new DataView(b), bytes = new Uint8Array(b), dec = new TextDecoder();
   const n = Number(v.getBigUint64(0, true));
@@ -61,7 +61,7 @@ function readImages(b: ArrayBuffer) {
   return out;
 }
 
-test("câmeras novas no fim, com ids depois do maior", () => {
+test("new cameras appended, with ids after the largest", () => {
   const { bin, ids } = appendCameras(camerasBin(), [{ width: 480, height: 960, fx: 800, fy: 800, cx: 240, cy: 480 }]);
   assert.deepEqual(ids, [2]);
   const v = new DataView(bin);
@@ -73,7 +73,7 @@ test("câmeras novas no fim, com ids depois do maior", () => {
   assert.equal(bin.byteLength, 56 + 24 + 32);
 });
 
-test("imagens novas sem pontos 2D; as antigas ficam intactas", () => {
+test("new images have no 2D points; existing ones stay intact", () => {
   const src = imagesBin();
   const out = appendImages(
     src,

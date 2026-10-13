@@ -1,12 +1,12 @@
-// Service worker (cache offline, web/src/sw.template.js) e aviso de versão
-// nova: quando um build novo termina de baixar e fica esperando, a interface
-// mostra "Atualizar" (Host.onUpdate / Host.applyUpdate).
+// Service worker (offline cache, web/src/sw.template.js) and new-version
+// notice: once a new build finishes downloading and is waiting, the UI shows
+// "Update" (Host.onUpdate / Host.applyUpdate).
 
-/** Versão nova instalada e esperando para assumir. */
+/** New version installed and waiting to take over. */
 let waiting: ServiceWorker | null = null;
 const listeners = new Set<() => void>();
 
-// Procura deploys novos de tempos em tempos (sessões de treino são longas).
+// Check for new deploys periodically (training sessions are long).
 const CHECK_EVERY_MS = 60 * 60 * 1000;
 
 function announce(w: ServiceWorker) {
@@ -14,14 +14,14 @@ function announce(w: ServiceWorker) {
   for (const h of listeners) h();
 }
 
-/** Só no build: no dev o sw.js não existe. Registra depois do load para os
- *  ~60 MB do cache não disputarem a abertura do app. */
+/** Build only: sw.js doesn't exist in dev. Registers after load so the ~60 MB
+ *  cache download doesn't compete with the app's startup. */
 export function registerServiceWorker() {
   if (!import.meta.env.PROD || !("serviceWorker" in navigator)) return;
   window.addEventListener("load", async () => {
     try {
       const reg = await navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`);
-      // Sem controller é a primeira instalação: não há versão "antiga" a trocar.
+      // No controller means first install: there is no "old" version to replace.
       const track = (w: ServiceWorker) =>
         w.addEventListener("statechange", () => {
           if (w.state === "installed" && navigator.serviceWorker.controller) announce(w);
@@ -42,8 +42,8 @@ export function onUpdate(handler: () => void): () => void {
   return () => void listeners.delete(handler);
 }
 
-/** Põe a versão nova no ar e recarrega esta aba. Se outra aba já fez isso,
- *  basta recarregar. */
+/** Activates the new version and reloads this tab. If another tab already did
+ *  that, just reload. */
 export function applyUpdate() {
   if (!waiting || waiting.state !== "installed") {
     location.reload();

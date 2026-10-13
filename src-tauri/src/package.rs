@@ -1,12 +1,12 @@
-//! Pacote do projeto (`.gorbit`): um ZIP com o que já foi processado —
-//! frames, recortes, poses, splat, a fonte (vídeo ou imagens) e os ajustes da
-//! sessão —, para levar o projeto a outra máquina ou guardá-lo no meio de um
-//! processamento. Aberto de volta, comporta-se como um projeto em cache: as
-//! etapas prontas aparecem como salvas e o trabalho continua de onde parou.
+//! Project package (`.gorbit`): a ZIP with everything processed so far —
+//! frames, masks, poses, splat, the source (video or images) and the session
+//! settings — to move the project to another machine or save it mid-run.
+//! Opened again, it behaves like a cached project: finished stages show up as
+//! saved and work resumes where it stopped.
 //!
-//! O layout dentro do ZIP é o da pasta do projeto (`Layout`), com os caminhos
-//! do `project.json` relativos à raiz; o mesmo pacote abre no desktop e no web
-//! (web/src/host/package.ts).
+//! The layout inside the ZIP mirrors the project folder (`Layout`), with the
+//! `project.json` paths relative to the root; the same package opens on
+//! desktop and web (web/src/host/package.ts).
 
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Read, Write};
@@ -26,12 +26,12 @@ const VERSION: u32 = 1;
 const MANIFEST: &str = "manifest.json";
 const STATE: &str = "project.json";
 const MODEL_FILES: [&str; 3] = ["cameras.bin", "images.bin", "points3D.bin"];
-/// Pastas e arquivos que um pacote pode trazer; o resto é ignorado (versões
-/// futuras podem acrescentar coisas).
+/// Folders and files a package may contain; anything else is ignored (future
+/// versions may add more).
 const ALLOWED: [&str; 7] = ["dataset/images/", "dataset/sparse/0/", "rejected/", "masks/", "export/", "source/", "splat.ply"];
 
-/// Etapas a levar, além dos frames: só as que a interface sabe que estão
-/// prontas (um job em andamento pode estar reescrevendo as outras).
+/// Stages to include besides the frames: only those the UI knows are finished
+/// (a running job may be rewriting the others).
 #[derive(Debug, Clone, Copy, Default, Deserialize)]
 pub struct Include {
     pub masks: bool,
@@ -52,10 +52,10 @@ pub struct PackRequest {
     pub project_dir: String,
     pub dest: String,
     pub include: Include,
-    /// Vídeo ou imagens de origem, quando ainda estão disponíveis.
+    /// Source video or images, when still available.
     #[serde(default)]
     pub source: Option<Source>,
-    /// Ajustes da interface (qualidade, recorte, trecho): opacos aqui.
+    /// UI settings (quality, masking, trim): opaque here.
     #[serde(default)]
     pub session: Option<serde_json::Value>,
 }
@@ -90,7 +90,7 @@ struct Manifest {
     format: String,
     version: u32,
     app: String,
-    /// Milissegundos desde 1970.
+    /// Milliseconds since 1970.
     created_at: u64,
     #[serde(default)]
     source: Option<PackedSource>,
@@ -101,12 +101,12 @@ struct Manifest {
 fn file_name(path: &Path) -> Result<String> {
     Ok(path
         .file_name()
-        .with_context(|| format!("caminho sem nome de arquivo: {}", path.display()))?
+        .with_context(|| format!("path has no file name: {}", path.display()))?
         .to_string_lossy()
         .into_owned())
 }
 
-/// Arquivos (do primeiro nível) de uma pasta, em ordem de nome.
+/// Top-level files of a folder, sorted by name.
 fn files_in(dir: &Path) -> Vec<(String, PathBuf)> {
     let mut out: Vec<_> = std::fs::read_dir(dir)
         .into_iter()
@@ -120,7 +120,7 @@ fn files_in(dir: &Path) -> Vec<(String, PathBuf)> {
     out
 }
 
-/// Compactar só o que encolhe: imagens e vídeo já vêm comprimidos.
+/// Only compress what shrinks: images and video are already compressed.
 fn method_for(name: &str) -> CompressionMethod {
     match name.rsplit('.').next().map(str::to_ascii_lowercase).as_deref() {
         Some("json" | "bin" | "ply") => CompressionMethod::Deflated,
@@ -128,13 +128,13 @@ fn method_for(name: &str) -> CompressionMethod {
     }
 }
 
-/// Grava o pacote em `dest` (via `.part`, para não deixar um pacote pela
-/// metade com o nome final).
+/// Writes the package to `dest` (through `.part`, so a half-written package
+/// never ends up under the final name).
 pub fn pack(req: &PackRequest, mut progress: impl FnMut(f32)) -> Result<PackStats> {
     let layout = Layout::new(&req.project_dir);
     let mut state = layout.load();
     if state.frames.is_empty() {
-        bail!("o projeto ainda não tem frames para salvar");
+        bail!("the project has no frames to save yet");
     }
     let mut entries: Vec<(String, PathBuf)> = Vec::new();
 
@@ -168,7 +168,7 @@ pub fn pack(req: &PackRequest, mut progress: impl FnMut(f32)) -> Result<PackStat
         state.poses = None;
     }
 
-    // O splat depende das poses com que foi treinado.
+    // The splat depends on the poses it was trained with.
     if poses && req.include.splat && state.final_ply.is_some() && layout.final_ply().is_file() {
         entries.push(("splat.ply".into(), layout.final_ply()));
         state.final_ply = Some("splat.ply".into());
@@ -197,7 +197,7 @@ pub fn pack(req: &PackRequest, mut progress: impl FnMut(f32)) -> Result<PackStat
             let mut seen = std::collections::HashSet::new();
             for (i, p) in paths.iter().map(Path::new).filter(|p| p.is_file()).enumerate() {
                 let mut name = file_name(p)?;
-                // Imagens soltas de pastas diferentes podem ter o mesmo nome.
+                // Loose images from different folders may share a name.
                 if !seen.insert(name.clone()) {
                     name = format!("{i:05}_{name}");
                     seen.insert(name.clone());
@@ -238,7 +238,7 @@ pub fn pack(req: &PackRequest, mut progress: impl FnMut(f32)) -> Result<PackStat
         let _ = std::fs::remove_file(&part);
         return Err(e);
     }
-    std::fs::rename(&part, &dest).with_context(|| format!("não foi possível gravar {}", dest.display()))?;
+    std::fs::rename(&part, &dest).with_context(|| format!("could not write {}", dest.display()))?;
     Ok(PackStats {
         bytes: std::fs::metadata(&dest)?.len(),
         path: dest.to_string_lossy().into_owned(),
@@ -255,10 +255,10 @@ fn write_zip(
 ) -> Result<()> {
     let mut sizes = Vec::with_capacity(entries.len());
     for (_, p) in entries {
-        sizes.push(std::fs::metadata(p).with_context(|| format!("arquivo do projeto sumiu: {}", p.display()))?.len());
+        sizes.push(std::fs::metadata(p).with_context(|| format!("project file is missing: {}", p.display()))?.len());
     }
     let total = sizes.iter().sum::<u64>().max(1);
-    let mut zip = ZipWriter::new(BufWriter::new(File::create(out).with_context(|| format!("não foi possível criar {}", out.display()))?));
+    let mut zip = ZipWriter::new(BufWriter::new(File::create(out).with_context(|| format!("could not create {}", out.display()))?));
     let opts = |name: &str, size: u64| {
         SimpleFileOptions::default().compression_method(method_for(name)).large_file(size >= u32::MAX as u64)
     };
@@ -272,7 +272,7 @@ fn write_zip(
     progress(0.0);
     for ((name, path), size) in entries.iter().zip(sizes) {
         zip.start_file(name.as_str(), opts(name, size))?;
-        let mut f = File::open(path).with_context(|| format!("não foi possível ler {}", path.display()))?;
+        let mut f = File::open(path).with_context(|| format!("could not read {}", path.display()))?;
         loop {
             let n = f.read(&mut buf)?;
             if n == 0 {
@@ -288,20 +288,20 @@ fn write_zip(
     Ok(())
 }
 
-/// Caminho relativo de dentro do pacote → componentes seguros (sem `..`,
-/// raiz ou drive).
+/// Relative path inside the package → safe components (no `..`, root or
+/// drive).
 fn safe_rel(rel: &str) -> Result<PathBuf> {
     let mut out = PathBuf::new();
     for part in rel.split('/') {
         if part.is_empty() || part == "." || part == ".." || part.contains(['\\', ':']) {
-            bail!("caminho inválido no pacote: {rel}");
+            bail!("invalid path in package: {rel}");
         }
         out.push(part);
     }
     Ok(out)
 }
 
-/// `<pasta>/<nome>`, ou `<nome> (2)`, `(3)`… se já existir.
+/// `<folder>/<name>`, or `<name> (2)`, `(3)`… if it already exists.
 fn free_dir(parent: &Path, name: &str) -> PathBuf {
     let first = parent.join(name);
     if !first.exists() {
@@ -317,24 +317,24 @@ fn read_json<T: serde::de::DeserializeOwned>(zip: &mut ZipArchive<BufReader<File
     Ok(serde_json::from_slice(&buf)?)
 }
 
-/// Extrai o pacote numa pasta nova ao lado dele (com o nome do arquivo) e
-/// devolve o projeto pronto para abrir.
+/// Extracts the package into a new folder next to it (named after the file)
+/// and returns the project ready to open.
 pub fn unpack(package: &Path, mut progress: impl FnMut(f32)) -> Result<Unpacked> {
-    let file = File::open(package).with_context(|| format!("não foi possível abrir {}", package.display()))?;
-    let mut zip = ZipArchive::new(BufReader::new(file)).context("o arquivo não é um pacote do Gausify Orbit")?;
-    let manifest: Manifest = read_json(&mut zip, MANIFEST).context("o arquivo não é um pacote do Gausify Orbit")?;
+    let file = File::open(package).with_context(|| format!("could not open {}", package.display()))?;
+    let mut zip = ZipArchive::new(BufReader::new(file)).context("the file is not a Gausify Orbit package")?;
+    let manifest: Manifest = read_json(&mut zip, MANIFEST).context("the file is not a Gausify Orbit package")?;
     if manifest.format != FORMAT {
-        bail!("o arquivo não é um pacote do Gausify Orbit");
+        bail!("the file is not a Gausify Orbit package");
     }
     if manifest.version > VERSION {
-        bail!("o pacote foi salvo por uma versão mais nova do Gausify Orbit ({}); atualize o app", manifest.app);
+        bail!("the package was saved by a newer version of Gausify Orbit ({}); update the app", manifest.app);
     }
-    let state: ProjectState = read_json(&mut zip, STATE).context("pacote sem project.json válido")?;
+    let state: ProjectState = read_json(&mut zip, STATE).context("package has no valid project.json")?;
 
     let parent = package.parent().unwrap_or(Path::new("."));
-    let stem = package.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "projeto".into());
+    let stem = package.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "project".into());
     let root = free_dir(parent, &stem);
-    std::fs::create_dir_all(&root).with_context(|| format!("não foi possível criar {}", root.display()))?;
+    std::fs::create_dir_all(&root).with_context(|| format!("could not create {}", root.display()))?;
     match extract(&mut zip, &root, &manifest, state, &mut progress) {
         Ok(r) => Ok(r),
         Err(e) => {
@@ -371,9 +371,9 @@ fn extract(
         if let Some(dir) = out.parent() {
             std::fs::create_dir_all(dir)?;
         }
-        let mut w = BufWriter::new(File::create(&out).with_context(|| format!("não foi possível criar {}", out.display()))?);
+        let mut w = BufWriter::new(File::create(&out).with_context(|| format!("could not create {}", out.display()))?);
         loop {
-            let n = f.read(&mut buf).with_context(|| format!("pacote corrompido em {}", f.name()))?;
+            let n = f.read(&mut buf).with_context(|| format!("package corrupted at {}", f.name()))?;
             if n == 0 {
                 break;
             }
@@ -384,7 +384,7 @@ fn extract(
         w.flush()?;
     }
 
-    // Caminhos relativos do pacote → absolutos nesta máquina.
+    // Package-relative paths → absolute paths on this machine.
     let abs = |rel: &str| -> Result<String> { Ok(root.join(safe_rel(rel)?).to_string_lossy().into_owned()) };
     let layout = Layout::new(root);
     for f in &mut state.frames {
@@ -458,7 +458,7 @@ mod tests {
             std::fs::write(layout.model().join(f), vec![7u8; 5000]).unwrap();
         }
         std::fs::write(layout.final_ply(), b"ply").unwrap();
-        let video = tmp.join("orbita.mp4");
+        let video = tmp.join("orbit.mp4");
         std::fs::write(&video, b"mp4").unwrap();
         let stats = ModelStats { registered: 2, total: 2, points: 10, reprojection_error: None, mapper: "t".into(), inferred: 0, refined: 0 };
         let masks = MaskStats { count: 3, no_subject: 0, mean_coverage: 0.5, backend: "t".into(), key_color: None };
@@ -483,13 +483,13 @@ mod tests {
             session: Some(serde_json::json!({ "trim": { "start": 1 } })),
         };
 
-        // Tudo pronto.
+        // Everything finished.
         let all = Include { masks: true, poses: true, splat: true };
-        let packed = pack(&req(all, "tudo"), |_| {}).unwrap();
-        assert!(packed.path.ends_with("tudo.gorbit"));
+        let packed = pack(&req(all, "all"), |_| {}).unwrap();
+        assert!(packed.path.ends_with("all.gorbit"));
         let u = unpack(Path::new(&packed.path), |_| {}).unwrap();
-        assert_eq!(u.project_dir, tmp.join("tudo").to_string_lossy());
-        assert_eq!(u.video.as_deref(), Some(tmp.join("tudo/source/orbita.mp4").to_string_lossy().as_ref()));
+        assert_eq!(u.project_dir, tmp.join("all").to_string_lossy());
+        assert_eq!(u.video.as_deref(), Some(tmp.join("all/source/orbit.mp4").to_string_lossy().as_ref()));
         assert_eq!(u.session.unwrap()["trim"]["start"], 1);
         let s = Layout::new(&u.project_dir).load();
         assert_eq!(s.frames.len(), 3);
@@ -499,16 +499,16 @@ mod tests {
         assert_eq!(std::fs::read(s.final_ply.unwrap()).unwrap(), b"ply");
         assert_eq!(std::fs::read(Layout::new(&u.project_dir).model().join("points3D.bin")).unwrap(), vec![7u8; 5000]);
 
-        // No meio do treino: o splat antigo não vai; abrir de novo não sobrescreve.
-        let packed = pack(&req(Include { masks: true, poses: true, splat: false }, "tudo.gorbit"), |_| {}).unwrap();
+        // Mid-training: the old splat is left out; opening again doesn't overwrite.
+        let packed = pack(&req(Include { masks: true, poses: true, splat: false }, "all.gorbit"), |_| {}).unwrap();
         let u = unpack(Path::new(&packed.path), |_| {}).unwrap();
-        assert!(u.project_dir.ends_with("tudo (2)"));
+        assert!(u.project_dir.ends_with("all (2)"));
         let s = Layout::new(&u.project_dir).load();
         assert!(s.poses.is_some() && s.final_ply.is_none() && s.last_psnr.is_none());
         assert!(!Path::new(&u.project_dir).join("splat.ply").exists());
 
-        // Recalculando as poses: elas e o splat ficam de fora.
-        let packed = pack(&req(Include { masks: true, poses: false, splat: true }, "sem_poses"), |_| {}).unwrap();
+        // Recomputing poses: they and the splat are left out.
+        let packed = pack(&req(Include { masks: true, poses: false, splat: true }, "no_poses"), |_| {}).unwrap();
         let s = Layout::new(&unpack(Path::new(&packed.path), |_| {}).unwrap().project_dir).load();
         assert!(s.masks.is_some() && s.poses.is_none() && s.final_ply.is_none());
         let _ = std::fs::remove_dir_all(&tmp);

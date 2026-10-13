@@ -1,5 +1,5 @@
-// Encoder PNG mínimo (cinza 8 bits ou RGBA com alfa direto). O canvas guarda
-// alfa pré-multiplicado e perderia a cor nas bordas semitransparentes.
+// Minimal PNG encoder (8-bit grayscale or RGBA with straight alpha). Canvas stores
+// premultiplied alpha and would lose color on semi-transparent edges.
 
 const CRC = new Uint32Array(256).map((_, n) => {
   let c = n;
@@ -23,12 +23,12 @@ function chunk(type: string, data: Uint8Array): Uint8Array {
 }
 
 async function zlib(data: Uint8Array): Promise<Uint8Array> {
-  // "deflate" no CompressionStream é o formato zlib, o que o IDAT espera
+  // "deflate" in CompressionStream is the zlib format, which is what IDAT expects
   const stream = new Blob([data as BlobPart]).stream().pipeThrough(new CompressionStream("deflate"));
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
-/** `channels`: 1 (cinza) ou 4 (RGBA). Filtro "Sub" em todas as linhas. */
+/** `channels`: 1 (grayscale) or 4 (RGBA). "Sub" filter on every row. */
 export async function encodePng(pixels: Uint8Array | Uint8ClampedArray, width: number, height: number, channels: 1 | 4) {
   const stride = width * channels;
   const raw = new Uint8Array((stride + 1) * height);

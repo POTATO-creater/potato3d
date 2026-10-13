@@ -15,7 +15,7 @@ function loadOptions(): ExportOptions {
     const raw = localStorage.getItem(STORE_KEY);
     if (raw) return { ...DEFAULTS, ...JSON.parse(raw) };
   } catch {
-    /* armazenamento indisponível */
+    /* storage unavailable */
   }
   return DEFAULTS;
 }
@@ -26,10 +26,10 @@ interface Props {
   finalPly: string;
   lastExport: ExportStats | null;
   onExported: (stats: ExportStats) => void;
-  /** O visualizador está mostrando a exportação (e não o splat do treino). */
+  /** The viewer is showing the export (not the trained splat). */
   previewing: boolean;
   onPreview: (on: boolean) => void;
-  /** Enquadramento do vídeo, levado junto no link de compartilhamento. */
+  /** Video framing, passed along with the share link. */
   frame: SceneFrame | null;
 }
 
@@ -42,7 +42,7 @@ export function ExportPanel(p: Props) {
   const [error, setError] = useState<string | null>(null);
   const set = (patch: Partial<ExportOptions>) => setOpts((o) => ({ ...o, ...patch }));
   const last = p.lastExport;
-  // Já aberto se esta exportação tem um link válido criado neste aparelho.
+  // Open by default if this export has a valid link created on this device.
   const lastKey = last ? shareKey(last.path, last.outputBytes) : null;
   const [sharing, setSharing] = useState(false);
   useEffect(() => setSharing(!!lastKey && !!savedShare(lastKey)), [lastKey]);
@@ -51,7 +51,7 @@ export function ExportPanel(p: Props) {
     try {
       localStorage.setItem(STORE_KEY, JSON.stringify(opts));
     } catch {
-      /* ignora */
+      /* ignore */
     }
   }, [opts]);
 
@@ -60,7 +60,7 @@ export function ExportPanel(p: Props) {
     api.splatInfo(p.finalPly).then(setInfo, () => setInfo(null));
   }, [p.finalPly]);
 
-  // Grau escolhido acima do treinado vira "manter".
+  // A degree above the trained one becomes "keep".
   const trained = info?.shDegree ?? 3;
   const shDegree = opts.shDegree != null && opts.shDegree < trained ? opts.shDegree : null;
   const estimate = info ? Math.round(info.count * (1 - opts.decimate)) : null;

@@ -1,4 +1,4 @@
-// ZIP sem compressão (STORE), como o SOG pede: o WebP já vem comprimido.
+// Uncompressed ZIP (STORE), as SOG requires: WebP is already compressed.
 
 const CRC = new Uint32Array(256).map((_, n) => {
   let c = n;
@@ -19,7 +19,7 @@ export function zipStore(files: [name: string, data: Uint8Array][]): Uint8Array 
   const out = new Uint8Array(size);
   const v = new DataView(out.buffer);
   let o = 0;
-  // cabeçalho comum ao local e ao central: versão 2.0, sem flags, STORE, sem data
+  // header shared by local and central entries: version 2.0, no flags, STORE, no date
   const common = (at: number, e: (typeof entries)[number]) => {
     v.setUint16(at, 20, true);
     v.setUint16(at + 2, 0, true);
@@ -42,9 +42,9 @@ export function zipStore(files: [name: string, data: Uint8Array][]): Uint8Array 
   const central = o;
   for (const e of entries) {
     v.setUint32(o, 0x02014b50, true);
-    v.setUint16(o + 4, 20, true); // feito por
+    v.setUint16(o + 4, 20, true); // version made by
     common(o + 6, e);
-    // comentário, disco, atributos internos/externos ficam zerados
+    // comment, disk, internal/external attributes stay zeroed
     v.setUint32(o + 42, e.offset, true);
     out.set(e.name, o + 46);
     o += 46 + e.name.length;

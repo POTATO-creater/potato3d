@@ -1,23 +1,23 @@
-// Vídeo → frames no navegador, com a mesma lógica de src-tauri/src/frames.rs:
-// candidatos uniformes no trecho (targetFrames × oversample, no máximo o fps
-// do vídeo), escala que cabe em maxSide × maxSide sem ampliar, e o candidato
-// mais nítido (variância do Laplaciano) de cada janela vira 00000.jpg, …
-// O próprio navegador decodifica (um seek por candidato). Imagens soltas
-// passam pela mesma escolha (framesFromImages).
+// Video → frames in the browser, with the same logic as src-tauri/src/frames.rs:
+// uniform candidates over the range (targetFrames × oversample, capped at the
+// video fps), scaled to fit maxSide × maxSide without upscaling, and the
+// sharpest candidate (variance of the Laplacian) of each window becomes
+// 00000.jpg, … The browser itself decodes (one seek per candidate). Loose
+// images go through the same selection (framesFromImages).
 
 import type { FrameOptions, VideoInfo } from "../../../src/lib/api";
 
-/** Frame escolhido: nome em images/ e de onde saiu no vídeo. */
+/** Chosen frame: name in images/ and where it came from in the video. */
 export interface PickedFrame {
   name: string;
   time: number;
   sharpness: number;
-  /** Imagem de origem, quando não veio de um vídeo. */
+  /** Source image, when it didn't come from a video. */
   source?: string;
 }
 
-/** Janela de cada candidato quando `total` viram `target` frames:
- *  lo(w) = ⌊w·total/target⌋, como no frames.rs. */
+/** Window of each candidate when `total` become `target` frames:
+ *  lo(w) = ⌊w·total/target⌋, as in frames.rs. */
 function windowsOf(total: number, target: number) {
   const windowOf = new Int32Array(total);
   for (let w = 0; w < target; w++) {
@@ -44,7 +44,7 @@ function loadVideo(file: File): Promise<HTMLVideoElement> {
   video.src = URL.createObjectURL(file);
   return new Promise((resolve, reject) => {
     video.onloadeddata = () => resolve(video);
-    video.onerror = () => reject(new Error("O navegador não conseguiu abrir este vídeo (codec não suportado?)."));
+    video.onerror = () => reject(new Error("The browser could not open this video (unsupported codec?)."));
   });
 }
 
@@ -54,11 +54,11 @@ function release(video: HTMLVideoElement) {
   video.load();
 }
 
-/** fps do contêiner MP4/MOV (como o ffprobe): amostras ÷ duração na trilha
- *  de vídeo (mdhd + stts). null se não for MP4 ou faltar alguma caixa. */
+/** MP4/MOV container fps (like ffprobe): samples ÷ duration of the video
+ *  track (mdhd + stts). null if it isn't MP4 or a box is missing. */
 export async function containerFps(file: Blob): Promise<number | null> {
   const read = async (at: number, n: number) => new DataView(await file.slice(at, at + n).arrayBuffer());
-  // caixas de primeiro nível até achar o moov (pode estar no fim do arquivo)
+  // top-level boxes until moov is found (it may be at the end of the file)
   let moov: DataView | null = null;
   for (let at = 0; at + 8 <= file.size; ) {
     const h = await read(at, 16);
@@ -79,7 +79,7 @@ export async function containerFps(file: Blob): Promise<number | null> {
   if (!moov) return null;
   const v = moov;
   const type = (o: number) => String.fromCharCode(v.getUint8(o + 4), v.getUint8(o + 5), v.getUint8(o + 6), v.getUint8(o + 7));
-  /** Filhos de [start, end) como [tipo, início do conteúdo, fim]. */
+  /** Children of [start, end) as [type, content start, end]. */
   const children = (start: number, end: number) => {
     const out: [string, number, number][] = [];
     for (let o = start; o + 8 <= end; ) {
@@ -115,9 +115,9 @@ export async function containerFps(file: Blob): Promise<number | null> {
   return null;
 }
 
-/** fps pelo intervalo entre quadros apresentados (requestVideoFrameCallback),
- *  para contêineres sem `containerFps`. O menor intervalo resiste a quadros
- *  pulados (aba em segundo plano), que só aumentam os outros. */
+/** fps from the interval between presented frames (requestVideoFrameCallback),
+ *  for containers without `containerFps`. The smallest interval is robust to
+ *  dropped frames (background tab), which only lengthen the others. */
 async function measureFps(video: HTMLVideoElement): Promise<number> {
   if (!("requestVideoFrameCallback" in video)) return 30;
   const times: number[] = [];
@@ -138,8 +138,8 @@ async function measureFps(video: HTMLVideoElement): Promise<number> {
     .map((t, i) => t - times[i])
     .filter((x) => x > 1e-4);
   if (!d.length) return 30;
-  // Cada intervalo cobre round(d/mín) quadros; a média no trecho todo tira o
-  // arredondamento dos timestamps (WebM: ms inteiros, 41/42 ms a 24 fps).
+  // Each interval covers round(d/min) frames; averaging over the whole span
+  // removes timestamp rounding (WebM: whole ms, 41/42 ms at 24 fps).
   const min = Math.min(...d);
   const frames = d.reduce((s, x) => s + Math.max(1, Math.round(x / min)), 0);
   return Math.round((frames / d.reduce((s, x) => s + x, 0)) * 1000) / 1000;
@@ -149,7 +149,7 @@ export async function probeVideo(file: File): Promise<VideoInfo> {
   const video = await loadVideo(file);
   try {
     const fps = (await containerFps(file).catch(() => null)) ?? (await measureFps(video));
-    // O navegador não expõe o codec; o tipo do arquivo é o que há.
+    // The browser doesn't expose the codec; the file type is all we have.
     const codec = file.type.replace(/^video\//, "") || (file.name.split(".").pop() ?? "").toLowerCase();
     return { width: video.videoWidth, height: video.videoHeight, duration: video.duration, fps, codec };
   } finally {
@@ -164,8 +164,8 @@ function seek(video: HTMLVideoElement, t: number): Promise<void> {
   });
 }
 
-/** Variância do Laplaciano (4 vizinhos) na miniatura que cabe em 640×640,
- *  luma Rec.709 arredondada para 8 bits — igual ao frames.rs. */
+/** Variance of the Laplacian (4-neighbor) on the thumbnail that fits 640×640,
+ *  Rec.709 luma rounded to 8 bits — same as frames.rs. */
 export function sharpness(rgba: Uint8ClampedArray, w: number, h: number) {
   if (w < 3 || h < 3) return 0;
   const l = new Float32Array(w * h);
@@ -194,7 +194,7 @@ export async function extractFrames(
   const start = Math.max(0, opts.trimStart);
   const end = Math.min(opts.trimEnd != null && opts.trimEnd > start ? opts.trimEnd : info.duration, info.duration);
   const span = end - start;
-  if (span <= 0.1) throw new Error("O trecho selecionado do vídeo é vazio.");
+  if (span <= 0.1) throw new Error("The selected video range is empty.");
   const wanted = opts.targetFrames * Math.max(1, opts.oversample);
   const sampleFps = Math.max(0.1, Math.min(wanted / span, info.fps));
   const total = Math.max(1, Math.round(span * sampleFps));
@@ -228,18 +228,18 @@ export async function extractFrames(
   try {
     for (let k = 0; k < total; k++) {
       if (k > 0 && windowOf[k] !== windowOf[k - 1]) await flush();
-      // meio quadro da fonte adiante: o instante exato cai na fronteira entre
-      // dois quadros e o seek às vezes pega o anterior; assim vem o mais
-      // próximo, como no filtro fps do ffmpeg
+      // half a source frame ahead: the exact instant falls on the boundary
+      // between two frames and the seek sometimes lands on the previous one;
+      // this gets the nearest, like ffmpeg's fps filter
       await seek(video, Math.min(start + k / sampleFps + 0.5 / info.fps, end - 1e-3));
       tctx.drawImage(video, 0, 0, tw, th);
       const score = sharpness(tctx.getImageData(0, 0, tw, th).data, tw, th);
-      // empate: fica o último, como o max_by do Rust
+      // tie: the last one wins, like Rust's max_by
       if (!best || score >= best.score) {
         fctx.drawImage(video, 0, 0, W, H);
         best = { score, blob: await full.convertToBlob({ type: "image/jpeg", quality: 0.95 }), k };
       }
-      progress((k + 1) / total, `Frames: candidato ${k + 1}/${total}`);
+      progress((k + 1) / total, `Frames: candidate ${k + 1}/${total}`);
     }
     await flush();
   } finally {
@@ -248,8 +248,8 @@ export async function extractFrames(
   return frames;
 }
 
-/** Frames a partir de imagens, na ordem dada: a mais nítida de cada janela,
- *  girada pelo EXIF (createImageBitmap) e reduzida para caber em maxSide. */
+/** Frames from images, in the given order: the sharpest of each window,
+ *  rotated per EXIF (createImageBitmap) and downscaled to fit maxSide. */
 export async function framesFromImages(
   files: File[],
   opts: FrameOptions,
@@ -257,7 +257,7 @@ export async function framesFromImages(
   progress: (frac: number) => void,
 ): Promise<PickedFrame[]> {
   const total = files.length;
-  if (!total) throw new Error("Nenhuma imagem para usar como frame.");
+  if (!total) throw new Error("No images to use as frames.");
   const target = Math.min(Math.max(1, opts.targetFrames), total);
   const windowOf = windowsOf(total, target);
   const thumb = new OffscreenCanvas(1, 1);
@@ -274,12 +274,12 @@ export async function framesFromImages(
     best = null;
     const s = Math.min(1, opts.maxSide / Math.max(bmp.width, bmp.height));
     const W = Math.max(1, Math.round(bmp.width * s)), H = Math.max(1, Math.round(bmp.height * s));
-    // O SfM e o Brush usam uma câmera só para todos os frames.
+    // SfM and Brush use a single camera for all frames.
     size ??= { w: W, h: H, from: files[k].name };
     if (W !== size.w || H !== size.h) {
       bmp.close();
       throw new Error(
-        `As imagens têm tamanhos diferentes (${size.from}: ${size.w}×${size.h}, ${files[k].name}: ${W}×${H}); use imagens de uma mesma câmera.`,
+        `The images have different sizes (${size.from}: ${size.w}×${size.h}, ${files[k].name}: ${W}×${H}); use images from a single camera.`,
       );
     }
     full.width = W;
@@ -296,9 +296,9 @@ export async function framesFromImages(
     for (let k = 0; k < total; k++) {
       if (k > 0 && windowOf[k] !== windowOf[k - 1]) await flush();
       const bmp = await createImageBitmap(files[k]).catch(() => {
-        throw new Error(`O navegador não conseguiu abrir ${files[k].name}.`);
+        throw new Error(`The browser could not open ${files[k].name}.`);
       });
-      // Miniatura que cabe em 640×640, como na extração do vídeo.
+      // Thumbnail that fits 640×640, as in video extraction.
       const ts = Math.min(1, 640 / Math.max(bmp.width, bmp.height));
       const tw = Math.max(1, Math.round(bmp.width * ts)), th = Math.max(1, Math.round(bmp.height * ts));
       if (thumb.width !== tw || thumb.height !== th) {
@@ -309,7 +309,7 @@ export async function framesFromImages(
       tctx.imageSmoothingQuality = "high";
       tctx.drawImage(bmp, 0, 0, tw, th);
       const score = sharpness(tctx.getImageData(0, 0, tw, th).data, tw, th);
-      // empate: fica o último, como o max_by do Rust
+      // tie: the last one wins, like Rust's max_by
       if (!best || score >= best.score) {
         best?.bmp.close();
         best = { score, bmp, k };

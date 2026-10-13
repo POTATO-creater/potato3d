@@ -1,12 +1,12 @@
-// Trajetórias de retoque, em convenção COLMAP (pose = mundo → câmera, câmera
-// olhando para +Z com +Y para baixo). Saem de uma foto real, passam por
-// ângulos que a órbita não viu e voltam para uma foto real: as pontas
-// (âncoras) têm exatamente a pose de uma foto, o que dá ao modelo de vídeo
-// uma referência real e permite medir a restauração. Porte do
-// build_trajectory de scripts/restore-test/restore_test.py.
+// Retouch trajectories, in COLMAP convention (pose = world → camera, camera
+// looking down +Z with +Y pointing down). They leave from a real photo, pass
+// through angles the orbit never saw and return to a real photo: the ends
+// (anchors) have exactly a photo's pose, which gives the video model a real
+// reference and lets us measure the restoration. Port of build_trajectory from
+// scripts/restore-test/restore_test.py.
 
 export type Vec3 = [number, number, number];
-/** (w, x, y, z), a ordem do COLMAP. */
+/** (w, x, y, z), COLMAP order. */
 export type Quat = [number, number, number, number];
 type Mat3 = [Vec3, Vec3, Vec3];
 
@@ -26,7 +26,7 @@ export interface Lens {
 export interface PathPose {
   qvec: Quat;
   tvec: Vec3;
-  /** Nome da foto quando a pose é exatamente a dela. */
+  /** Photo name when the pose is exactly that photo's. */
   anchor: string | null;
 }
 
@@ -37,31 +37,30 @@ export interface ClipPlan {
 }
 
 export interface ClipOptions {
-  /** Frames do clipe; o LTX quer 8n + 1. */
+  /** Clip frame count; LTX wants 8n + 1. */
   frames: number;
-  /** Lado maior do vídeo, arredondado (com o menor) para múltiplos de 32. */
+  /** Video long side, rounded (along with the short side) to multiples of 32. */
   longSide: number;
-  /** Fração do clipe parada em cada ponta (âncoras). */
+  /** Fraction of the clip held still at each end (anchors). */
   hold: number;
-  /** Fração do clipe em cada transição. */
+  /** Fraction of the clip spent in each transition. */
   ramp: number;
-  /** Proporção largura/altura; sem ela, a da lente. */
+  /** Width/height aspect ratio; defaults to the lens's. */
   aspect?: number;
 }
 
-/** Sem pontas paradas: a transição usa 40% do clipe de cada lado, o que deixa
- *  a câmera bem mais lenta que com pontas paradas (o LTX borra o que passa
- *  rápido). */
+/** No held ends: each transition uses 40% of the clip, which makes the camera
+ *  much slower than with held ends (LTX blurs anything that moves fast). */
 export const DEFAULT_CLIP: ClipOptions = { frames: 97, longSide: 960, hold: 0, ramp: 0.4 };
 
-/** Frames de um clipe de `seconds` a `fps`, no 8n + 1 mais próximo (o LTX
- *  trabalha em blocos de 8 frames mais o primeiro). Mínimo de 17. */
+/** Frame count for a clip of `seconds` at `fps`, at the nearest 8n + 1 (LTX
+ *  works in blocks of 8 frames plus the first). Minimum 17. */
 export function clipFrames(seconds: number, fps: number): number {
   const n = Math.round((seconds * fps - 1) / 8);
   return Math.max(2, n) * 8 + 1;
 }
 
-// ---------------------------------------------------------------- álgebra --
+// ---------------------------------------------------------------- algebra --
 
 const dot = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const add = (a: Vec3, b: Vec3): Vec3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
@@ -129,7 +128,7 @@ export function slerp(a: Quat, b: Quat, u: number): Quat {
   return a.map((v, i) => (Math.sin((1 - u) * th) * v + Math.sin(u * th) * b[i]) / s) as Quat;
 }
 
-/** Rotação de `ang` radianos em torno de `axis` (Rodrigues). */
+/** Rotation of `ang` radians about `axis` (Rodrigues). */
 function axisAngle(axis: Vec3, ang: number): Mat3 {
   const [x, y, z] = unit(axis);
   const c = Math.cos(ang), s = Math.sin(ang), t = 1 - c;
@@ -140,7 +139,7 @@ function axisAngle(axis: Vec3, ang: number): Mat3 {
   ];
 }
 
-/** Pose câmera → mundo: rotação e centro. */
+/** Camera → world pose: rotation and center. */
 const toWorld = (p: { qvec: Quat; tvec: Vec3 }) => {
   const r = quatToMat(p.qvec);
   const rt = transpose(r);
@@ -151,8 +150,8 @@ const fromWorld = (rot: Mat3, center: Vec3): { qvec: Quat; tvec: Vec3 } => {
   return { qvec: matToQuat(r), tvec: scale(mulMV(r, center), -1) };
 };
 
-/** Centro e "up" da órbita. Centro: o ponto mais perto de todos os eixos
- *  ópticos (para onde as câmeras olham); up: média do -Y das câmeras. */
+/** Orbit center and "up". Center: the point closest to all optical axes
+ *  (where the cameras look); up: mean of the cameras' -Y. */
 export function orbitFrame(cams: CameraPose[]): { center: Vec3; up: Vec3 } {
   const a = [0, 0, 0, 0, 0, 0, 0, 0, 0];
   const b: Vec3 = [0, 0, 0];
@@ -183,9 +182,9 @@ function solve3(m: number[], b: Vec3): Vec3 {
   return [0, 1, 2].map((r) => (inv[r * 3] * b[0] + inv[r * 3 + 1] * b[1] + inv[r * 3 + 2] * b[2]) / det) as Vec3;
 }
 
-// ------------------------------------------------------------ trajetórias --
+// ----------------------------------------------------------- trajectories --
 
-/** 0 nas pontas (âncoras), 1 no meio, com rampas em cosseno. */
+/** 0 at the ends (anchors), 1 in the middle, with cosine ramps. */
 export function profile(u: number, hold: number, ramp: number): number {
   const d = Math.min(u, 1 - u);
   if (d <= hold) return 0;
@@ -193,10 +192,10 @@ export function profile(u: number, hold: number, ramp: number): number {
   return 0.5 - 0.5 * Math.cos((Math.PI * (d - hold)) / ramp);
 }
 
-/** Tamanho do clipe (múltiplos de 32, lado maior ~longSide) e intrínsecos
- *  com o ponto principal no centro, como o render do viewer. Sem `aspect`
- *  (largura/altura), a proporção é a da lente; com ela, o campo de visão
- *  vertical da lente se mantém e a proporção só muda a largura do quadro. */
+/** Clip size (multiples of 32, long side ~longSide) and intrinsics with the
+ *  principal point at the center, like the viewer's render. Without `aspect`
+ *  (width/height) the lens's aspect is used; with it, the lens's vertical
+ *  field of view is kept and the aspect only changes the frame width. */
 export function clipLens(lens: Lens, longSide: number, aspect?: number): Pick<ClipPlan, "size" | "intrinsics"> {
   if (aspect && aspect > 0) {
     const r32 = (v: number) => Math.max(32, Math.round(v / 32) * 32);
@@ -208,12 +207,12 @@ export function clipLens(lens: Lens, longSide: number, aspect?: number): Pick<Cl
   const s = longSide / Math.max(lens.width, lens.height);
   const w = Math.max(32, Math.round((lens.width * s) / 32) * 32);
   const h = Math.max(32, Math.round((lens.height * s) / 32) * 32);
-  // A escala que cobre os dois lados; a sobra é cortada igualmente nas bordas.
+  // Scale that covers both sides; the excess is cropped equally at the edges.
   const k = Math.max(w / lens.width, h / lens.height);
   return { size: [w, h], intrinsics: { fx: lens.fx * k, fy: lens.fy * k, cx: w / 2, cy: h / 2 } };
 }
 
-/** Pose interpolada ao longo das fotos (índice fracionário, órbita fechada). */
+/** Pose interpolated along the photos (fractional index, closed orbit). */
 function alongOrbit(cams: CameraPose[], s: number) {
   const m = cams.length;
   const i0 = Math.floor(s);
@@ -226,10 +225,10 @@ function alongOrbit(cams: CameraPose[], s: number) {
   return { rot: transpose(rot), center, anchor };
 }
 
-/** Percorre `span` fotos a partir do índice `start` com velocidade angular
- *  constante em volta do centro. As fotos quase nunca são igualmente
- *  espaçadas (e numa órbita fechada a última costuma repetir a primeira):
- *  andar "uma foto por frame" faz a câmera acelerar, frear e até parar. */
+/** Walks `span` photos from index `start` at constant angular speed around
+ *  the center. Photos are almost never evenly spaced (and in a closed orbit
+ *  the last one usually repeats the first): stepping "one photo per frame"
+ *  makes the camera speed up, slow down and even stop. */
 function orbitWalk(cams: CameraPose[], orbitC: Vec3, up: Vec3, start: number, span: number) {
   const m = cams.length;
   const ref: Vec3 = Math.abs(up[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0];
@@ -237,7 +236,7 @@ function orbitWalk(cams: CameraPose[], orbitC: Vec3, up: Vec3, start: number, sp
   const e2 = cross(up, e1);
   const k0 = Math.floor(start);
   const k1 = Math.ceil(start + span);
-  // Azimute desembrulhado em cada foto do trecho.
+  // Unwrapped azimuth at each photo in the segment.
   const az: number[] = [];
   for (let k = k0; k <= k1; k++) {
     const r = sub(toWorld(cams[((k % m) + m) % m]).center, orbitC);
@@ -245,7 +244,7 @@ function orbitWalk(cams: CameraPose[], orbitC: Vec3, up: Vec3, start: number, sp
     if (az.length) a -= 2 * Math.PI * Math.round((a - az[az.length - 1]) / (2 * Math.PI));
     az.push(a);
   }
-  // Monótono no sentido da volta (ruído das poses não pode fazer voltar).
+  // Monotonic in the direction of travel (pose noise must not make it go back).
   const dir = Math.sign(az[az.length - 1] - az[0]) || 1;
   for (let i = 1; i < az.length; i++) az[i] = dir > 0 ? Math.max(az[i], az[i - 1]) : Math.min(az[i], az[i - 1]);
   const at = (s: number) => {
@@ -264,8 +263,8 @@ function orbitWalk(cams: CameraPose[], orbitC: Vec3, up: Vec3, start: number, sp
   };
 }
 
-/** Leva a câmera para `radius` do centro da órbita, ao longo da reta que a
- *  liga ao centro (mesma direção de visão). Sem `radius`, fica onde está. */
+/** Moves the camera to `radius` from the orbit center, along the line joining
+ *  it to the center (same view direction). Without `radius`, it stays put. */
 function atRadius<T extends { center: Vec3; anchor: string | null }>(p: T, orbitC: Vec3, radius: number | undefined): T {
   if (!radius) return p;
   const r = sub(p.center, orbitC);
@@ -274,13 +273,13 @@ function atRadius<T extends { center: Vec3; anchor: string | null }>(p: T, orbit
   return { ...p, center: add(orbitC, scale(r, radius / d)), anchor: null };
 }
 
-/** Distância de uma pose ao centro da órbita das fotos. */
+/** Distance from a pose to the photos' orbit center. */
 export function orbitDistance(cams: CameraPose[], pose: { qvec: Quat; tvec: Vec3 }): number {
   return norm(sub(toWorld(pose).center, orbitFrame(cams).center));
 }
 
-/** Pico da velocidade angular da câmera, em graus por segundo (média em
- *  janelas de `window` frames, para não pegar ruído de um frame só). */
+/** Peak camera angular speed in degrees per second (averaged over windows of
+ *  `window` frames, to ignore single-frame noise). */
 export function peakSpeed(poses: { qvec: Quat }[], fps: number, window = 3): number {
   let peak = 0;
   for (let i = window; i < poses.length; i++) {
@@ -292,7 +291,7 @@ export function peakSpeed(poses: { qvec: Quat }[], fps: number, window = 3): num
   return peak;
 }
 
-/** Câmera real mais próxima, em ângulo em torno do centro da órbita. */
+/** Nearest real camera, by angle around the orbit center. */
 export function nearestCamera(cams: CameraPose[], pose: { qvec: Quat; tvec: Vec3 }, center: Vec3): number {
   const dir = unit(sub(toWorld(pose).center, center));
   let best = 0, bestDot = -Infinity;
@@ -304,23 +303,23 @@ export function nearestCamera(cams: CameraPose[], pose: { qvec: Quat; tvec: Vec3
 }
 
 export interface PresetOptions extends ClipOptions {
-  /** Índice (em `cams`) da foto no meio do clipe. */
+  /** Index (into `cams`) of the photo at the middle of the clip. */
   center: number;
-  /** Elevação máxima em graus em relação às fotos (negativo = abaixo). */
+  /** Maximum elevation in degrees relative to the photos (negative = below). */
   elevDeg: number;
-  /** Fotos percorridas; padrão (frames-1)/2, metade de uma foto por frame.
-   *  Com o número de fotos, a câmera dá a volta inteira e termina na foto
-   *  em que começou. */
+  /** Photos traversed; default (frames-1)/2, half a photo per frame. With the
+   *  photo count, the camera goes all the way around and ends at the photo
+   *  it started from. */
   span?: number;
-  /** "arc": desvia `elevDeg` no meio e volta; "wave": numa metade desvia
-   *  `elevDeg`, na outra o oposto (sobe e desce). */
+  /** "arc": deviates `elevDeg` in the middle and comes back; "wave": deviates
+   *  `elevDeg` in one half and the opposite in the other (up and down). */
   shape?: "arc" | "wave";
-  /** Distância ao centro da órbita do clipe inteiro; padrão, a das fotos. */
+  /** Distance to the orbit center for the whole clip; defaults to the photos'. */
   radius?: number;
 }
 
-/** Atalho: percorre a órbita em volta de uma foto subindo ou descendo
- *  `elevDeg` no meio (rotação rígida em torno do centro). */
+/** Preset: walks the orbit around a photo, rising or dropping `elevDeg` in
+ *  the middle (rigid rotation about the center). */
 export function presetPath(cams: CameraPose[], lens: Lens, o: PresetOptions): ClipPlan {
   const { center: orbitC, up } = orbitFrame(cams);
   const n = o.frames;
@@ -332,14 +331,14 @@ export function presetPath(cams: CameraPose[], lens: Lens, o: PresetOptions): Cl
     const u = i / (n - 1);
     const base = atRadius(walk(u), orbitC, o.radius);
     const ramp = profile(u, o.hold, o.ramp);
-    // Na onda, o seno corre só no trecho fora das âncoras; a rampa suaviza a saída.
+    // For the wave, the sine runs only outside the anchors; the ramp smooths the exit.
     const inner = Math.min(1, Math.max(0, (u - o.hold) / (1 - 2 * o.hold)));
     const w = o.shape === "wave" ? ramp * Math.sin(2 * Math.PI * inner) : ramp;
     let { rot, center } = base;
     const r = sub(center, orbitC);
     const radial = sub(r, scale(up, dot(r, up)));
     if (w !== 0 && norm(radial) > 1e-9) {
-      // Eixo horizontal: ângulo positivo leva a câmera para cima.
+      // Horizontal axis: a positive angle moves the camera up.
       const R = axisAngle(cross(unit(radial), up), ((o.elevDeg * Math.PI) / 180) * w);
       center = add(orbitC, mulMV(R, r));
       rot = mulMM(R, rot);
@@ -350,15 +349,15 @@ export function presetPath(cams: CameraPose[], lens: Lens, o: PresetOptions): Cl
 }
 
 export interface ViewOptions extends ClipOptions {
-  /** Fotos percorridas de ponta a ponta. */
+  /** Photos traversed end to end. */
   span: number;
-  /** Varredura em azimute em volta da vista mirada, em graus (paralaxe). */
+  /** Azimuth sweep around the target view, in degrees (parallax). */
   sweepDeg: number;
 }
 
-/** Sai da direção de uma foto real, mistura até a vista mirada (com uma
- *  pequena varredura em volta dela) e termina na direção de outra foto. O
- *  clipe inteiro fica na distância da vista: sem aproximar nem afastar. */
+/** Leaves from a real photo's direction, blends into the target view (with a
+ *  small sweep around it) and ends in another photo's direction. The whole
+ *  clip stays at the view's distance: no moving in or out. */
 export function viewPath(cams: CameraPose[], lens: Lens, target: { qvec: Quat; tvec: Vec3 }, o: ViewOptions): ClipPlan {
   const { center: orbitC, up } = orbitFrame(cams);
   const mid = nearestCamera(cams, target, orbitC);
@@ -372,12 +371,12 @@ export function viewPath(cams: CameraPose[], lens: Lens, target: { qvec: Quat; t
     const u = i / (n - 1);
     const base = atRadius(walk(u), orbitC, radius);
     const w = profile(u, o.hold, o.ramp);
-    // Alvo girado em torno do "up" da órbita, de −sweep a +sweep.
+    // Target rotated about the orbit's "up", from −sweep to +sweep.
     const R = axisAngle(up, (((u - 0.5) * 2 * o.sweepDeg) * Math.PI) / 180);
     const tc = add(orbitC, mulMV(R, sub(t.center, orbitC)));
     const trot = mulMM(R, t.rot);
-    // Posição: mistura em coordenadas de órbita (azimute, elevação, raio) para
-    // não cortar caminho por dentro do sujeito.
+    // Position: blend in orbit coordinates (azimuth, elevation, radius) so the
+    // path doesn't cut through the subject.
     const center = blendOrbit(base.center, tc, w, orbitC, up);
     const rot = transpose(quatToMat(slerp(matToQuat(transpose(base.rot)), matToQuat(transpose(trot)), w)));
     poses.push({ ...fromWorld(rot, center), anchor: w === 0 ? base.anchor : null });
@@ -385,8 +384,8 @@ export function viewPath(cams: CameraPose[], lens: Lens, target: { qvec: Quat; t
   return { ...clipLens(lens, o.longSide, o.aspect), poses };
 }
 
-/** Sentido da órbita filmada em volta de `up` (+1 ou −1), pela soma dos
- *  passos de azimute entre fotos vizinhas. */
+/** Direction of the filmed orbit around `up` (+1 or −1), from the sum of
+ *  azimuth steps between neighbouring photos. */
 function orbitSense(cams: CameraPose[], orbitC: Vec3, up: Vec3): number {
   const ref: Vec3 = Math.abs(up[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0];
   const e1 = unit(cross(up, ref));
@@ -403,10 +402,10 @@ function orbitSense(cams: CameraPose[], orbitC: Vec3, up: Vec3): number {
   return sum < 0 ? -1 : 1;
 }
 
-/** Volta 360° a partir de uma vista: gira a pose em torno do "up" da órbita,
- *  na mesma altura (ângulo), no sentido em que o vídeo foi filmado, e termina
- *  nela. Velocidade angular constante. `radius` leva a vista para outra
- *  distância do centro (mesma direção de visão); padrão, a da própria vista. */
+/** 360° turn from a view: rotates the pose about the orbit's "up" at the same
+ *  height (angle), in the direction the video was filmed, ending where it
+ *  started. Constant angular speed. `radius` moves the view to another
+ *  distance from the center (same view direction); defaults to the view's own. */
 export function turnPath(cams: CameraPose[], lens: Lens, target: { qvec: Quat; tvec: Vec3 }, o: ClipOptions & { radius?: number }): ClipPlan {
   const { center: orbitC, up } = orbitFrame(cams);
   const sense = orbitSense(cams, orbitC, up);
@@ -421,30 +420,30 @@ export function turnPath(cams: CameraPose[], lens: Lens, target: { qvec: Quat; t
 }
 
 
-/** Rotação rígida de uma pose (câmera → mundo) em torno de `orbitC`. */
+/** Rigid rotation of a pose (camera → world) about `orbitC`. */
 const rotateAbout = (p: { rot: Mat3; center: Vec3 }, R: Mat3, orbitC: Vec3) => ({
   rot: mulMM(R, p.rot),
   center: add(orbitC, mulMV(R, sub(p.center, orbitC))),
 });
 
-/** Eixo horizontal para subir ou descer uma câmera (ângulo positivo = para
- *  cima): o "direita" da própria câmera, achatado no plano da órbita. Com o
- *  eixo tirado da posição (o radial), uma vista quase vertical desceria pelo
- *  lado errado e a imagem viraria de ponta-cabeça, porque a mira do viewer não
- *  é exatamente o centro da órbita. */
+/** Horizontal axis for raising or lowering a camera (positive angle = up):
+ *  the camera's own "right", flattened onto the orbit plane. With the axis
+ *  taken from the position (the radial), a near-vertical view would come down
+ *  on the wrong side and the image would flip upside down, because the
+ *  viewer's aim point is not exactly the orbit center. */
 function pitchAxis(p: { rot: Mat3; center: Vec3 }, orbitC: Vec3, up: Vec3): Vec3 | null {
   const right: Vec3 = [p.rot[0][0], p.rot[1][0], p.rot[2][0]];
   const axis = sub(right, scale(up, dot(right, up)));
   if (norm(axis) >= 1e-6) return scale(unit(axis), -1);
-  // Câmera de lado (rolada 90°): cai para o radial.
+  // Camera on its side (rolled 90°): fall back to the radial.
   const r = sub(p.center, orbitC);
   const radial = sub(r, scale(up, dot(r, up)));
   return norm(radial) < 1e-9 ? null : cross(unit(radial), up);
 }
 
-/** Ponto que a câmera mira: onde o eixo óptico passa mais perto do eixo
- *  vertical do sujeito (a reta por `orbitC` na direção `up`). Olhando quase
- *  na vertical (eixos paralelos), o ponto do eixo óptico mais perto do centro. */
+/** Point the camera aims at: where the optical axis passes closest to the
+ *  subject's vertical axis (the line through `orbitC` along `up`). When looking
+ *  nearly vertically (parallel axes), the optical-axis point closest to the center. */
 function focusPoint(c: Vec3, fwd: Vec3, orbitC: Vec3, up: Vec3): Vec3 {
   const w = sub(c, orbitC);
   const b = dot(fwd, up);
@@ -457,10 +456,10 @@ function focusPoint(c: Vec3, fwd: Vec3, orbitC: Vec3, up: Vec3): Vec3 {
 
 const ease = (x: number) => 0.5 - 0.5 * Math.cos(Math.PI * Math.min(1, Math.max(0, x)));
 
-/** Rotação (câmera → mundo) de uma câmera nivelada, sem rolagem, virada para
- *  o mesmo lado que `rot` (o "para a frente" no plano horizontal). Olhando
- *  quase na vertical, o lado vem do "para cima" da imagem: ele aponta para a
- *  frente quando a câmera olha para baixo e para trás quando olha para cima. */
+/** Rotation (camera → world) of a level camera, with no roll, facing the same
+ *  way as `rot` (its forward on the horizontal plane). When looking nearly
+ *  vertically, the heading comes from the image's "up": it points forward when
+ *  the camera looks down and backward when it looks up. */
 function levelRotation(rot: Mat3, up: Vec3): Mat3 {
   const flat = (v: Vec3) => sub(v, scale(up, dot(v, up)));
   const fwd: Vec3 = [rot[0][2], rot[1][2], rot[2][2]];
@@ -476,17 +475,16 @@ function levelRotation(rot: Mat3, up: Vec3): Mat3 {
   ];
 }
 
-/** Volta 360° na inclinação de uma vista, em três fases:
- *  1. subida reta: parte da altura das fotos (o primeiro frame, a referência
- *     do modelo de vídeo, fica numa altura bem coberta), com a câmera
- *     nivelada, na direção e distância da vista, e sobe (ou desce) até ela
- *     num arco em torno do ponto que a vista mira, como uma grua; a câmera
- *     inclina aos poucos da horizontal até a inclinação da vista;
- *  2. volta de 360° nessa inclinação, em torno do eixo vertical que passa
- *     pelo ponto mirado;
- *  3. descida reta de volta ao primeiro frame.
- *  O tempo de cada fase é proporcional ao ângulo percorrido, e a câmera
- *  desacelera nas trocas de fase (sem quina). */
+/** 360° turn at a view's tilt, in three phases:
+ *  1. straight lift: starts at the photos' height (the first frame, the video
+ *     model's reference, sits at a well-covered height) with the camera level,
+ *     at the view's direction and distance, and rises (or drops) to the view
+ *     along an arc around the point it aims at, like a crane; the camera
+ *     gradually tilts from horizontal to the view's tilt;
+ *  2. a 360° turn at that tilt, about the vertical axis through the aim point;
+ *  3. straight descent back to the first frame.
+ *  Each phase's duration is proportional to the angle covered, and the camera
+ *  slows down at phase changes (no corners). */
 export function tiltTurnPath(cams: CameraPose[], lens: Lens, target: { qvec: Quat; tvec: Vec3 }, o: ClipOptions & { radius?: number }): ClipPlan {
   const { center: orbitC, up } = orbitFrame(cams);
   const sense = orbitSense(cams, orbitC, up);
@@ -496,19 +494,19 @@ export function tiltTurnPath(cams: CameraPose[], lens: Lens, target: { qvec: Qua
   const axis = pitchAxis(t, orbitC, up);
   const r = sub(t.center, focus);
   const rho = norm(r);
-  // Elevação da câmera em torno do ponto mirado, no plano da subida.
+  // Camera elevation around the aim point, in the lift plane.
   const elView = axis ? Math.atan2(dot(r, up), dot(r, cross(up, axis))) : Math.PI / 2;
-  // Início na altura média das fotos (limitado a ±30° em torno do ponto mirado).
+  // Start at the photos' mean height (clamped to ±30° around the aim point).
   const photoH = cams.reduce((a, c) => a + dot(sub(toWorld(c).center, orbitC), up), 0) / cams.length;
   const focusH = dot(sub(focus, orbitC), up);
   const elStart = Math.asin(Math.max(-0.5, Math.min(0.5, (photoH - focusH) / (rho || 1))));
   const delta = elView - elStart;
   const crane = (ang: number) => (axis && Math.abs(ang) > 1e-12 ? rotateAbout(t, axisAngle(axis, ang), focus) : t);
-  // Na subida, a posição segue o arco e a rotação vai da nivelada à da vista.
+  // During the lift, position follows the arc and rotation goes from level to the view's.
   const levelQ = matToQuat(transpose(levelRotation(t.rot, up)));
   const viewQ = matToQuat(transpose(t.rot));
   const lifting = (e: number) => ({ center: crane(-delta * (1 - e)).center, rot: transpose(quatToMat(slerp(levelQ, viewQ, e))) });
-  // Frações do clipe: subida e descida proporcionais ao ângulo (10% a 30%).
+  // Clip fractions: lift and descent proportional to the angle (10% to 30%).
   const lift = Math.min(0.3, Math.max(0.1, Math.abs(delta) / (2 * Math.abs(delta) + 2 * Math.PI)));
   const n = o.frames;
   const poses: PathPose[] = [];
@@ -523,11 +521,11 @@ export function tiltTurnPath(cams: CameraPose[], lens: Lens, target: { qvec: Qua
   return { ...clipLens(lens, o.longSide, o.aspect), poses };
 }
 
-/** Interpola dois pontos em coordenadas esféricas em torno de `c` (eixo `up`). */
+/** Interpolates two points in spherical coordinates around `c` (axis `up`). */
 function blendOrbit(a: Vec3, b: Vec3, w: number, c: Vec3, up: Vec3): Vec3 {
   if (w <= 0) return a;
   if (w >= 1) return b;
-  // Base ortonormal: e1, e2 no plano da órbita, up.
+  // Orthonormal basis: e1, e2 in the orbit plane, up.
   const ref = Math.abs(up[0]) < 0.9 ? ([1, 0, 0] as Vec3) : ([0, 1, 0] as Vec3);
   const e1 = unit(cross(up, ref));
   const e2 = cross(up, e1);
@@ -544,5 +542,5 @@ function blendOrbit(a: Vec3, b: Vec3, w: number, c: Vec3, up: Vec3): Vec3 {
   return add(c, add(scale(e1, rad * ce * Math.cos(az)), add(scale(e2, rad * ce * Math.sin(az)), scale(up, rad * Math.sin(el)))));
 }
 
-/** Câmera → mundo de uma pose de trajetória (para o viewer). */
+/** Camera → world of a trajectory pose (for the viewer). */
 export const poseToWorld = toWorld;

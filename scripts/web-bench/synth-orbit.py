@@ -1,20 +1,20 @@
-# Vídeo orbital sintético com poses verdadeiras, para medir as poses e o
-# treino da versão web (ver README, "Versão web").
+# Synthetic orbit video with ground-truth poses, for measuring the web
+# version's poses and training (see README, "Web version").
 #
-#   python3 scripts/web-bench/synth-orbit.py <saida> [frames] [largura] [altura]
+#   python3 scripts/web-bench/synth-orbit.py <output> [frames] [width] [height]
 #
-# Cena: esfera e cubo sobre um chão, com uma parede cilíndrica ao fundo, todos
-# com textura procedural sem padrões repetidos; a câmera orbita com raio e
-# altura variando. <saida> já é um dataset COLMAP:
+# Scene: a sphere and a cube on a floor, with a cylindrical wall behind, all
+# with non-repeating procedural textures; the camera orbits with varying radius
+# and height. <output> is already a COLMAP dataset:
 #   images/*.jpg   frames 00000.jpg, 00001.jpg, …
-#   sparse/0/      modelo com as poses verdadeiras (treino de referência)
-#   gt.json        poses mundo→câmera e focal, para o eval-poses.py
-# Com --green: tela verde no lugar do chão/parede/céu (mais clara no centro,
-# como uma tela real), um pouco de verde rebatido nos objetos e as máscaras
-# verdadeiras em masks_gt/*.png (255 = sujeito), para medir o recorte. Sem o
-# cenário, os objetos ficam mais perto e com textura mais fina (como objetos
-# reais), senão nem o COLMAP acha pontos suficientes.
-# Requer numpy e Pillow; 120 frames 960×720 levam ~1,5 min.
+#   sparse/0/      model with the ground-truth poses (reference training)
+#   gt.json        world→camera poses and focal, for eval-poses.py
+# With --green: a green screen replaces floor/wall/sky (brighter in the center,
+# like a real screen), some green spill on the objects, and ground-truth masks
+# in masks_gt/*.png (255 = subject), for measuring masking. Without the
+# set, the objects are closer and more finely textured (like real objects),
+# otherwise not even COLMAP finds enough points.
+# Requires numpy and Pillow; 120 frames at 960×720 take ~1.5 min.
 import json, os, struct, sys
 import numpy as np
 from PIL import Image
@@ -25,7 +25,7 @@ out = args[0]
 N = int(args[1]) if len(args) > 1 else 120
 W = int(args[2]) if len(args) > 2 else 960
 H = int(args[3]) if len(args) > 3 else 720
-F = 0.875 * W  # ~59° de FOV horizontal
+F = 0.875 * W  # ~59° horizontal FOV
 os.makedirs(f"{out}/images", exist_ok=True)
 os.makedirs(f"{out}/sparse/0", exist_ok=True)
 if GREEN:
@@ -58,7 +58,7 @@ SPH_C, SPH_R = np.array([0.35, 0.0, 0.55]), 0.55
 BOX_MIN, BOX_MAX = np.array([-0.95, -0.45, 0.0]), np.array([-0.25, 0.25, 0.7])
 GROUND_R, WALL_R, WALL_H = 6.0, 7.0, 3.0
 LIGHT = np.array([0.4, 0.3, 0.86]); LIGHT /= np.linalg.norm(LIGHT)
-DETAIL = 4.0 if GREEN else 1.0  # escala da textura dos objetos
+DETAIL = 4.0 if GREEN else 1.0  # object texture scale
 
 def shade(col, n):
     return col * (0.55 + 0.45 * np.clip((n * LIGHT).sum(-1), 0, 1))[..., None]
@@ -68,7 +68,7 @@ def render(C, D):
     t = np.full(shp, np.inf)
     col = np.zeros(shp + (3,))
     if GREEN:
-        # tela verde: mais clara no centro do quadro
+        # green screen: brighter in the center of the frame
         u = np.linspace(-1, 1, shp[1])[None, :]; v = np.linspace(-1, 1, shp[0])[:, None]
         g = 0.82 + 0.18 * (1 - np.clip(u * u + v * v, 0, 1))
         col[:] = np.stack([0.12 * g, 0.78 * g, 0.22 * g], -1)
@@ -88,23 +88,23 @@ def render(C, D):
             m = mask & (ts > 1e-6) & (ts < t)
             t = np.where(m, ts, t)
             P = C + D * np.where(m, ts, 0)[..., None]
-            # luz verde rebatida pela tela tinge o objeto inteiro
+            # green light bounced off the screen tints the whole object
             col = np.where(m[..., None], colfn(P) * 0.88 + np.array([0.0, 0.14, 0.02]), col)
             subject = subject | m
         hit = hit_s
-    # parede cilíndrica (por dentro)
+    # cylindrical wall (from the inside)
     if not GREEN:
         a = D[..., 0] ** 2 + D[..., 1] ** 2; b = 2 * (C[0] * D[..., 0] + C[1] * D[..., 1]); c = C[0] ** 2 + C[1] ** 2 - WALL_R ** 2
         tw = (-b + np.sqrt(np.maximum(b * b - 4 * a * c, 0))) / (2 * a + 1e-12)
         zw = C[2] + D[..., 2] * tw
         hit(tw, (zw > 0) & (zw < WALL_H), lambda P: tex_wall(P * 0.5) * 0.85)
-        # chão
+        # floor
         with np.errstate(divide="ignore", invalid="ignore"):
             tg = -C[2] / D[..., 2]
         tg = np.nan_to_num(tg, nan=-1, posinf=-1, neginf=-1)
         Pg = C + D * tg[..., None]
         hit(tg, np.hypot(Pg[..., 0], Pg[..., 1]) < GROUND_R, lambda P: tex_ground(P * 0.8))
-    # cubo
+    # cube
     with np.errstate(divide="ignore", invalid="ignore"):
         t1 = (BOX_MIN - C) / D; t2 = (BOX_MAX - C) / D
     tn = np.nanmax(np.minimum(t1, t2), -1); tf = np.nanmin(np.maximum(t1, t2), -1)
@@ -114,7 +114,7 @@ def render(C, D):
             n[..., ax] = np.where(np.abs(P[..., ax] - BOX_MIN[ax]) < 1e-4, -1, 0) + np.where(np.abs(P[..., ax] - BOX_MAX[ax]) < 1e-4, 1, 0)
         return shade(tex_box(P * DETAIL), n)
     hit(tn, tn < tf, box_col)
-    # esfera
+    # sphere
     oc = C - SPH_C; bb = (D * oc).sum(-1); cc = oc @ oc - SPH_R ** 2; disc = bb * bb - cc
     ts = -bb - np.sqrt(np.maximum(disc, 0))
     hit(ts, disc > 0, lambda P: shade(tex_sphere(P * DETAIL), (P - SPH_C) / SPH_R))
@@ -154,7 +154,7 @@ for i in range(N):
     poses.append({"name": f"{i:05d}.jpg", "R": R.tolist(), "t": t.tolist(), "center": C.tolist()})
 json.dump({"width": W, "height": H, "focal": F, "poses": poses}, open(f"{out}/gt.json", "w"))
 
-# Modelo COLMAP com as poses verdadeiras e pontos amostrados nas superfícies.
+# COLMAP model with the ground-truth poses and points sampled on the surfaces.
 with open(f"{out}/sparse/0/cameras.bin", "wb") as fh:
     fh.write(struct.pack("<Q", 1)); fh.write(struct.pack("<IiQQ", 1, 0, W, H)); fh.write(struct.pack("<3d", F, W / 2, H / 2))
 with open(f"{out}/sparse/0/images.bin", "wb") as fh:
@@ -175,4 +175,4 @@ with open(f"{out}/sparse/0/points3D.bin", "wb") as fh:
     fh.write(struct.pack("<Q", len(P)))
     for i, (x, c) in enumerate(zip(P, Cc)):
         fh.write(struct.pack("<Q3d3BdQ", i + 1, *x, *c, 0.5, 0))
-print(N, "frames", W, "x", H, "f =", F, "em", out)
+print(N, "frames", W, "x", H, "f =", F, "in", out)

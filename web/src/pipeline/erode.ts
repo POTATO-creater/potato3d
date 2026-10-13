@@ -1,9 +1,9 @@
-// Erosão do alpha de treino: port de `erode` em src-tauri/src/masks.rs.
+// Erosion of the training alpha: port of `erode` in src-tauri/src/masks.rs.
 
-/** Raio usado no dataset de treino (ver ALPHA_ERODE no masks.rs). */
+/** Radius used in the training dataset (see ALPHA_ERODE in masks.rs). */
 export const ALPHA_ERODE = 1;
 
-/** Mínimo numa janela (2r+1)², separável, com a borda da imagem replicada. */
+/** Minimum over a (2r+1)² window, separable, with the image border replicated. */
 export function erode(mask: Uint8Array, w: number, h: number, r: number): Uint8Array {
   if (r <= 0) return mask.slice();
   const pass = (src: Uint8Array, dx: number, dy: number) => {

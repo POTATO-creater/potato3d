@@ -1,10 +1,10 @@
-// Caminhos da versão web. A interface trata caminhos como texto opaco, como
-// no desktop; aqui eles apontam para:
-//   /projects/<nome>/…  pastas e arquivos no OPFS (armazenamento da origem)
-//   /videos/<nome>      vídeos abertos nesta aba (só em memória)
-//   /inputs/<pasta>/…   imagens usadas como frames, idem
-// e `fileUrl` precisa ser síncrono, então cada arquivo que a interface vai
-// exibir é "publicado" antes: ganha uma URL blob: guardada num mapa.
+// Web paths. The UI treats paths as opaque strings, as on the desktop; here
+// they point to:
+//   /projects/<name>/…  folders and files in OPFS (origin storage)
+//   /videos/<name>      videos opened in this tab (in memory only)
+//   /inputs/<folder>/…  images used as frames, likewise
+// and `fileUrl` must be synchronous, so every file the UI will display is
+// "published" first: it gets a blob: URL kept in a map.
 
 import type { VideoInfo } from "../../../src/lib/api";
 
@@ -12,7 +12,7 @@ export const PROJECTS = "/projects";
 
 const videos = new Map<string, { file: File; info?: VideoInfo }>();
 const images = new Map<string, File>();
-/** Pacotes de projeto (.gorbit) abertos nesta aba. */
+/** Project packages (.gorbit) opened in this tab. */
 const packages = new Map<string, File>();
 const urls = new Map<string, string>();
 
@@ -29,7 +29,7 @@ export function addVideo(file: File): string {
 
 export function video(path: string) {
   const v = videos.get(path);
-  if (!v) throw new Error("O vídeo não está aberto nesta aba: arraste-o para a janela de novo.");
+  if (!v) throw new Error("The video is not open in this tab: drag it onto the window again.");
   return v;
 }
 
@@ -41,14 +41,14 @@ export function addPackage(file: File): string {
 
 export function packageFile(path: string): File {
   const f = packages.get(path);
-  if (!f) throw new Error("O pacote não está aberto nesta aba: arraste-o para a janela de novo.");
+  if (!f) throw new Error("The package is not open in this tab: drag it onto the window again.");
   return f;
 }
 
-/** Imagens de uma pasta (ou soltas, agrupadas sob `name`) para usar como
- *  frames. Abrir o mesmo nome de novo troca o conjunto. */
+/** Images from a folder (or loose ones, grouped under `name`) to use as
+ *  frames. Opening the same name again replaces the set. */
 export function addImages(files: File[], name: string): string[] {
-  const dir = `/inputs/${name.replace(/[\\/]/g, "_") || "imagens"}`;
+  const dir = `/inputs/${name.replace(/[\\/]/g, "_") || "images"}`;
   for (const p of images.keys()) if (p.startsWith(`${dir}/`)) images.delete(p);
   unpublishUnder(dir);
   return files.map((file) => {
@@ -61,23 +61,23 @@ export function addImages(files: File[], name: string): string[] {
 
 export function inputImage(path: string): File {
   const f = images.get(path);
-  if (!f) throw new Error("As imagens não estão abertas nesta aba: arraste-as para a janela de novo.");
+  if (!f) throw new Error("The images are not open in this tab: drag them onto the window again.");
   return f;
 }
 
-/** Nome de um grupo de imagens soltas: o prefixo comum ("frame_0001.png",
+/** Name for a group of loose images: their common prefix ("frame_0001.png",
  *  "frame_0002.png" → "frame"). */
 export function groupName(names: string[]): string {
   let prefix = names[0] ?? "";
   for (const n of names) while (!n.startsWith(prefix)) prefix = prefix.slice(0, -1);
-  return prefix.replace(/[\d\s._-]+$/, "") || "imagens";
+  return prefix.replace(/[\d\s._-]+$/, "") || "images";
 }
 
-/** URL do arquivo publicado, ou "" se ainda não foi. */
+/** URL of the published file, or "" if it hasn't been published yet. */
 export const urlOf = (path: string) => urls.get(path) ?? "";
 
-/** Dá ao arquivo uma URL estável até a próxima publicação do mesmo caminho.
- *  A antiga é solta mais tarde: pode haver uma imagem ou splat carregando. */
+/** Gives the file a URL that stays stable until the same path is published again.
+ *  The old one is revoked later: an image or splat may still be loading from it. */
 export function publish(path: string, blob: Blob) {
   const old = urls.get(path);
   urls.set(path, URL.createObjectURL(blob));
@@ -104,7 +104,7 @@ export async function exists(path: string) {
     const d = await dirAt(ps.slice(0, -1).join("/"));
     for await (const name of d.keys()) if (name === ps[ps.length - 1]) return true;
   } catch {
-    /* pasta do caminho não existe */
+    /* parent folder doesn't exist */
   }
   return false;
 }
@@ -132,23 +132,23 @@ export async function remove(path: string) {
     const d = await dirAt(ps.slice(0, -1).join("/"));
     await d.removeEntry(ps[ps.length - 1], { recursive: true });
   } catch {
-    /* já não existe */
+    /* already gone */
   }
 }
 
-/** Arquivos de uma pasta (só o primeiro nível), em ordem de nome. */
+/** Files in a folder (top level only), sorted by name. */
 export async function listFiles(path: string, pattern?: RegExp): Promise<string[]> {
   const names: string[] = [];
   try {
     for await (const [name, h] of (await dirAt(path)).entries())
       if (h.kind === "file" && (!pattern || pattern.test(name))) names.push(name);
   } catch {
-    /* pasta não existe */
+    /* folder doesn't exist */
   }
   return names.sort();
 }
 
-/** Publica todos os arquivos (do primeiro nível) de uma pasta. */
+/** Publishes every (top-level) file in a folder. */
 export async function publishDir(path: string, pattern?: RegExp) {
   const d = await dirAt(path).catch(() => null);
   if (!d) return;
@@ -156,14 +156,14 @@ export async function publishDir(path: string, pattern?: RegExp) {
     if (h.kind === "file" && (!pattern || pattern.test(name))) publish(`${path}/${name}`, await (h as FileSystemFileHandle).getFile());
 }
 
-/** Lê um arquivo publicado (inclusive os que só existem em memória). */
+/** Reads a published file (including ones that only exist in memory). */
 export async function readPublished(path: string): Promise<Blob> {
   const url = urls.get(path);
   if (url) return (await fetch(url)).blob();
   return readFile(path);
 }
 
-/** Entrega um arquivo ao usuário como download. */
+/** Hands a file to the user as a download. */
 export function download(blob: Blob, name: string) {
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);

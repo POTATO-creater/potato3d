@@ -4,9 +4,9 @@ import { eraseAt, type PromptMarks } from "../lib/prompt";
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
 /**
- * Camada de marcação do sujeito (SAM 2.1) sobre o quadro, no retângulo que a
- * imagem ocupa no palco 16:9 (object-fit: contain). Arrastar: caixa · clique:
- * ponto do sujeito · Alt+clique ou botão direito: fundo · Shift+clique: apaga.
+ * Subject marking layer (SAM 2.1) over the frame, in the rectangle the image
+ * occupies on the 16:9 stage (object-fit: contain). Drag: box · click:
+ * subject point · Alt+click or right-click: background · Shift+click: erase.
  */
 export function PromptLayer({
   marks,
@@ -15,7 +15,7 @@ export function PromptLayer({
   onChange,
 }: {
   marks: PromptMarks | null;
-  /** largura / altura do quadro */
+  /** frame width / height */
   aspect: number;
   editing: boolean;
   onChange: (m: PromptMarks) => void;
@@ -23,7 +23,7 @@ export function PromptLayer({
   const start = useRef<{ x: number; y: number } | null>(null);
   const [drag, setDrag] = useState<[number, number, number, number] | null>(null);
   const [erasing, setErasing] = useState(false);
-  // O cursor de apagar acompanha o Shift mesmo sem mexer o mouse.
+  // The erase cursor follows Shift even without moving the mouse.
   useEffect(() => {
     if (!editing) return;
     const onKey = (e: KeyboardEvent) => setErasing(e.shiftKey);

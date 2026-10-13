@@ -1,14 +1,14 @@
-// Câmera orbital do visualizador de links: arrastar gira, roda/pinça
-// aproxima, botão direito/Shift ou dois dedos movem, e WASD/setas andam pela
-// cena. Porte do player do WebGaussian (orbit-camera.ts), com a faixa de
-// altura travada no que o vídeo filmou e giro automático.
+// Orbit camera for the link viewer: drag rotates, wheel/pinch zooms, right
+// button/Shift or two fingers pan, and WASD/arrows move through the scene.
+// Port of the WebGaussian player (orbit-camera.ts), with the pitch range locked
+// to what the video covered, plus auto-spin.
 
 import { Entity, Vec3 } from "playcanvas";
 
-const ROTATE_SPEED = 0.25; // graus por pixel
-const PAN_SPEED = 0.0015; // fração da distância por pixel
-const KEY_MOVE_SPEED = 1.2; // fração da distância por segundo
-const SPIN_SPEED = 12; // graus por segundo
+const ROTATE_SPEED = 0.25; // degrees per pixel
+const PAN_SPEED = 0.0015; // fraction of the distance per pixel
+const KEY_MOVE_SPEED = 1.2; // fraction of the distance per second
+const SPIN_SPEED = 12; // degrees per second
 const PITCH_LIMIT = 89;
 
 const CAMERA_KEYS = new Set(["w", "a", "s", "d", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"]);
@@ -20,7 +20,7 @@ export class OrbitCamera {
   distance = 3;
   readonly target = new Vec3();
   spin = false;
-  /** Faixa de inclinação em graus; fora dela o vídeo não filmou nada. */
+  /** Pitch range in degrees; outside it the video captured nothing. */
   private minPitch = -PITCH_LIMIT;
   private maxPitch = PITCH_LIMIT;
   private minDistance = 0.01;
@@ -32,7 +32,7 @@ export class OrbitCamera {
   private readonly keys = new Set<string>();
   private shift = false;
   private readonly abort = new AbortController();
-  /** Avisado quando o usuário mexe (para parar o giro automático). */
+  /** Called when the user interacts (to stop the auto-spin). */
   onInteract: () => void = () => {};
 
   constructor(
@@ -48,12 +48,12 @@ export class OrbitCamera {
     dom.addEventListener("contextmenu", (e) => e.preventDefault(), opts);
     dom.addEventListener("keydown", (e) => this.onKey(e, true), opts);
     dom.addEventListener("keyup", (e) => this.onKey(e, false), opts);
-    // Tecla presa "apertada" depois que o foco sai faria a câmera seguir andando.
+    // A key stuck "down" after focus is lost would keep the camera moving.
     dom.addEventListener("blur", () => this.keys.clear(), opts);
     this.apply();
   }
 
-  /** Inclinação permitida, em graus (negativo olha para baixo). */
+  /** Allowed pitch, in degrees (negative looks down). */
   setPitchRange(min: number, max: number) {
     this.minPitch = Math.max(-PITCH_LIMIT, min);
     this.maxPitch = Math.min(PITCH_LIMIT, max);
@@ -66,19 +66,19 @@ export class OrbitCamera {
     this.apply();
   }
 
-  /** Olha para `target` a partir de `position`. */
+  /** Looks at `target` from `position`. */
   lookFrom(position: Vec3, target: Vec3) {
     const d = new Vec3().sub2(position, target);
     this.target.copy(target);
     this.distance = d.length() || 1;
-    // A câmera olha para -d; para a orientação (pitch, yaw, 0) do PlayCanvas,
-    // a direção de visão é (-cos p · sen y, sen p, -cos p · cos y).
+    // The camera looks along -d; for PlayCanvas orientation (pitch, yaw, 0),
+    // the view direction is (-cos p · sin y, sin p, -cos p · cos y).
     this.pitch = (Math.asin(Math.max(-1, Math.min(1, -d.y / this.distance))) * 180) / Math.PI;
     this.yaw = (Math.atan2(d.x, d.z) * 180) / Math.PI;
     this.apply();
   }
 
-  /** Avança o giro automático e o movimento pelas teclas; chamar a cada quadro. */
+  /** Advances auto-spin and keyboard movement; call every frame. */
   update(dt: number) {
     if (dt <= 0) return;
     if (this.spin) {
@@ -90,8 +90,8 @@ export class OrbitCamera {
     const forward = (has("w", "ArrowUp") ? 1 : 0) - (has("s", "ArrowDown") ? 1 : 0);
     const strafe = (has("d", "ArrowRight") ? 1 : 0) - (has("a", "ArrowLeft") ? 1 : 0);
     if (!forward && !strafe) return;
-    // Anda com o alvo junto (não muda a distância), num passo proporcional
-    // ao tamanho da cena.
+    // Moves the target along (distance unchanged), with a step proportional
+    // to the scene size.
     const step = this.distance * KEY_MOVE_SPEED * dt;
     if (this.shift) this.target.y += forward * step;
     else this.target.add(this.camera.forward.clone().mulScalar(forward * step));
@@ -114,7 +114,7 @@ export class OrbitCamera {
   }
 
   private onPointerDown(e: PointerEvent) {
-    // Pega o foco do teclado para o WASD funcionar logo depois de um clique.
+    // Grab keyboard focus so WASD works right after a click.
     this.dom.focus({ preventScroll: true });
     this.dom.setPointerCapture(e.pointerId);
     this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -137,7 +137,7 @@ export class OrbitCamera {
     this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
     if (this.pointers.size === 2) {
-      // Dois dedos: pinça aproxima, arrastar os dois move.
+      // Two fingers: pinch zooms, dragging both pans.
       const [a, b] = [...this.pointers.values()];
       const pinch = Math.hypot(a.x - b.x, a.y - b.y);
       const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };

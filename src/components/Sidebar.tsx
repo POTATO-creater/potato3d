@@ -15,21 +15,21 @@ interface Props {
   os: Os | undefined;
   videoPath: string | null;
   video: VideoInfo | null;
-  /** Frames já extraídos, no lugar do vídeo. */
+  /** Already-extracted frames, instead of a video. */
   imageSet: ImageSet | null;
   trim: { start: number; end: number | null };
   onTrim: (t: { start: number; end: number | null }) => void;
-  /** Um vídeo ou várias imagens. */
+  /** One video or several images. */
   onPickFiles: () => void;
-  /** Uma pasta de frames. */
+  /** A folder of frames. */
   onPickFolder: () => void;
   projectDir: string | null;
   onPickProject: () => void;
   onRevealProject: () => void;
-  /** Salvar o projeto em .gorbit; ausente quando ainda não há o que salvar. */
+  /** Save the project as .gorbit; missing when there is nothing to save yet. */
   onSavePackage?: () => void;
   onOpenPackage: () => void;
-  /** Andamento ou resultado do último salvar/abrir pacote. */
+  /** Progress or result of the last package save/open. */
   packageStatus: PackageStatus | null;
   preset: PresetId | "custom";
   onPreset: (p: PresetId) => void;
@@ -44,7 +44,7 @@ interface Props {
   canRun: boolean;
   onRun: () => void;
   onCancel: () => void;
-  /** Painel de exportação (só aparece com um splat treinado). */
+  /** Export panel (only shown with a trained splat). */
   exportPanel?: ReactNode;
 }
 
@@ -59,21 +59,21 @@ export function Sidebar(p: Props) {
   const { t } = useI18n();
   const ts = t.sidebar;
   const videoEl = useRef<HTMLVideoElement>(null);
-  // No web os projetos ficam no armazenamento do navegador e as poses saem
-  // do SfM próprio (sem as opções do COLMAP).
+  // On the web projects live in browser storage and poses come from our own
+  // SfM (no COLMAP options).
   const web = p.os === "web";
   const s = p.settings;
   const set = <K extends keyof Settings>(k: K, patch: Partial<Settings[K]>) =>
     p.onSettings({ ...s, [k]: { ...s[k], ...patch } });
   const locked = p.running;
-  // Marcação do SAM 2.1 (no vídeo ou nas imagens); fora do trecho ela não vale.
+  // SAM 2.1 marking (on the video or images); invalid outside the trim range.
   const sam2 = p.os === "web" && p.masks.enabled && p.masks.method === "sam2";
   const prompt = sam2 ? (p.masks.prompt ?? null) : null;
   const promptOutside = !!prompt && !promptInTrim(prompt, p.trim);
   const marking = sam2
     ? { prompt, onPrompt: locked ? undefined : (pr: SubjectPrompt | null) => p.onMasks({ ...p.masks, prompt: pr }) }
     : {};
-  // Prévia do recorte: o quadro marcado, senão o início do trecho (ou a 1ª imagem).
+  // Mask preview: the marked frame, else the trim start (or the first image).
   const markedImage = prompt?.image ? p.imageSet?.paths.find((x) => basename(x) === prompt.image) : undefined;
   const previewSource: PreviewSource | null = p.videoPath
     ? { kind: "video", src: fileUrl(p.videoPath), time: !promptOutside && prompt?.time != null ? prompt.time : p.trim.start }

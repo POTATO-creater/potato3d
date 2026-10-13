@@ -1,5 +1,5 @@
-// Chroma key e despill: port de src-tauri/src/masks.rs (mod chroma e
-// Despill), mesmas fórmulas e constantes. Máscaras: 255 = sujeito.
+// Chroma key and despill: port of src-tauri/src/masks.rs (mod chroma and
+// Despill), same formulas and constants. Masks: 255 = subject.
 
 export type RGB = [number, number, number];
 
@@ -21,7 +21,7 @@ export const DEFAULT_CHROMA: ChromaOptions = {
   contiguous: true,
 };
 
-/** Mediana (superior) por canal dos pixels da borda, com passo (w+h)/400. */
+/** Per-channel (upper) median of the border pixels, with step (w+h)/400. */
 export function borderKey(rgba: Uint8ClampedArray, w: number, h: number): RGB {
   const step = Math.max(Math.floor((w + h) / 400), 1);
   const ch: number[][] = [[], [], []];
@@ -41,9 +41,9 @@ export function borderKey(rgba: Uint8ClampedArray, w: number, h: number): RGB {
 }
 
 /**
- * Distância à cor de fundo, aceitando a cor até 1,6× mais clara (o centro da
- * tela costuma ser mais iluminado que a borda) e nunca mais escura (um objeto
- * sombreado e esverdeado não vira fundo).
+ * Distance to the background color, accepting the color up to 1.6× brighter
+ * (the screen center is usually better lit than the edge) and never darker (a
+ * shaded, greenish object doesn't become background).
  */
 export function keyDistance(r: number, g: number, b: number, k: RGB) {
   const kk = Math.max(k[0] * k[0] + k[1] * k[1] + k[2] * k[2], 1);
@@ -59,7 +59,7 @@ export function chromaMask(rgba: Uint8ClampedArray, w: number, h: number, key: R
   const soft = Math.max(Math.min(100, Math.max(0, o.softness)) * 4.42, 1);
   const lim = tol + soft;
 
-  // só conta como fundo o que se liga à borda (buracos no sujeito ficam)
+  // only what connects to the border counts as background (holes in the subject stay)
   let reached: Uint8Array | null = null;
   if (o.contiguous) {
     reached = new Uint8Array(n);
@@ -97,7 +97,7 @@ export function chromaMask(rgba: Uint8ClampedArray, w: number, h: number, key: R
   return mask;
 }
 
-/** Cor do fundo pelas máscaras: mediana dos pixels com máscara < 26, a cada 3. */
+/** Background color from the masks: median of pixels with mask < 26, every 3rd one. */
 export function backgroundColor(samples: { rgba: Uint8ClampedArray; mask: Uint8Array }[]): RGB | null {
   const hist = [new Uint32Array(256), new Uint32Array(256), new Uint32Array(256)];
   let n = 0;
@@ -124,10 +124,10 @@ export interface Despill {
   strength: number;
 }
 
-/** Só verde ou azul bem saturados: canal dominante − maior dos outros > 50. */
+/** Only well-saturated green or blue: dominant channel − max of the others > 50. */
 export function despillFor(key: RGB, strength: number): Despill | null {
   let channel = 0;
-  for (let c = 1; c < 3; c++) if (key[c] >= key[channel]) channel = c; // empate: o último
+  for (let c = 1; c < 3; c++) if (key[c] >= key[channel]) channel = c; // tie: the last one wins
   const others = [0, 1, 2].filter((c) => c !== channel) as [number, number];
   const other = Math.max(key[others[0]], key[others[1]]);
   if (channel === 0 || key[channel] - other <= 50 || strength <= 0) return null;
@@ -136,8 +136,8 @@ export function despillFor(key: RGB, strength: number): Despill | null {
 
 const LUMA = [0.2126, 0.7152, 0.0722];
 
-/** No sujeito inteiro (máscara > 0): limita o canal da tela ao maior dos
- *  outros dois e devolve a luminância tirada como cinza. */
+/** Over the whole subject (mask > 0): clamps the screen channel to the max of
+ *  the other two and adds the removed luminance back as gray. */
 export function applyDespill(rgba: Uint8ClampedArray, mask: Uint8Array, d: Despill) {
   const c = d.channel, [a, b] = d.others;
   for (let p = 0; p < mask.length; p++) {

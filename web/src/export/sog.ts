@@ -1,11 +1,11 @@
-// Escrita do SOG v2 (PlayCanvas): um ZIP sem compressão com `meta.json` e
-// texturas WebP sem perdas. Port de src-tauri/src/export/sog.rs (que veio do
-// sog-encode.ts do WebGaussian, no formato do `write-sog.ts` do
-// splat-transform): ordem de Morton, quantizador 1D por programação dinâmica
-// (codebooks de 256), posições em 16 bits log-transformadas, quatérnios
-// "smallest three" e opacidade no alfa do `sh0`. As bandas SH vão como no
-// splat-transform: paleta de até 64k vetores (k-means em dois níveis),
-// quantizada num codebook de 256, e um rótulo de 16 bits por gaussiana.
+// SOG v2 (PlayCanvas) writer: an uncompressed ZIP with `meta.json` and
+// lossless WebP textures. Port of src-tauri/src/export/sog.rs (which came from
+// WebGaussian's sog-encode.ts, following splat-transform's `write-sog.ts`):
+// Morton order, dynamic-programming 1D quantizer (256-entry codebooks),
+// log-transformed 16-bit positions, "smallest three" quaternions and opacity
+// in the `sh0` alpha. SH bands are stored as in splat-transform: a palette of
+// up to 64k vectors (two-level k-means), quantized into a 256-entry codebook,
+// plus a 16-bit label per Gaussian.
 
 import type { Msg } from "../../../src/lib/api";
 import { restLen, shCoeffs, type Splats } from "./splats.ts";
@@ -15,21 +15,21 @@ const KMEANS_ITERATIONS = 8;
 const COARSE_CLUSTERS = 256;
 const COARSE_SAMPLE = 65_536;
 
-/** RGBA → WebP sem perdas (alfa direto). */
+/** RGBA → lossless WebP (straight alpha). */
 export type WebpEncoder = (rgba: Uint8Array, width: number, height: number) => Uint8Array;
 
 export function writeSog(s: Splats, webp: WebpEncoder, generator: string, progress: (f: number, msg: Msg) => void): Uint8Array {
   const n = s.count;
-  if (n === 0) throw new Error("nenhuma gaussiana para exportar");
+  if (n === 0) throw new Error("no Gaussians to export");
   const width = Math.max(Math.ceil(Math.sqrt(n) / 4) * 4, 4);
   const height = Math.max(Math.ceil(n / width / 4) * 4, 4);
-  if (width > 16383 || height > 16383) throw new Error(`gaussianas demais para o SOG (${n})`);
+  if (width > 16383 || height > 16383) throw new Error(`too many Gaussians for SOG (${n})`);
   const texels = width * height;
 
   progress(0, { key: "export.sorting" });
   const order = mortonOrder(s.pos);
 
-  // ---- quantização das escalas e das cores (codebooks de 256)
+  // ---- quantize scales and colors (256-entry codebooks)
   progress(0.1, { key: "export.quantizing" });
   const column = (src: Float32Array, stride: number, a: number) => {
     const c = new Float32Array(src.length / stride);
@@ -39,7 +39,7 @@ export function writeSog(s: Splats, webp: WebpEncoder, generator: string, progre
   const scalesQ = quantize1d([0, 1, 2].map((a) => column(s.scale, 3, a)), 256);
   const sh0Q = quantize1d([0, 1, 2].map((a) => column(s.dc, 3, a)), 256);
 
-  // ---- paleta SH
+  // ---- SH palette
   let sh: ShPalette | null = null;
   if (s.shDegree > 0) {
     progress(0.25, { key: "export.clustering" });
@@ -47,7 +47,7 @@ export function writeSog(s: Splats, webp: WebpEncoder, generator: string, progre
   }
 
   progress(0.6, { key: "export.textures" });
-  // ---- means: log, 16 bits em duas texturas
+  // ---- means: log, 16 bits split over two textures
   const logT = (v: number) => Math.sign(v) * Math.log(Math.abs(v) + 1);
   const mins = [Infinity, Infinity, Infinity], maxs = [-Infinity, -Infinity, -Infinity];
   for (let i = 0; i < n; i++)
@@ -125,8 +125,8 @@ export function writeSog(s: Splats, webp: WebpEncoder, generator: string, progre
   return zipStore(files);
 }
 
-/** Quatérnio normalizado em 4 bytes: as três menores componentes em RGB e o
- *  índice da maior (descartada) em A (252 + i). */
+/** Normalized quaternion in 4 bytes: the three smallest components in RGB and
+ *  the index of the largest (dropped) one in A (252 + i). */
 export function packQuat(rot: ArrayLike<number>, ro: number, out: Uint8Array, o: number) {
   const q = [rot[ro], rot[ro + 1], rot[ro + 2], rot[ro + 3]];
   const l = Math.hypot(q[0], q[1], q[2], q[3]) || 1;
@@ -142,7 +142,7 @@ export function packQuat(rot: ArrayLike<number>, ro: number, out: Uint8Array, o:
 }
 
 // ---------------------------------------------------------------------------
-// Ordem de Morton (localidade espacial → WebP comprime melhor).
+// Morton order (spatial locality → WebP compresses better).
 // ---------------------------------------------------------------------------
 
 function mortonOrder(pos: Float32Array): Uint32Array {
@@ -160,8 +160,8 @@ function part1by2(v: number) {
   return v >>> 0;
 }
 
-/** Códigos de 10 bits por eixo; grupos com o mesmo código e mais de 256
- *  elementos são refinados recursivamente. */
+/** 10-bit codes per axis; groups sharing a code with more than 256
+ *  elements are refined recursively. */
 function sortMorton(pos: Float32Array, range: Uint32Array) {
   if (!range.length) return;
   const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
@@ -173,7 +173,7 @@ function sortMorton(pos: Float32Array, range: Uint32Array) {
     }
   const len = [0, 1, 2].map((a) => mx[a] - mn[a]);
   if (len.some((l) => !Number.isFinite(l)) || len.every((l) => l === 0)) return;
-  // Em f32, como no Rust: pontos na fronteira de uma célula caem na mesma.
+  // In f32, as in Rust: points on a cell boundary land in the same cell.
   const f = Math.fround;
   const mul = len.map((l) => (l === 0 ? 0 : f(1024 / f(l))));
   const codes = new Uint32Array(range.length);
@@ -195,8 +195,8 @@ function sortMorton(pos: Float32Array, range: Uint32Array) {
 }
 
 // ---------------------------------------------------------------------------
-// Quantizador 1D ótimo (programação dinâmica num histograma), port do
-// `quantize1dColumns` (k = 256, alpha = 0,5). As colunas dividem um codebook.
+// Optimal 1D quantizer (dynamic programming over a histogram), port of
+// `quantize1dColumns` (k = 256, alpha = 0.5). The columns share one codebook.
 // ---------------------------------------------------------------------------
 
 export interface Quantized {
@@ -285,7 +285,7 @@ export function quantize1d(columns: Float32Array[], k: number): Quantized {
     let lo = 0, hi = k - 1;
     while (lo < hi) {
       const mid = (lo + hi) >> 1;
-      // ponto médio em f32, como no Rust
+      // midpoint in f32, as in Rust
       if (v < Math.fround(centroids[mid] + centroids[mid + 1]) * 0.5) hi = mid;
       else lo = mid + 1;
     }
@@ -295,25 +295,25 @@ export function quantize1d(columns: Float32Array[], k: number): Quantized {
 }
 
 // ---------------------------------------------------------------------------
-// Bandas SH: paleta por k-means em dois níveis.
+// SH bands: palette via two-level k-means.
 // ---------------------------------------------------------------------------
 
 interface ShPalette {
   count: number;
   labels: Uint16Array;
   codebook: Float32Array;
-  /** Textura `shN_centroids`: 64 centroides por linha, `coeffs` texels cada. */
+  /** `shN_centroids` texture: 64 centroids per row, `coeffs` texels each. */
   centroidsRgba: Uint8Array;
 }
 
 function encodeSh(s: Splats): ShPalette {
   const n = s.count, d = restLen(s), coeffs = shCoeffs(s.shDegree);
-  // Mesmo tamanho de paleta do splat-transform.
+  // Same palette size as splat-transform.
   const palette = Math.min(Math.max(Math.trunc(Math.min(2 ** Math.floor(Math.log2(n / 1024)), 64) * 1024), 1), Math.min(n, 65_536));
   const { centroids, labels } = kmeansTwoLevel(s.rest, n, d, palette);
   const count = centroids.length / d;
 
-  // Codebook único sobre todas as colunas da paleta.
+  // Single codebook across all palette columns.
   const cols = Array.from({ length: d }, (_, j) => {
     const c = new Float32Array(count);
     for (let i = 0; i < count; i++) c[i] = centroids[i * d + j];
@@ -333,7 +333,7 @@ function encodeSh(s: Splats): ShPalette {
   return { count, labels, codebook: q.centroids, centroidsRgba: rgba };
 }
 
-/** Centroide mais próximo de `data[p·d …]` e a distância². */
+/** Nearest centroid to `data[p·d …]`. */
 function nearest(data: Float32Array, p: number, cent: Float32Array, d: number): number {
   let best = 0, bestD = Infinity;
   const base = p * d;
@@ -352,8 +352,8 @@ function nearest(data: Float32Array, p: number, cent: Float32Array, d: number): 
   return best;
 }
 
-/** Lloyd sobre os pontos `members` de `data`, com `k` centroides iniciais
- *  espaçados na lista. Devolve centroides e o rótulo local de cada membro. */
+/** Lloyd over the `members` points of `data`, with `k` initial centroids
+ *  evenly spaced in the list. Returns centroids and each member's local label. */
 function lloyd(data: Float32Array, d: number, members: Uint32Array, k: number, iterations: number) {
   k = Math.max(Math.min(k, members.length), 1);
   const cent = new Float32Array(k * d);
@@ -381,7 +381,7 @@ function lloyd(data: Float32Array, d: number, members: Uint32Array, k: number, i
     for (let c = 0; c < k; c++) {
       if (counts[c] > 0) for (let j = 0; j < d; j++) cent[c * d + j] = sums[c * d + j] / counts[c];
       else {
-        // Centroide vazio: recomeça num ponto qualquer do grupo.
+        // Empty centroid: reseed it at some point of the group.
         const m = members[(c * 7919 + it * 104_729) % members.length];
         cent.set(data.subarray(m * d, (m + 1) * d), c * d);
       }
@@ -390,9 +390,9 @@ function lloyd(data: Float32Array, d: number, members: Uint32Array, k: number, i
   return { cent, labels };
 }
 
-/** k-means hierárquico: grupos grossos numa amostra, todos os pontos
- *  atribuídos a eles, e cada grupo subdividido com centroides proporcionais
- *  à sua população (soma = `k`). */
+/** Hierarchical k-means: coarse clusters on a sample, every point assigned
+ *  to them, then each cluster subdivided with centroids proportional to its
+ *  population (sum = `k`). */
 export function kmeansTwoLevel(data: Float32Array, n: number, d: number, k: number) {
   const step = Math.max(Math.floor(n / COARSE_SAMPLE), 1);
   const sample = Uint32Array.from({ length: Math.ceil(n / step) }, (_, i) => i * step);
@@ -403,7 +403,7 @@ export function kmeansTwoLevel(data: Float32Array, n: number, d: number, k: numb
   for (let i = 0; i < n; i++) buckets[nearest(data, i, coarse, d)].push(i);
   const groups = buckets.filter((g) => g.length).map((g) => Uint32Array.from(g));
 
-  // Distribui os k centroides proporcionalmente (pelo menos 1 por grupo).
+  // Distribute the k centroids proportionally (at least 1 per group).
   const alloc = groups.map((g) => Math.max(Math.floor((g.length * k) / n), 1));
   let total = alloc.reduce((s, a) => s + a, 0);
   const bySize = groups.map((_, g) => g).sort((a, b) => groups[b].length - groups[a].length);

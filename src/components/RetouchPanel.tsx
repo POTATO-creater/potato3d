@@ -13,28 +13,28 @@ import { Field, NumField, Select, Toggle } from "./fields";
 import type { ColmapPose, ViewerHandle } from "./Viewer";
 
 const DEFAULT_STEPS = 3000;
-/** Taxa de aprendizado das posições: 10× menor que a do treino do zero. */
+/** Position learning rate: 10× lower than training from scratch. */
 const LR_MEAN = 2e-6;
 const WF_KEY = "splatforge.retouchWorkflow.v1";
-/** Limite de frames restaurados no ajuste, em fração das fotos. */
+/** Cap on restored frames in fine-tuning, as a fraction of the photos. */
 const RATIO_KEY = "splatforge.retouchRestoredRatio.v1";
-/** Duração e inclinação escolhidas por último. */
+/** Last chosen duration and tilt. */
 const MOTION_KEY = "splatforge.retouchMotion.v1";
 const DEFAULT_TILT = 30;
-/** Acima disso a câmera passa rápido demais e o modelo de vídeo borra
- *  (estimativa; ajustar com a experiência). */
+/** Above this the camera moves too fast and the video model blurs
+ *  (estimate; tune with experience). */
 const MAX_SPEED = 30;
 
 const KINDS = ["view", "orbit", "tiltOrbit", "below", "above", "orbitBelow", "orbitAbove", "wave"] as const;
 type Kind = (typeof KINDS)[number];
-/** Movimentos que partem da vista atual: a altura vem dela (sem inclinação). */
+/** Moves that start from the current view: height comes from it (no tilt). */
 const FROM_VIEW: Kind[] = ["view", "orbit", "tiltOrbit"];
-/** O que a trajetória guarda do clique: a vista mirada ou a foto do meio. A
- *  trajetória em si é refeita quando a duração ou a inclinação mudam. */
+/** What the trajectory keeps from the click: the aimed view or the middle
+ *  photo. The trajectory itself is rebuilt when duration or tilt change. */
 interface Draft {
   kind: Kind;
   pose: ColmapPose | null;
-  /** Índice da foto mais próxima da vista no momento do clique. */
+  /** Index of the photo closest to the view at click time. */
   nearest: number;
 }
 
@@ -44,27 +44,27 @@ interface Motion {
   kind: Kind;
   seconds: number | null;
   tilt: number;
-  /** Distância de arcos e voltas: a das fotos ou a da vista do clique. */
+  /** Distance for arcs and loops: the photos' or the clicked view's. */
   distance: Distance;
-  /** Lado maior do vídeo de referência, em px. */
+  /** Long side of the reference video, in px. */
   longSide: number;
-  /** Proporção do vídeo: "lens" (a da lente das fotos) ou "L:A". */
+  /** Video aspect: "lens" (the photos' lens) or "W:H". */
   aspect: string;
-  /** Quadros por segundo do vídeo de referência; null = o do workflow. */
+  /** Reference video frame rate; null = the workflow's. */
   fps: number | null;
 }
 
 const FPS_OPTIONS = [12, 15, 16, 24, 25, 30, 48, 50, 60];
 
 const ASPECTS = ["lens", "9:16", "2:3", "3:4", "1:1", "4:3", "3:2", "16:9"];
-/** Largura/altura de uma proporção "L:A"; undefined = a da lente. */
+/** Width/height of a "W:H" aspect; undefined = the lens's. */
 const aspectValue = (a: string) => {
   const [w, h] = a.split(":").map(Number);
   return w > 0 && h > 0 ? w / h : undefined;
 };
 
-/** Opções de resolução (lado maior); o menor sai da proporção da lente,
- *  ambos arredondados para múltiplos de 32. */
+/** Resolution options (long side); the short side follows the lens aspect,
+ *  both rounded to multiples of 32. */
 const LONG_SIDES = [512, 640, 768, 960, 1088, 1280, 1536, 1920];
 
 function loadMotion(): Motion {
@@ -84,7 +84,7 @@ function loadMotion(): Motion {
   }
 }
 interface Task {
-  /** Clipe em andamento (ou "draft" ao gerar, "apply" no treino). */
+  /** Clip in progress (or "draft" while generating, "apply" while training). */
   target: string;
   fraction: number;
   text: string;
@@ -92,7 +92,7 @@ interface Task {
 }
 
 const pad = (i: number) => String(i).padStart(5, "0");
-/** Proporção legível de um tamanho (1080×1920 → 9:16). */
+/** Readable aspect of a size (1080×1920 → 9:16). */
 function lensRatio(w: number, h: number): string {
   const g = (a: number, b: number): number => (b ? g(b, a % b) : a);
   const d = g(Math.round(w), Math.round(h)) || 1;
@@ -104,18 +104,18 @@ const restoredOk = (c: RetouchClip) => !!c.restored;
 export function RetouchPanel(props: {
   projectDir: string;
   viewer: RefObject<ViewerHandle | null>;
-  /** Ajustes do treino normal, reaproveitados no ajuste. */
+  /** Regular training settings, reused for fine-tuning. */
   train: TrainOptions;
-  /** Recorte do projeto (null = treinou sem recorte). */
+  /** Project masking (null = trained without masks). */
   masks: MaskOptions | null;
-  /** Outro processamento usa a GPU. */
+  /** Another job is using the GPU. */
   disabled: boolean;
   onBusy: (busy: boolean) => void;
-  /** Splat a mostrar no 3D no lugar do do projeto (prévias e comparação). */
+  /** Splat to show in 3D instead of the project's (previews and comparison). */
   onViewerSplat: (s: { path: string; label: string; iter: number | null } | null) => void;
-  /** O splat do projeto mudou (aplicar ou desfazer). */
+  /** The project splat changed (apply or undo). */
   onSplatChanged: () => void;
-  /** Linhas para a aba Log (Brush, montagem do dataset). */
+  /** Lines for the Log tab (Brush, dataset assembly). */
   onLog: (line: string) => void;
 }) {
   const { t, tm, locale } = useI18n();
@@ -125,7 +125,7 @@ export function RetouchPanel(props: {
   const [clips, setClips] = useState<RetouchClip[]>([]);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [motion, setMotion] = useState(loadMotion);
-  /** Clipe sob o mouse (a trajetória dele aparece no 3D). */
+  /** Clip under the mouse (its trajectory shows in 3D). */
   const [hovered, setHovered] = useState<string | null>(null);
   const [task, setTask] = useState<Task | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -145,7 +145,7 @@ export function RetouchPanel(props: {
     try {
       localStorage.setItem(RATIO_KEY, String(v));
     } catch {
-      /* armazenamento indisponível */
+      /* storage unavailable */
     }
   };
   const [reviewing, setReviewing] = useState<RetouchClip | null>(null);
@@ -176,10 +176,10 @@ export function RetouchPanel(props: {
   }, [projectDir, reload, rt]);
 
   useEffect(() => onBusy(!!task), [task, onBusy]);
-  // Ao sair (projeto trocado, painel some), apaga a trajetória do 3D.
+  // On exit (project switched, panel hidden), clear the trajectory from 3D.
   useEffect(() => () => viewer.current?.showPath(null), [viewer]);
 
-  // Quadro do vídeo para a máscara de enquadramento do viewer.
+  // Video frame for the viewer's framing mask.
   useEffect(() => {
     const v = viewer.current;
     if (!v || !cams) return;
@@ -188,7 +188,7 @@ export function RetouchPanel(props: {
     return () => v.setFrameGuide(null);
   }, [cams, viewer, motion.longSide, motion.aspect]);
 
-  // A configuração muda no diálogo de Integrações: relê a cada mudança.
+  // Settings change in the Integrations dialog: reload on every change.
   const [, setComfyVersion] = useState(0);
   useEffect(() => {
     const onChange = () => setComfyVersion((v) => v + 1);
@@ -197,10 +197,10 @@ export function RetouchPanel(props: {
   }, []);
   const restoreWorkflows = workflowsOf(loadComfy(), "restore");
   const workflow = restoreWorkflows.find((w) => w.id === workflowId) ?? restoreWorkflows[0] ?? null;
-  // FPS do vídeo de referência: o escolhido ou, sem escolha, o do workflow.
+  // Reference video FPS: the chosen one or, if none, the workflow's.
   const workflowRate = workflow ? workflowFps(workflow.graph) : DEFAULT_FPS;
   const fps = motion.fps ?? workflowRate;
-  // Valores dos campos personalizados do workflow escolhido.
+  // Custom field values of the chosen workflow.
   const [paramValues, setParamValues] = useState<Record<string, ParamValue>>({});
   useEffect(() => setParamValues(workflow ? loadParamValues(workflow.id) : {}), [workflow?.id]);
   const setParam = (id: string, v: ParamValue | undefined) => {
@@ -220,7 +220,7 @@ export function RetouchPanel(props: {
     try {
       localStorage.setItem(MOTION_KEY, JSON.stringify(next));
     } catch {
-      /* armazenamento indisponível */
+      /* storage unavailable */
     }
   };
 
@@ -238,7 +238,7 @@ export function RetouchPanel(props: {
     }
   };
 
-  // ---------------------------------------------------------- trajetória --
+  // ---------------------------------------------------------- trajectory --
 
   const plan = (kind: Kind = motion.kind) => {
     const v = viewer.current;
@@ -249,7 +249,7 @@ export function RetouchPanel(props: {
     setDraft({ kind, pose, nearest });
   };
 
-  // Trajetória do rascunho, refeita a cada mudança de duração ou inclinação.
+  // Draft trajectory, rebuilt whenever duration or tilt changes.
   const tilt = motion.tilt;
   const distance = motion.distance;
   const longSide = motion.longSide;
@@ -259,37 +259,37 @@ export function RetouchPanel(props: {
     const { cameras, lens } = cams;
     const m = cameras.length;
     const clip = { ...DEFAULT_CLIP, frames, longSide, aspect };
-    // Arcos e voltas na distância das fotos ou na da vista do clique.
+    // Arcs and loops at the photos' distance or the clicked view's.
     const radius = distance === "view" && draft.pose ? orbitDistance(cameras, draft.pose) : undefined;
     switch (draft.kind) {
       case "view":
-        // Um sexto da órbita de ponta a ponta; a vista mirada fica no meio.
+        // One sixth of the orbit end to end; the aimed view sits in the middle.
         return viewPath(cameras, lens, draft.pose!, { ...clip, span: Math.max(6, Math.round(m / 6)), sweepDeg: 12 });
       case "orbit":
-        // Volta inteira na altura da vista, começando nela; a distância é a
-        // escolhida (a da vista ou a das fotos).
+        // Full loop at the view's height, starting at it; distance is the chosen
+        // one (the view's or the photos').
         return turnPath(cameras, lens, draft.pose!, {
           ...clip,
           radius: distance === "photos" ? orbitDistance(cameras, cameras[draft.nearest]) : undefined,
         });
       case "tiltOrbit":
-        // Subida reta da altura das fotos (frame de referência bem coberto)
-        // até a vista, volta na inclinação dela e descida de volta.
+        // Straight climb from the photos' height (well-covered reference frame)
+        // to the view, a loop at its tilt, then back down.
         return tiltTurnPath(cameras, lens, draft.pose!, {
           ...clip,
           radius: distance === "photos" ? orbitDistance(cameras, cameras[draft.nearest]) : undefined,
         });
       case "below":
       case "above":
-        // Arco de um terço da órbita em volta da foto mais próxima.
+        // Arc of one third of the orbit around the nearest photo.
         return presetPath(cameras, lens, { ...clip, radius, center: draft.nearest, span: Math.round(m / 3), elevDeg: draft.kind === "below" ? -tilt : tilt });
       case "orbitBelow":
       case "orbitAbove":
       case "wave":
-        // Volta inteira: começa e termina na foto mais próxima da vista. A
-        // descida é mais curta que nos arcos, para a volta passar mais tempo
-        // na altura nova. A onda dispensa rampa: o seno já passa liso pelo
-        // ponto em que o fim encontra o começo (uma rampa ali faria um degrau).
+        // Full loop: starts and ends at the photo nearest the view. The ramp is
+        // shorter than for arcs so the loop spends more time at the new height.
+        // The wave needs no ramp: the sine already passes smoothly through the
+        // point where end meets start (a ramp there would create a step).
         return presetPath(cameras, lens, {
           ...clip,
           radius,
@@ -303,9 +303,9 @@ export function RetouchPanel(props: {
   }, [draft, cams, frames, tilt, distance, longSide, aspect]);
   const speed = draftPlan ? peakSpeed(draftPlan.poses, fps) : 0;
 
-  // Trajetória no 3D: a do rascunho ou, sem rascunho, a do clipe sob o mouse.
-  // Sai do estado, e não de mouseenter/mouseleave: um cartão que some sob o
-  // cursor (clipe excluído) não dispara mouseleave e deixaria o desenho preso.
+  // Trajectory in 3D: the draft's or, with no draft, the hovered clip's.
+  // Derived from state, not mouseenter/mouseleave: a card that disappears under
+  // the cursor (deleted clip) fires no mouseleave and would leave it stuck.
   const hoveredClip = clips.find((c) => c.id === hovered) ?? null;
   const shown = draftPlan
     ? { poses: draftPlan.poses, size: draftPlan.size, fy: draftPlan.intrinsics.fy }
@@ -369,9 +369,9 @@ export function RetouchPanel(props: {
 
   // ------------------------------------------------------------- ComfyUI --
 
-  /** Confere o restaurado e devolve o tamanho dele. O número de frames tem
-   *  de ser o mesmo; a proporção também (o tamanho pode mudar: o ajuste
-   *  escala os intrínsecos), senão o frame não corresponde mais à pose. */
+  /** Checks the restored video and returns its size. Frame count must match;
+   *  so must the aspect (size may change: fine-tuning scales the intrinsics),
+   *  otherwise frames no longer correspond to poses. */
   const checkRestored = async (clip: RetouchClip, video: Blob): Promise<[number, number]> => {
     const info = await videoInfo(video);
     if (info.frames !== clip.poses.length) throw new Error(tr.frameMismatch(info.frames, clip.poses.length));
@@ -422,7 +422,7 @@ export function RetouchPanel(props: {
     setClips((cs) => cs.filter((c) => c.id !== clip.id));
   };
 
-  // --------------------------------------------------------------- aplicar --
+  // ----------------------------------------------------------------- apply --
 
   const ready = clips.filter(restoredOk);
   const restoredTotal = ready.reduce((n, c) => n + c.poses.length, 0);
@@ -442,7 +442,7 @@ export function RetouchPanel(props: {
           ready.map((c) => c.id),
           { steps, lrMean: LR_MEAN, train: props.train, masks: props.masks, maxRestored: restoredMax },
           (e) => {
-            if (e.kind === "log") props.onLog(`[retoque] ${e.line}`);
+            if (e.kind === "log") props.onLog(`[retouch] ${e.line}`);
             else if (e.kind === "progress") progress(e.fraction, tm(e.message));
             else if (e.kind === "train" && e.event.kind === "step") progress(e.event.iter / total, tm({ key: "train.step", args: { iter: e.event.iter, total, splats: e.event.splats } }));
             else if (e.kind === "train" && e.event.kind === "snapshot") props.onViewerSplat({ path: e.event.path, label: "", iter: e.event.iter });
@@ -471,7 +471,7 @@ export function RetouchPanel(props: {
     props.onViewerSplat(on && applied ? { path: applied.base, label: tr.beforeLabel, iter: null } : null);
   };
 
-  // ----------------------------------------------------------------- tela --
+  // -------------------------------------------------------------------- UI --
 
   const progressRow = (target: string) =>
     task?.target === target && (
@@ -509,7 +509,7 @@ export function RetouchPanel(props: {
           options={KINDS.map((k) => ({ value: k, label: tr.moves[k].label, hint: tr.moves[k].hint }))}
           onChange={(kind) => {
             updateMotion({ kind });
-            // Com uma trajetória aberta, troca o movimento mantendo a vista do clique.
+            // With a trajectory open, switch the move but keep the clicked view.
             if (draft) setDraft({ ...draft, kind });
           }}
         />
@@ -601,7 +601,7 @@ export function RetouchPanel(props: {
               try {
                 if (id) localStorage.setItem(WF_KEY, id);
               } catch {
-                /* armazenamento indisponível */
+                /* storage unavailable */
               }
             }}
           />
@@ -749,8 +749,8 @@ export function RetouchPanel(props: {
   );
 }
 
-/** Editor de um campo personalizado do workflow, no tipo do valor original.
- *  `fallback` é o valor do workflow (padrão); undefined = campo sumiu. */
+/** Editor for a custom workflow field, typed like the original value.
+ *  `fallback` is the workflow's value (default); undefined = field is gone. */
 function ParamField(props: {
   param: WorkflowParam;
   fallback: ParamValue | undefined;
@@ -763,7 +763,7 @@ function ParamField(props: {
   const { param, fallback } = props;
   const name = param.label.trim() || param.field;
   if (fallback === undefined) return <p className="help warn">{tr.paramMissing(name)}</p>;
-  // Valor salvo de outro tipo (o workflow mudou): vale o padrão.
+  // Saved value of another type (the workflow changed): use the default.
   const value = props.value !== undefined && typeof props.value === typeof fallback ? props.value : fallback;
   const changed = value !== fallback;
   const reset = changed && (
@@ -807,7 +807,7 @@ function ParamField(props: {
   );
 }
 
-/** Referência e restaurado lado a lado, no mesmo frame. */
+/** Reference and restored side by side, on the same frame. */
 function ReviewDialog({ clip, onClose }: { clip: RetouchClip; onClose: () => void }) {
   const { t } = useI18n();
   const tr = t.retouch;
@@ -819,7 +819,7 @@ function ReviewDialog({ clip, onClose }: { clip: RetouchClip; onClose: () => voi
   const [sizes, setSizes] = useState<{ ref?: string; res?: string }>({});
   const dims = (v: HTMLVideoElement) => `${v.videoWidth}×${v.videoHeight}`;
 
-  // Mesmo índice de frame nos dois vídeos (o restaurado pode ter outro fps).
+  // Same frame index in both videos (the restored one may have another fps).
   const seek = useCallback(
     (i: number) => {
       for (const v of [ref.current, res.current]) {

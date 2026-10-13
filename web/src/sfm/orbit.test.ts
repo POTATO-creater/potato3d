@@ -1,4 +1,4 @@
-// Correções da órbita numa órbita sintética com poses conhecidas.
+// Orbit corrections on a synthetic orbit with known poses.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Pose } from "./geometry";
@@ -12,7 +12,7 @@ const unit = (a: Vec3): Vec3 => {
   return [a[0] / l, a[1] / l, a[2] / l];
 };
 
-/** Câmera em `c` olhando para a origem, "para cima" ≈ +z (COLMAP: y para baixo). */
+/** Camera at `c` looking at the origin, "up" ≈ +z (COLMAP: y points down). */
 function lookAt(c: Vec3): Pose {
   const z = unit(sub([0, 0, 0], c));
   const x = unit(cross(z, [0, 0, -1]));
@@ -31,7 +31,7 @@ const angleBetween = (a: Pose, b: Pose) => {
   return Math.acos(Math.min(1, Math.max(-1, (M[0] + M[4] + M[8] - 1) / 2)));
 };
 
-/** 96 frames a 24 fps (4 s), velocidade angular variando, raio 4, altura 1. */
+/** 96 frames at 24 fps (4 s), varying angular speed, radius 4, height 1. */
 function orbit(heightAt = (_i: number) => 1) {
   const n = 96;
   const at = Array.from({ length: n }, (_, i) => i / 24);
@@ -52,25 +52,25 @@ function orbit(heightAt = (_i: number) => 1) {
   return { at, truth, model };
 }
 
-test("fillMissing recupera frames perdidos no meio e nas pontas", () => {
+test("fillMissing recovers frames lost in the middle and at the ends", () => {
   const { at, truth, model } = orbit();
   const lost = [0, 1, 20, 21, 22, 23, 50, 94, 95];
   for (const i of lost) model.poses[i] = null;
   assert.deepEqual(fillMissing(model, at).inferred, lost);
   for (const i of lost) {
     const err = Math.hypot(...sub(centerOf(model.poses[i]!), centerOf(truth[i])));
-    assert.ok(err < 0.005 * 4, `frame ${i}: centro a ${(err / 4 * 100).toFixed(2)}% do raio`);
+    assert.ok(err < 0.005 * 4, `frame ${i}: center off by ${(err / 4 * 100).toFixed(2)}% of the radius`);
     const ang = (angleBetween(model.poses[i]!, truth[i]) * 180) / Math.PI;
-    assert.ok(ang < 0.3, `frame ${i}: orientação a ${ang.toFixed(2)}°`);
+    assert.ok(ang < 0.3, `frame ${i}: orientation off by ${ang.toFixed(2)}°`);
   }
-  // No meio da lacuna a órbita é seguida, não a corda: raio preservado.
+  // In the middle of the gap the orbit is followed, not the chord: radius preserved.
   const c = centerOf(model.poses[21]!);
   assert.ok(Math.abs(Math.hypot(c[0], c[1]) - 4) < 0.01);
 });
 
-test("flattenOrbit nivela as câmeras e mantém o sujeito no centro", () => {
+test("flattenOrbit levels the cameras and keeps the subject centered", () => {
   const { model } = orbit((i) => 1 + 0.3 * Math.sin(i / 5));
-  // Pontos observados pelas câmeras, para o BA dos pontos.
+  // Points observed by the cameras, for the point BA.
   const xy = model.poses.map((p) => {
     const out: number[] = [];
     for (const pt of model.points) {
@@ -83,11 +83,11 @@ test("flattenOrbit nivela as câmeras e mantém o sujeito no centro", () => {
   model.points.forEach((pt, j) => (pt.obs = model.poses.map((_, i) => [i, j] as [number, number])));
   const dev = flattenOrbit(model, xy);
   assert.ok(dev != null && dev > 0.05);
-  // Todas as câmeras no mesmo plano.
+  // All cameras on the same plane.
   const cs = model.poses.map((p) => centerOf(p!));
   const n = unit(cross(sub(cs[30], cs[0]), sub(cs[60], cs[0])));
-  for (const c of cs) assert.ok(Math.abs(n.reduce((a, v, k) => a + v * (c[k] - cs[0][k]), 0)) < 1e-6, "coplanares");
-  // A origem continua no centro da imagem de cada câmera.
+  for (const c of cs) assert.ok(Math.abs(n.reduce((a, v, k) => a + v * (c[k] - cs[0][k]), 0)) < 1e-6, "coplanar");
+  // The origin stays at the image center of every camera.
   for (const p of model.poses) {
     const c = p!.t;
     assert.ok(Math.hypot(c[0] / c[2], c[1] / c[2]) < 1e-9);
@@ -95,7 +95,7 @@ test("flattenOrbit nivela as câmeras e mantém o sujeito no centro", () => {
   assert.ok(Number.isFinite(Number(model.stats.meanError)));
 });
 
-test("refinePose volta de um palpite grosseiro mesmo com matches errados", () => {
+test("refinePose recovers from a rough guess even with wrong matches", () => {
   const { truth, model } = orbit();
   const pose = truth[30];
   const c = centerOf(pose);
@@ -114,13 +114,13 @@ test("refinePose volta de um palpite grosseiro mesmo com matches errados", () =>
     }
     X.set(x, 3 * j);
   }
-  // Palpite a ~3% do raio e ~1,5° da verdade; prior fraco.
+  // Guess ~3% of the radius and ~1.5° off the truth; weak prior.
   const c0: Vec3 = [c[0] + 0.08, c[1] - 0.06, c[2] + 0.05];
   const guess = lookAt(c0);
   const r = refinePose(model, guess.R, c0, 1, { uv, X, n });
   assert.ok(r);
   const err = Math.hypot(...sub(centerOf(r.pose), c)) / 4;
-  assert.ok(err < 0.002, `centro a ${(err * 100).toFixed(3)}% do raio`);
+  assert.ok(err < 0.002, `center off by ${(err * 100).toFixed(3)}% of the radius`);
   assert.ok((angleBetween(r.pose, pose) * 180) / Math.PI < 0.1);
   assert.ok(r.inliers >= 150);
   assert.equal(refinePose(model, guess.R, c0, 1, { uv: uv.subarray(0, 20), X: X.subarray(0, 30), n: 10 }), null);

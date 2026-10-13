@@ -3,7 +3,7 @@ import type { Messages } from "../i18n";
 
 export type Os = Tools["os"];
 
-/** Rótulo curto da ferramenta de cada etapa, conforme o sistema e a GPU. */
+/** Short label of each stage's tool, per OS and GPU. */
 export function stageToolLabels(t: Messages, tools: Tools | null, masks?: MaskOptions, images?: boolean): Record<Stage, string> {
   const os = tools?.os ?? "macos";
   const p = t.platform;
@@ -31,7 +31,7 @@ export function stageToolLabels(t: Messages, tools: Tools | null, masks?: MaskOp
   };
 }
 
-/** Comando de instalação sugerido para uma ferramenta que falta. */
+/** Suggested install command for a missing tool. */
 export function installCommand(t: Messages, tool: "ffmpeg" | "colmap" | "brush" | "model", os: Os): string {
   const p = t.platform;
   if (os === "web") return tool === "brush" ? p.webgpuChrome : p.webgpuBrowser;
@@ -43,16 +43,16 @@ export function installCommand(t: Messages, tool: "ffmpeg" | "colmap" | "brush" 
 
 export const basename = (p: string) => p.split(/[\\/]/).pop() ?? p;
 
-/** Nome do gerenciador de arquivos do sistema. */
+/** Name of the system file manager. */
 export const fileManager = (t: Messages, os: Os | undefined) =>
   os === "windows" ? "Explorer" : os === "linux" ? t.platform.fileManager : "Finder";
 
-/** Rótulo do botão que leva a um arquivo: no web os arquivos ficam no
- *  armazenamento do navegador, então o botão baixa. */
+/** Label of the button that reveals a file: on the web files live in browser
+ *  storage, so the button downloads instead. */
 export const revealLabel = (t: Messages, os: Os | undefined, what?: string) =>
   os === "web" ? t.platform.download(what) : t.platform.reveal(fileManager(t, os), what);
 
-/** O que cada etapa faz, para a tela inicial. */
+/** What each stage does, for the start screen. */
 export function stageBlurbs(t: Messages, os: Os | undefined): Record<Stage, string> {
   return os === "web" ? t.platform.blurbs.web : t.platform.blurbs.desktop;
 }

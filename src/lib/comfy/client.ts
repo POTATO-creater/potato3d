@@ -1,6 +1,6 @@
-// Cliente HTTP + WebSocket do ComfyUI, chamado direto do navegador. O
-// ComfyUI precisa rodar com --enable-cors-header (sem ele, o navegador barra
-// as respostas e o próprio ComfyUI recusa origens diferentes em loopback).
+// ComfyUI HTTP + WebSocket client, called straight from the browser. ComfyUI
+// must run with --enable-cors-header (without it the browser blocks the
+// responses and ComfyUI itself rejects cross-origin requests on loopback).
 
 import type { ApiGraph } from "./workflow.ts";
 import { initialProgress, reduceProgress, type ComfyProgress } from "./progress.ts";
@@ -23,14 +23,14 @@ export interface ComfyStats {
   vramGb: number | null;
 }
 
-/** Arquivo de saída como o /history descreve. */
+/** Output file as /history describes it. */
 export interface ComfyFile {
   filename: string;
   subfolder: string;
   type: string;
 }
 
-/** Aceita "127.0.0.1:8188", "http://host:8188/" etc. */
+/** Accepts "127.0.0.1:8188", "http://host:8188/", etc. */
 export function normalizeUrl(raw: string): string {
   let url = raw.trim();
   if (!url) return "";
@@ -41,8 +41,8 @@ export function normalizeUrl(raw: string): string {
 export const wsUrl = (base: string, clientId: string) =>
   `${base.replace(/^http/i, "ws")}/ws?clientId=${encodeURIComponent(clientId)}`;
 
-/** Saídas de um nó no /history: vídeos vêm em "images" (SaveVideo, com
- *  animated: [true]), "videos" ou "gifs" (VideoHelperSuite). */
+/** A node's outputs in /history: videos come under "images" (SaveVideo, with
+ *  animated: [true]), "videos" or "gifs" (VideoHelperSuite). */
 export function outputFiles(output: Record<string, unknown> | undefined): ComfyFile[] {
   if (!output) return [];
   const out: ComfyFile[] = [];
@@ -89,7 +89,7 @@ export class ComfyClient {
     };
   }
 
-  /** Sobe para a pasta input/ do ComfyUI; devolve o nome a pôr no nó. */
+  /** Uploads to ComfyUI's input/ folder; returns the name to put in the node. */
   async upload(file: Blob, name: string, signal?: AbortSignal): Promise<string> {
     const form = new FormData();
     form.append("image", file, name);
@@ -114,7 +114,7 @@ export class ComfyClient {
     }
     const body = await res.json().catch(() => null);
     if (!res.ok || !body?.prompt_id) {
-      // 400 com error/node_errors: o grafo não valida (modelo ausente, nó desconhecido…).
+      // 400 with error/node_errors: the graph failed validation (missing model, unknown node…).
       type NodeError = { class_type?: string; errors?: { message?: string; details?: string }[] };
       const nodeErrors: NodeError[] = body?.node_errors ? Object.values(body.node_errors as Record<string, NodeError>) : [];
       const first = nodeErrors[0];
@@ -143,10 +143,10 @@ export class ComfyClient {
     ]);
   }
 
-  /** Enfileira o grafo e acompanha até o fim. O WebSocket abre antes do
-   *  POST /prompt para não perder as primeiras mensagens; se ele não abrir
-   *  ou cair, o progresso vira consulta ao /history (sem passo a passo).
-   *  Devolve os arquivos do nó de saída. */
+  /** Queues the graph and follows it to the end. The WebSocket opens before
+   *  POST /prompt so the first messages aren't lost; if it fails to open or
+   *  drops, progress falls back to polling /history (no per-step detail).
+   *  Returns the output node's files. */
   async run(
     graph: ApiGraph,
     outputNode: string,
@@ -167,11 +167,11 @@ export class ComfyClient {
     };
     if (ws) {
       ws.onmessage = (ev) => {
-        if (typeof ev.data !== "string") return; // prévias binárias
+        if (typeof ev.data !== "string") return; // binary previews
         try {
           apply(JSON.parse(ev.data));
         } catch {
-          /* mensagem que não é JSON */
+          /* non-JSON message */
         }
       };
       ws.onclose = () => wake?.();
@@ -186,9 +186,9 @@ export class ComfyClient {
       state = initialProgress(promptId, Object.keys(graph).length);
       onProgress(state);
       for (const m of pending.splice(0)) apply(m);
-      // Espera o fim pelo WebSocket; sem ele (ou se cair), consulta o histórico.
+      // Wait for completion over the WebSocket; without it (or if it drops), poll the history.
       for (;;) {
-        if (signal?.aborted) throw new DOMException("cancelado", "AbortError");
+        if (signal?.aborted) throw new DOMException("cancelled", "AbortError");
         const s = state as ComfyProgress;
         if (s.status === "error") throw new ComfyError("execution", [s.error?.nodeType, s.error?.message].filter(Boolean).join(": "));
         if (s.status === "interrupted") throw new ComfyError("interrupted");
@@ -196,7 +196,7 @@ export class ComfyClient {
         const st = h?.status as { status_str?: string; completed?: boolean; messages?: [string, Record<string, unknown>][] } | undefined;
         if (h && st?.status_str === "error") {
           const err = st.messages?.find(([t]) => t === "execution_error")?.[1];
-          throw new ComfyError("execution", String(err?.exception_message ?? "erro no ComfyUI"));
+          throw new ComfyError("execution", String(err?.exception_message ?? "ComfyUI error"));
         }
         if (h && (st?.completed || st?.status_str === "success")) {
           if (s.status !== "success") apply({ type: "execution_success", data: { prompt_id: promptId } });
@@ -217,7 +217,7 @@ export class ComfyClient {
   }
 }
 
-/** Abre o WebSocket esperando no máximo alguns segundos; null se não der. */
+/** Opens the WebSocket, waiting a few seconds at most; null if it fails. */
 function openSocket(url: string, signal?: AbortSignal): Promise<WebSocket | null> {
   return new Promise((resolve) => {
     let ws: WebSocket;

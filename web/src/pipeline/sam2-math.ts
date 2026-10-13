@@ -1,20 +1,20 @@
-// Partes puras do SAM 2.1 da versão web (sem ONNX Runtime nem DOM), para
-// testar no Node: constantes, parâmetros do banco de memória, conversões de
-// layout, pós-processamento da máscara e o prompt.
+// Pure parts of the web SAM 2.1 (no ONNX Runtime or DOM), testable in Node:
+// constants, memory-bank parameters, layout conversions, mask
+// post-processing and the prompt.
 
 import type { SubjectPrompt } from "../../../src/lib/api";
 
-export const SIZE = 1024; // entrada do encoder
-export const LOW = 256; // máscaras de baixa resolução do decoder
-export const TOKENS = 64 * 64; // posições do mapa de features de mais baixa resolução
+export const SIZE = 1024; // encoder input
+export const LOW = 256; // decoder low-res masks
+export const TOKENS = 64 * 64; // positions in the lowest-resolution feature map
 export const HIDDEN = 256;
 export const MEM = 64;
-export const NUM_MASKMEM = 7; // o frame atual + 6 memórias
+export const NUM_MASKMEM = 7; // the current frame + 6 memories
 export const MAX_POINTERS = 16;
 export const MEAN = [0.485, 0.456, 0.406];
 export const STD = [0.229, 0.224, 0.225];
 
-/** Prompt em pixels do frame: caixa [x0, y0, x1, y1] e/ou pontos (label 1 = objeto, 0 = fundo). */
+/** Prompt in frame pixels: box [x0, y0, x1, y1] and/or points (label 1 = object, 0 = background). */
 export interface Sam2Prompt {
   box?: [number, number, number, number];
   points?: { x: number; y: number; label: 0 | 1 }[];
@@ -28,7 +28,7 @@ export interface Params {
 }
 
 /** sam2-params.bin: no_memory_embedding (256), memory_temporal_positional_encoding
- *  (7 × 64), peso (64 × 256) e viés (64) da projeção temporal dos ponteiros, em f32. */
+ *  (7 × 64), weight (64 × 256) and bias (64) of the pointer temporal projection, in f32. */
 export function parseParams(buf: ArrayBuffer): Params {
   const a = new Float32Array(buf);
   let o = 0;
@@ -37,18 +37,18 @@ export function parseParams(buf: ArrayBuffer): Params {
   const tpos = Array.from({ length: NUM_MASKMEM }, () => take(MEM));
   const projW = take(MEM * HIDDEN);
   const projB = take(MEM);
-  if (o !== a.length) throw new Error("SAM 2.1: parâmetros com tamanho inesperado");
+  if (o !== a.length) throw new Error("SAM 2.1: parameters have unexpected size");
   return { noMemory, tpos, projW, projB };
 }
 
-/** Arredonda para bf16 (o Transformers guarda as memórias assim). */
+/** Rounds to bf16 (Transformers stores the memories that way). */
 export function roundBf16(a: Float32Array): Float32Array {
   const u = new Uint32Array(a.buffer, a.byteOffset, a.length);
   for (let i = 0; i < u.length; i++) u[i] = (u[i] + 0x7fff + ((u[i] >>> 16) & 1)) & 0xffff0000;
   return a;
 }
 
-/** Codificação temporal dos ponteiros: seno 1D de dim 256 → Linear(256, 64). */
+/** Pointer temporal encoding: 1D sine of dim 256 → Linear(256, 64). */
 export function pointerPosEnc(t: number, p: Params): Float32Array {
   const half = HIDDEN / 2;
   const pe = new Float32Array(HIDDEN);
@@ -67,18 +67,18 @@ export function pointerPosEnc(t: number, p: Params): Float32Array {
 }
 
 /**
- * O export do encoder declara a saída do ramo `then` de um If (a interpolação
- * da posição do Hiera, que nunca roda em 1024²) com 5 dimensões, onde a
- * inferência de shapes acha 4; o ORT Web 1.30 recusa o modelo por isso (o ORT
- * de Python 1.19 só avisa). Corrige o dim_value no próprio buffer, um byte, sem
- * mudar o tamanho; o arquivo baixado já teve o SHA-256 conferido.
+ * The encoder export declares the output of an If's `then` branch (Hiera's
+ * position interpolation, which never runs at 1024²) with 5 dims, where shape
+ * inference finds 4; ORT Web 1.30 rejects the model for it (Python ORT 1.19
+ * only warns). Patches the dim_value in the buffer itself, one byte, without
+ * changing its size; the downloaded file's SHA-256 has already been checked.
  */
 export function fixVisionShape(model: ArrayBuffer) {
   const at = 10137;
   const want = [0x0a, 0x0a, 0x08, 0x08, 0x07, 0x12, 0x04, 0x0a, 0x02, 0x08, 0x05];
   const b = new Uint8Array(model, at, want.length);
-  if (b[10] === 0x04 && want.slice(0, 10).every((v, i) => b[i] === v)) return; // já corrigido
-  if (!want.every((v, i) => b[i] === v)) throw new Error("SAM 2.1: encoder com layout inesperado");
+  if (b[10] === 0x04 && want.slice(0, 10).every((v, i) => b[i] === v)) return; // already patched
+  if (!want.every((v, i) => b[i] === v)) throw new Error("SAM 2.1: encoder has unexpected layout");
   b[10] = 0x04;
 }
 
@@ -96,8 +96,8 @@ export function toNchw(seq: Float32Array, c: number): Float32Array {
   return out;
 }
 
-/** Logits 256² → máscara u8 (sigmoide) no tamanho do frame, bilinear como o
- *  F.interpolate(align_corners=False) do pós-processamento do Transformers. */
+/** 256² logits → u8 mask (sigmoid) at frame size, bilinear like the
+ *  F.interpolate(align_corners=False) in Transformers' post-processing. */
 export function logitsToMask(logits: Float32Array, W: number, H: number): Uint8Array {
   const out = new Uint8Array(W * H);
   const xs = new Int32Array(W), xf = new Float32Array(W);
@@ -121,11 +121,11 @@ export function logitsToMask(logits: Float32Array, W: number, H: number): Uint8A
   return out;
 }
 
-/** De onde veio cada frame (por nome): instante no vídeo ou imagem de origem. */
+/** Where each frame came from (by name): video timestamp or source image. */
 export type FrameOrigin = Map<string, { time?: number | null; source?: string }>;
 
-/** Frame do prompt: o da imagem marcada, ou o mais próximo do instante
- *  marcado (o primeiro, sem marcação); -1 se a imagem marcada não virou frame. */
+/** Prompt frame: the marked image's, or the one closest to the marked
+ *  timestamp (the first, if unmarked); -1 if the marked image didn't become a frame. */
 export function promptFrame(names: string[], prompt: SubjectPrompt | null, origin?: FrameOrigin): number {
   if (!prompt || !origin) return 0;
   if (prompt.image) return names.findIndex((n) => origin.get(n)?.source === prompt.image);
@@ -139,7 +139,7 @@ export function promptFrame(names: string[], prompt: SubjectPrompt | null, origi
   return best;
 }
 
-/** Prompt em pixels; sem marcação, um ponto no centro (vídeos orbitais giram em volta do sujeito). */
+/** Prompt in pixels; if unmarked, a point at the center (orbit videos circle the subject). */
 export function promptPixels(prompt: SubjectPrompt | null, w: number, h: number): Sam2Prompt {
   if (!prompt || (!prompt.box && !prompt.points.length)) return { points: [{ x: w / 2, y: h / 2, label: 1 }] };
   return {

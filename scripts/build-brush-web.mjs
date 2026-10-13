@@ -1,23 +1,23 @@
 #!/usr/bin/env node
-// Compila o Brush do commit fixo, com os patches de web/brush/: em
-// WebAssembly (bindings `brush-js`) para a versão web, ou nativo (`brush-cli`)
-// como sidecar do desktop. Assim os dois treinam com o mesmo Brush.
+// Builds Brush from the pinned commit with the patches in web/brush/: as
+// WebAssembly (`brush-js` bindings) for the web version, or native (`brush-cli`)
+// as the desktop sidecar. That way both train with the same Brush.
 //
-//   pnpm web:wasm             clona/atualiza o Brush, aplica o patch e compila
-//   pnpm web:wasm --dev       build de debug (mais rápido, wasm bem maior)
-//   pnpm web:wasm --profiling otimizado e com nomes de função, para perfilar
-//   pnpm brush:native         sidecar do desktop em src-tauri/binaries/
-//   pnpm brush:native --if-stale   só compila se o commit ou os patches mudaram
+//   pnpm web:wasm             clones/updates Brush, applies the patches and builds
+//   pnpm web:wasm --dev       debug build (faster, much larger wasm)
+//   pnpm web:wasm --profiling optimized with function names, for profiling
+//   pnpm brush:native         desktop sidecar in src-tauri/binaries/
+//   pnpm brush:native --if-stale   only builds if the commit or patches changed
 //
-// - Fonte: github.com/ArthurBrussee/brush num commit fixo, em web/.brush/.
-// - Patch: web/brush/*.patch, consertos do brush-js para rodar de verdade no
-//   navegador (ver README, "Versão web") e as opções de treino do app.
-// - Saída: web/pkg/ (módulo ES + .wasm, alvo `web` do wasm-pack), ou
-//   src-tauri/binaries/brush_app-<triple> mais um `.rev` com o carimbo do
-//   commit e dos patches.
-// - Requer rustup (e wasm-pack, no web) e Rust >= 1.95 (o Burn do Brush
-//   exige). Usa o toolchain de BRUSH_TOOLCHAIN (padrão 1.99) sem mexer no
-//   `stable`.
+// - Source: github.com/ArthurBrussee/brush at a pinned commit, in web/.brush/.
+// - Patches: web/brush/*.patch, brush-js fixes needed to actually run in the
+//   browser (see README, "Web version") and the app's training options.
+// - Output: web/pkg/ (ES module + .wasm, wasm-pack `web` target), or
+//   src-tauri/binaries/brush_app-<triple> plus a `.rev` file stamped with the
+//   commit and patches.
+// - Requires rustup (and wasm-pack, for web) and Rust >= 1.95 (Brush's Burn
+//   needs it). Uses the BRUSH_TOOLCHAIN toolchain (default 1.99) without
+//   touching `stable`.
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -28,9 +28,9 @@ import { fileURLToPath } from "node:url";
 
 const BRUSH = {
   repo: "https://github.com/ArthurBrussee/brush.git",
-  // main de 2026-10-03, #545 ("Train in metres"). O seguinte (#546, fusão do
-  // passo de treino) leva o kernel project_forward a 12 storage buffers, acima
-  // dos 10 por estágio que o Chrome expõe no Metal: o treino não roda no Mac.
+  // main as of 2026-10-03, #545 ("Train in metres"). The next one (#546, fused
+  // training step) takes the project_forward kernel to 12 storage buffers, over
+  // the 10 per stage Chrome exposes on Metal: training doesn't run on a Mac.
   rev: "38185dedaf8143988a31a64c1f27c2323b1febdf",
 };
 const TOOLCHAIN = process.env.BRUSH_TOOLCHAIN || "1.99";
@@ -52,19 +52,19 @@ function run(cmd, args, opts = {}) {
 
 const patchFiles = (await readdir(patches)).filter((f) => f.endsWith(".patch")).sort();
 
-// Sidecar do desktop: o nome `brush_app-<triple>` é o que o Tauri empacota
-// (externalBin) e o que src-tauri/src/tools.rs procura.
+// Desktop sidecar: the name `brush_app-<triple>` is what Tauri bundles
+// (externalBin) and what src-tauri/src/tools.rs looks for.
 let sidecar = null;
 if (native) {
   const host = spawnSync("rustc", ["-vV"], { encoding: "utf8" }).stdout?.match(/^host: (.+)$/m)?.[1].trim();
-  if (!host) throw new Error("rustc não encontrado; instale o Rust (https://rustup.rs).");
+  if (!host) throw new Error("rustc not found; install Rust (https://rustup.rs).");
   const ext = process.platform === "win32" ? ".exe" : "";
   const hash = createHash("sha256").update(BRUSH.rev);
   for (const p of patchFiles) hash.update(p).update(readFileSync(join(patches, p)));
   sidecar = { dest: join(root, "src-tauri", "binaries", `brush_app-${host}${ext}`), ext, stamp: hash.digest("hex") };
   const current = existsSync(`${sidecar.dest}.rev`) ? readFileSync(`${sidecar.dest}.rev`, "utf8").trim() : null;
   if (process.argv.includes("--if-stale") && existsSync(sidecar.dest) && current === sidecar.stamp) {
-    console.log(`✓ Brush já compilado deste commit e patches (${sidecar.dest})`);
+    console.log(`✓ Brush already built from this commit and patches (${sidecar.dest})`);
     process.exit(0);
   }
 }
@@ -75,27 +75,27 @@ if (!existsSync(join(src, ".git"))) {
 }
 const head = spawnSync("git", ["-C", src, "rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim();
 if (head !== BRUSH.rev) run("git", ["-C", src, "fetch", "-q", "--depth", "1", "origin", BRUSH.rev]);
-// O clone é só cache do build: volta sempre ao commit fixo e reaplica os patches.
+// The clone is just a build cache: always reset to the pinned commit and reapply the patches.
 run("git", ["-C", src, "checkout", "-q", "--force", BRUSH.rev]);
 run("git", ["-C", src, "clean", "-q", "-fd", "apps", "crates"]);
 for (const p of patchFiles) run("git", ["-C", src, "apply", join(patches, p)]);
 
 if (sidecar) {
   run("rustup", ["toolchain", "install", TOOLCHAIN, "--profile", "minimal"]);
-  // Sem símbolos de depuração: vai dentro do instalador (143 → 105 MB no Mac).
+  // No debug symbols: it ships inside the installer (143 → 105 MB on Mac).
   run("cargo", ["build", "--release", "-p", "brush-cli"], { cwd: src, env: { ...env, CARGO_PROFILE_RELEASE_STRIP: "symbols" } });
   await mkdir(dirname(sidecar.dest), { recursive: true });
   await copyFile(join(src, "target", "release", `brush-cli${sidecar.ext}`), sidecar.dest);
   if (process.platform !== "win32") await chmod(sidecar.dest, 0o755);
   await writeFile(`${sidecar.dest}.rev`, `${sidecar.stamp}\n`);
-  console.log(`✓ Brush em ${sidecar.dest}`);
+  console.log(`✓ Brush at ${sidecar.dest}`);
   process.exit(0);
 }
 
 run("rustup", ["toolchain", "install", TOOLCHAIN, "--profile", "minimal", "--target", "wasm32-unknown-unknown"]);
 run(
   "wasm-pack",
-  // --profiling sem wasm-opt: o -O dele apaga a seção `name` e o perfil sai sem nomes.
+  // --profiling without wasm-opt: its -O strips the `name` section and profiles lose names.
   ["build", "apps/brush-js", profile, ...(profile === "--profiling" ? ["--no-opt"] : []), "--target", "web", "--out-dir", out],
   { cwd: src, env },
 );

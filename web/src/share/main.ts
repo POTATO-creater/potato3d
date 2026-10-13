@@ -1,7 +1,7 @@
-// Visualizador dos links compartilhados (/s/<id>): baixa o splat do Worker
-// (worker/index.ts) e mostra com o PlayCanvas, que roda no desktop, no
-// celular e em óculos com WebXR (VR) ou celulares com AR. Independente do
-// app: não carrega React nem o pipeline.
+// Shared-link viewer (/s/<id>): downloads the splat from the Worker
+// (worker/index.ts) and shows it with PlayCanvas, which runs on desktop,
+// mobile, WebXR headsets (VR) and AR-capable phones. Independent of the app:
+// it loads neither React nor the pipeline.
 
 import "./share.css";
 import {
@@ -31,22 +31,22 @@ document.title = `${t.title} · Gausify Orbit`;
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
-// /s/<id> em produção; no `pnpm web:dev` (sem o Worker), /share.html?id=<id>
-// com VITE_SHARE_ORIGIN apontando para um `wrangler dev`.
+// /s/<id> in production; in `pnpm web:dev` (no Worker), /share.html?id=<id>
+// with VITE_SHARE_ORIGIN pointing at a `wrangler dev`.
 const id = location.pathname.match(/^\/s\/([0-9A-Za-z]+)/)?.[1] ?? new URLSearchParams(location.search).get("id") ?? "";
 const API = `${import.meta.env.VITE_SHARE_ORIGIN ?? ""}/api/share/${id}`;
 
-// Ajustes do XR, sobrepostos pela URL para comparar no próprio óculos
-// (ex.: /s/<id>?crop=0&foveation=0):
-//   crop       raio do recorte em volta do sujeito, em raios da órbita das
-//              câmeras (0 mostra a cena inteira)
-//   foveation  foveação fixa, 0–1
-//   xrScale    resolução do XR (1 = a recomendada pelo aparelho)
-//   sort       "radial" ou "linear"
-//   xrPreview  1 monta a maquete do XR no navegador comum, com a câmera na
-//              altura da cabeça (para conferir sem óculos)
-//   gpu        "webgpu" renderiza com WebGPU em vez de WebGL 2 (ver `createDevice`)
-//   gpuSort    0 mantém a ordenação dos splats na CPU mesmo no WebGPU
+// XR settings, overridable from the URL to compare on the headset itself
+// (e.g. /s/<id>?crop=0&foveation=0):
+//   crop       crop radius around the subject, in units of the camera orbit
+//              radius (0 shows the whole scene)
+//   foveation  fixed foveation, 0–1
+//   xrScale    XR resolution (1 = the device's recommended one)
+//   sort       "radial" or "linear"
+//   xrPreview  1 builds the XR diorama in a regular browser, with the camera at
+//              head height (to check without a headset)
+//   gpu        "webgpu" renders with WebGPU instead of WebGL 2 (see `createDevice`)
+//   gpuSort    0 keeps splat sorting on the CPU even on WebGPU
 const query = new URLSearchParams(location.search);
 const param = (key: string, fallback: number) => {
   const v = Number(query.get(key));
@@ -60,11 +60,11 @@ const XR_OPTIONS: XrOptions = {
 const XR_CROP = param("crop", 0.8);
 const WANT_WEBGPU = query.get("gpu") === "webgpu";
 
-/** WebGL 2 por padrão, como o WebGaussian. Com `?gpu=webgpu`, WebGPU: no XR
- *  isso depende do `XRGPUBinding` (WebXR/WebGPU Binding), ainda experimental
- *  (no Quest Browser, atrás da flag "WebXR experimental features"). Sem ele,
- *  num aparelho que entra em VR/AR, fica no WebGL 2 para os botões não
- *  sumirem. O backend em uso aparece num chip quando o parâmetro é passado. */
+/** WebGL 2 by default, like WebGaussian. With `?gpu=webgpu`, WebGPU: in XR that
+ *  depends on `XRGPUBinding` (WebXR/WebGPU Binding), still experimental (in
+ *  Quest Browser, behind the "WebXR experimental features" flag). Without it,
+ *  on a VR/AR-capable device it stays on WebGL 2 so the buttons don't
+ *  disappear. The active backend shows in a chip when the parameter is set. */
 async function createDevice(canvas: HTMLCanvasElement) {
   const xr = "xr" in navigator;
   const binding = "XRGPUBinding" in globalThis;
@@ -76,19 +76,19 @@ async function createDevice(canvas: HTMLCanvasElement) {
   const device = await createGraphicsDevice(canvas, {
     deviceTypes: webgpu ? [DEVICETYPE_WEBGPU, DEVICETYPE_WEBGL2] : [DEVICETYPE_WEBGL2],
     antialias: false,
-    // Sem o binding, `requestAdapter({ xrCompatible: true })` nunca responde
-    // no Chrome (e trava os pedidos seguintes); o PlayCanvas liga a opção
-    // sozinho quando existe `navigator.xr`. No WebGL ela é o makeXRCompatible.
+    // Without the binding, `requestAdapter({ xrCompatible: true })` never
+    // resolves in Chrome (and blocks later requests); PlayCanvas turns the
+    // option on by itself when `navigator.xr` exists. On WebGL it maps to makeXRCompatible.
     xrCompatible: webgpu ? binding : xr,
-    // Repassado ao WebGL (fora do tipo): canvas opaco, como no `new Application`.
+    // Passed through to WebGL (not in the type): opaque canvas, as in `new Application`.
     ...{ alpha: false },
   });
-  // Sem WebGPU nem WebGL 2, o PlayCanvas devolve um device "null" que não desenha.
-  if (!device.isWebGPU && !device.isWebGL2) throw new Error("WebGL 2 indisponível");
+  // Without WebGPU or WebGL 2, PlayCanvas returns a "null" device that doesn't draw.
+  if (!device.isWebGPU && !device.isWebGL2) throw new Error("WebGL 2 unavailable");
   if (query.has("gpu")) {
     const chip = $("backend");
     chip.hidden = false;
-    chip.textContent = device.isWebGPU ? "WebGPU" : WANT_WEBGPU ? "WebGL 2 (sem XRGPUBinding)" : "WebGL 2";
+    chip.textContent = device.isWebGPU ? "WebGPU" : WANT_WEBGPU ? "WebGL 2 (no XRGPUBinding)" : "WebGL 2";
   }
   return device;
 }
@@ -97,12 +97,12 @@ interface Meta {
   name: string;
   format: "sog" | "ply";
   size: number;
-  /** `null`: não expira. */
+  /** `null`: never expires. */
   expiresAt: number | null;
   view: ShareView | null;
 }
 
-/** O link expirou, foi revogado ou nunca existiu. */
+/** The link expired, was revoked or never existed. */
 class Gone extends Error {}
 
 const FOV = 50;
@@ -161,11 +161,11 @@ async function download(url: string, size: number, onProgress: (f: number) => vo
   return new Blob(chunks);
 }
 
-/** Rotação que leva o vetor unitário `a` em `b`. */
+/** Rotation taking unit vector `a` to `b`. */
 function rotationBetween(a: Vec3, b: Vec3): Quat {
   const d = a.dot(b);
   if (d < -0.999999) {
-    // Opostos: meia-volta em qualquer eixo perpendicular.
+    // Opposite: half turn around any perpendicular axis.
     const axis = new Vec3().cross(new Vec3(1, 0, 0), a);
     if (axis.lengthSq() < 1e-6) axis.cross(new Vec3(0, 0, 1), a);
     return new Quat().setFromAxisAngle(axis.normalize(), 180);
@@ -177,8 +177,8 @@ function rotationBetween(a: Vec3, b: Vec3): Quat {
 async function createViewer(view: ShareView | null) {
   const canvas = $<HTMLCanvasElement>("canvas");
   const app = new Application(canvas, { graphicsDevice: await createDevice(canvas) });
-  // No WebGPU o PlayCanvas ordena os splats na GPU (renderizador ainda
-  // experimental); `?gpuSort=0` volta para a ordenação na CPU, a do WebGL.
+  // On WebGPU, PlayCanvas sorts splats on the GPU (renderer still
+  // experimental); `?gpuSort=0` falls back to CPU sorting, as on WebGL.
   if (app.graphicsDevice.isWebGPU && query.get("gpuSort") === "0") {
     app.scene.gsplat.renderer = GSPLAT_RENDERER_RASTER_CPU_SORT;
   }
@@ -188,15 +188,15 @@ async function createViewer(view: ShareView | null) {
 
   const camera = new Entity("camera", app);
   camera.addComponent("camera", { clearColor: new Color(0.051, 0.055, 0.063), fov: FOV });
-  // Âncoras do XR: a pose dos óculos se compõe com o `rig`, e o splat fica
-  // sob o `stage` (ver xr-session.ts). Fora do XR, os dois ficam na identidade.
+  // XR anchors: the headset pose is composed with `rig`, and the splat lives
+  // under `stage` (see xr-session.ts). Outside XR, both stay at identity.
   const rig = new Entity("xr-rig", app);
   rig.addChild(camera);
   app.root.addChild(rig);
   const stage = new Entity("xr-stage", app);
   app.root.addChild(stage);
-  // Leva as coordenadas do splat (COLMAP) para o mundo: centro da órbita na
-  // origem e "up" das câmeras em +Y, como o visualizador do app.
+  // Maps splat (COLMAP) coordinates to the world: orbit center at the origin
+  // and the cameras' "up" along +Y, like the app's viewer.
   const root = new Entity("splat-root", app);
   stage.addChild(root);
   const q = view ? rotationBetween(new Vec3(...view.up).normalize(), UP) : new Quat();
@@ -217,15 +217,15 @@ async function createViewer(view: ShareView | null) {
     },
   });
 
-  // Enquadramento sem o vídeo (link sem poses): a caixa do splat.
+  // Framing without the video (link without poses): the splat's bounding box.
   let box: { center: Vec3; radius: number } | null = null;
 
-  /** Volta ao ponto de vista do primeiro frame do vídeo, como o "Recentrar" do app. */
+  /** Returns to the video's first-frame viewpoint, like the app's "Recenter". */
   function recenter() {
     if (view) {
       const first = q.transformVector(new Vec3(...view.camera).sub(new Vec3(...view.center)));
-      // A lente daqui é fixa; a do vídeo pode ser bem mais fechada
-      // (teleobjetiva). Aproxima até o quadro do vídeo caber justo na tela.
+      // This lens is fixed; the video's may be much narrower (telephoto).
+      // Move in until the video frame fits the screen snugly.
       let k = 1.35;
       if (view.fovY) {
         const v = Math.tan((FOV * Math.PI) / 360);
@@ -246,13 +246,13 @@ async function createViewer(view: ShareView | null) {
     camera.camera!.farClip = r * 100;
     orbit.setDistanceRange(r * 0.05, r * 10);
     if (view.polar) {
-      // Ângulo polar θ a partir do "up" ↔ inclinação θ − 90°.
+      // Polar angle θ from "up" ↔ pitch θ − 90°.
       const deg = (x: number) => (x * 180) / Math.PI;
       orbit.setPitchRange(deg(view.polar[0]) - 90, deg(view.polar[1]) - 90);
     }
-    // A maquete do XR é a esfera do recorte (o sujeito com folga, por dentro
-    // do anel de câmeras), girada para o primeiro frame ficar de frente para
-    // quem está de óculos (em +Z).
+    // The XR diorama is the crop sphere (the subject with some margin, inside
+    // the camera ring), rotated so the first frame faces the headset wearer
+    // (along +Z).
     const first = q.transformVector(new Vec3(...view.camera).sub(new Vec3(...view.center)));
     const crop = XR_CROP * r;
     xr.setContent({
@@ -270,7 +270,7 @@ async function createViewer(view: ShareView | null) {
 
   async function load(blob: Blob, format: Meta["format"]) {
     const url = URL.createObjectURL(blob);
-    // `filename` escolhe o leitor (.sog ou .ply) para uma URL blob:.
+    // `filename` picks the parser (.sog or .ply) for a blob: URL.
     const asset = new Asset("splat", "gsplat", { url, filename: `scene.${format}` });
     try {
       await new Promise<void>((resolve, reject) => {
@@ -319,12 +319,12 @@ function wireTools(v: Awaited<ReturnType<typeof createViewer>>) {
 
   const fs = $("fullscreen");
   fs.textContent = t.fullscreen;
-  // O iPhone não tem tela cheia para elementos.
+  // iPhone has no element fullscreen.
   fs.hidden = !document.fullscreenEnabled;
   fs.onclick = () =>
     document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen().catch(() => {});
 
-  // Tem que entrar no XR dentro do clique (gesto do usuário).
+  // XR must be entered inside the click handler (user gesture).
   $("vr").textContent = t.vr;
   $("vr").title = t.vrTitle;
   $("vr").onclick = () => v.xr.start("vr");

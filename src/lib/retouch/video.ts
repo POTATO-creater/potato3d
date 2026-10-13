@@ -1,7 +1,7 @@
-// Vídeo dos clipes de retoque no navegador (WebCodecs via Mediabunny):
-// codifica o render quadro a quadro, com timestamp exato i/fps (não depende
-// da velocidade da máquina), e lê o vídeo restaurado de volta, frame a frame.
-// Base: web/src/reference/record.ts da branch web-orbita-referencia.
+// Retouch clip video in the browser (WebCodecs via Mediabunny): encodes the
+// render frame by frame with exact i/fps timestamps (independent of machine
+// speed), and reads the restored video back frame by frame.
+// Based on web/src/reference/record.ts from the web-orbita-referencia branch.
 
 import {
   ALL_FORMATS,
@@ -17,28 +17,28 @@ import {
   type VideoCodec,
 } from "mediabunny";
 
-/** H.264 primeiro: é o que o ComfyUI (ffmpeg/PyAV) abre sem surpresa. */
+/** H.264 first: it is what ComfyUI (ffmpeg/PyAV) opens without surprises. */
 const CODECS: VideoCodec[] = ["avc", "hevc", "vp9", "av1"];
 
-/** Cinza do fundo do vídeo de referência (o mesmo meio do treino com recorte). */
+/** Background gray of the reference video (the same mid-gray as masked training). */
 export const CLIP_BACKGROUND = 128;
 
 export interface ClipEncoder {
-  /** Frame `index` em RGBA de cima para baixo, cor sem pré-multiplicar. */
+  /** Frame `index` as top-down RGBA, non-premultiplied color. */
   add(index: number, rgba: Uint8ClampedArray): Promise<void>;
   finish(): Promise<Blob>;
   cancel(): Promise<void>;
 }
 
-/** Bitrate alto: o restaurador não deve gastar esforço com artefatos de
- *  compressão nossos. Mbps. */
+/** High bitrate so the restorer doesn't spend effort on our own compression
+ *  artifacts. Mbps. */
 const BITRATE = 16;
 
 export async function createClipEncoder(width: number, height: number, fps: number): Promise<ClipEncoder> {
-  if (typeof VideoEncoder === "undefined") throw new Error("este navegador não codifica vídeo (WebCodecs)");
+  if (typeof VideoEncoder === "undefined") throw new Error("this browser cannot encode video (WebCodecs)");
   const quality = new Quality({ bitrate: BITRATE * 1e6 });
   const codec = await getFirstEncodableVideoCodec(CODECS, { width, height, frameRate: fps, quality });
-  if (!codec) throw new Error(`nenhum codec de vídeo disponível para ${width}×${height}`);
+  if (!codec) throw new Error(`no video codec available for ${width}×${height}`);
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
@@ -46,8 +46,8 @@ export async function createClipEncoder(width: number, height: number, fps: numb
   const image = g.createImageData(width, height);
   const target = new BufferTarget();
   const output = new Output({ format: new Mp4OutputFormat({ fastStart: "in-memory" }), target });
-  // Todo frame é keyframe: o restaurador e o decodificador acessam qualquer
-  // frame sem depender dos vizinhos, e a qualidade fica uniforme.
+  // Every frame is a keyframe: the restorer and decoder can access any frame
+  // without its neighbours, and quality stays uniform.
   const source = new CanvasSource(canvas, { codec, quality, keyFrameInterval: 0, latencyMode: "quality" });
   output.addVideoTrack(source, { frameRate: fps });
   await output.start();
@@ -74,7 +74,7 @@ export async function createClipEncoder(width: number, height: number, fps: numb
   };
 }
 
-/** Alpha do frame como PNG em tons de cinza (255 = sujeito). */
+/** Frame alpha as a grayscale PNG (255 = subject). */
 export async function alphaPng(width: number, height: number, rgba: Uint8ClampedArray): Promise<Blob> {
   const canvas = new OffscreenCanvas(width, height);
   const g = canvas.getContext("2d")!;
@@ -94,12 +94,12 @@ export interface VideoInfo {
   frames: number;
 }
 
-/** Tamanho e número de frames (contados, não estimados pela duração). */
+/** Size and frame count (counted, not estimated from duration). */
 export async function videoInfo(blob: Blob): Promise<VideoInfo> {
   const input = new Input({ source: new BlobSource(blob), formats: ALL_FORMATS });
   try {
     const track = await input.getPrimaryVideoTrack();
-    if (!track) throw new Error("o arquivo não tem trilha de vídeo");
+    if (!track) throw new Error("the file has no video track");
     const { packetCount } = await track.computePacketStats();
     return { width: track.displayWidth, height: track.displayHeight, frames: packetCount };
   } finally {
@@ -107,13 +107,13 @@ export async function videoInfo(blob: Blob): Promise<VideoInfo> {
   }
 }
 
-/** Frames do vídeo em ordem, redimensionados para `width`×`height` (o
- *  restaurador pode devolver outro tamanho; a proporção é a mesma). */
+/** Video frames in order, resized to `width`×`height` (the restorer may
+ *  return a different size; the aspect ratio is the same). */
 export async function* videoFrames(blob: Blob, width: number, height: number): AsyncGenerator<ImageData> {
   const input = new Input({ source: new BlobSource(blob), formats: ALL_FORMATS });
   try {
     const track = await input.getPrimaryVideoTrack();
-    if (!track) throw new Error("o arquivo não tem trilha de vídeo");
+    if (!track) throw new Error("the file has no video track");
     const sink = new CanvasSink(track, { width, height, fit: "fill", poolSize: 2 });
     for await (const { canvas } of sink.canvases()) {
       const g = (canvas as HTMLCanvasElement | OffscreenCanvas).getContext("2d") as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;

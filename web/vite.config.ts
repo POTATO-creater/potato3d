@@ -4,24 +4,23 @@ import react from "@vitejs/plugin-react";
 import { ortWasmGzip } from "./ort-wasm-plugin";
 import { serviceWorker } from "./sw-plugin";
 
-// Versão web: a interface de src/ com o host do navegador (web/src/host/);
-// o treino roda no Brush compilado para WASM + WebGPU (`pnpm web:wasm` gera
-// web/pkg).
+// Web version: the src/ UI with the browser host (web/src/host/); training
+// runs on Brush compiled to WASM + WebGPU (`pnpm web:wasm` generates web/pkg).
 export default defineConfig({
   root: import.meta.dirname,
-  // Vai no manifest.json do pacote do projeto (.gorbit).
+  // Written to the project package's manifest.json (.gorbit).
   define: { __APP_VERSION__: JSON.stringify(JSON.parse(readFileSync(`${import.meta.dirname}/../package.json`, "utf8")).version) },
-  // Só agem no build: o .wasm do ONNX Runtime sai gzipado (limite de 25 MiB
-  // do Cloudflare) e o service worker do cache offline, que no dev atrapalharia o HMR.
+  // Build-only: gzips the ONNX Runtime .wasm (Cloudflare's 25 MiB limit) and emits
+  // the offline-cache service worker, which would get in the way of HMR in dev.
   plugins: [react(), ortWasmGzip(), serviceWorker(`${import.meta.dirname}/src/sw.template.js`)],
-  // O ONNX Runtime acha os próprios .wasm por import.meta.url: não pode ser pré-empacotado.
+  // ONNX Runtime locates its own .wasm via import.meta.url, so it can't be pre-bundled.
   optimizeDeps: { exclude: ["onnxruntime-web"] },
   build: {
     outDir: "../dist-web",
     emptyOutDir: true,
     target: "es2022",
-    // Duas páginas: o app e o visualizador dos links compartilhados, que o
-    // Worker serve em /s/<id> (worker/index.ts).
+    // Two pages: the app and the shared-link viewer, which the Worker serves
+    // at /s/<id> (worker/index.ts).
     rolldownOptions: {
       input: {
         main: `${import.meta.dirname}/index.html`,
@@ -32,8 +31,8 @@ export default defineConfig({
   server: {
     port: 1440,
     strictPort: true,
-    // WEB_FS_ANY=1 deixa o dev server servir qualquer pasta via /@fs, para
-    // testar com `?dataset=/@fs/<caminho do dataset>`.
+    // WEB_FS_ANY=1 lets the dev server serve any folder via /@fs, for testing
+    // with `?dataset=/@fs/<dataset path>`.
     fs: { allow: [".."], strict: !process.env.WEB_FS_ANY },
   },
 });

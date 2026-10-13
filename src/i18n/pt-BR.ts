@@ -1,8 +1,8 @@
-// Catálogo de referência: os outros idiomas têm que ter exatamente esta forma.
+// Reference catalog: the other languages must have exactly this shape.
 
 import { fmtCount } from "../lib/format";
 
-/** Parâmetros de uma `Msg`, com as mensagens aninhadas já traduzidas. */
+/** Parameters of a `Msg`, with nested messages already translated. */
 export type Args = Record<string, string | number>;
 
 const FEATURES: Record<string, string> = { sift: "SIFT", siftPlus: "SIFT reforçado", aliked: "ALIKED + LightGlue" };
@@ -11,9 +11,9 @@ const features = (id: string | number) => FEATURES[id] ?? String(id);
 export const ptBR = {
   language: "Português (Brasil)",
 
-  /** Nomes curtos das etapas (botões e listas). */
+  /** Short stage names (buttons and lists). */
   stages: { frames: "Frames", masks: "Recorte", poses: "Poses", train: "Treino" },
-  /** Títulos da faixa de etapas. */
+  /** Stage strip titles. */
   stageTitles: { frames: "Frames", masks: "Recorte", poses: "Poses de câmera", train: "Treino do splat" },
 
   common: {
@@ -232,9 +232,9 @@ export const ptBR = {
     minOpacityHint: "0 desliga",
     shBands: "Bandas SH",
     shBandsHint: "brilho que muda com o ângulo; cortar reduz bastante o arquivo",
-    /** Rótulo de cada grau SH (minúsculo; o menu capitaliza). */
+    /** Label for each SH degree (lowercase; the menu capitalizes). */
     shLabels: ["só cor (grau 0)", "grau 1", "grau 2", "grau 3"],
-    /** O que cada grau mantém, para o menu. */
+    /** What each degree keeps, for the menu. */
     shHints: ["sem reflexos, o menor arquivo", "reflexos suaves", "reflexos mais nítidos"],
     keep: (label: string) => `Manter (${label})`,
     run: "Exportar",
@@ -284,7 +284,7 @@ export const ptBR = {
     },
   },
 
-  /** Página do link compartilhado (web/share.html). */
+  /** Shared link page (web/share.html). */
   shareViewer: {
     title: "Splat compartilhado",
     opening: "Abrindo…",
@@ -369,10 +369,10 @@ export const ptBR = {
     queued: "na fila",
     extracting: "extraindo…",
     ready: "pronto",
-    /** Seguido de `pnpm setup:tools` em código. */
+    /** Followed by `pnpm setup:tools` as code. */
     brushDev: "O Brush deveria vir junto com o app. Em desenvolvimento, rode",
     visionNote: "O recortador (Vision) vem com o app e exige macOS 14 ou superior.",
-    /** Rótulos dos modelos baixáveis (os demais pacotes usam o nome da ferramenta). */
+    /** Labels of downloadable models (other packages use the tool name). */
     packages: {
       rmbg: "Recorte RMBG-1.4",
       modnet: "Recorte de pessoas (MODNet)",
@@ -412,7 +412,7 @@ export const ptBR = {
     recenter: "Recentrar",
   },
 
-  /** Integração com o ComfyUI (configuração e erros). */
+  /** ComfyUI integration (settings and errors). */
   comfy: {
     open: "Integrações",
     openTitle: "Configurar a integração com o ComfyUI",
@@ -470,7 +470,7 @@ export const ptBR = {
     },
   },
 
-  /** Painel de retoque: clipes restaurados no ComfyUI e treino incremental. */
+  /** Retouch panel: clips restored in ComfyUI and incremental training. */
   retouch: {
     title: "Retoque",
     intro:
@@ -568,7 +568,7 @@ export const ptBR = {
     close: "Fechar",
   },
 
-  /** Versão web: aviso de versão nova baixada pelo service worker. */
+  /** Web version: notice of a new version downloaded by the service worker. */
   update: {
     available: "Há uma nova versão do Gausify Orbit pronta para usar.",
     apply: "Atualizar agora",
@@ -576,7 +576,7 @@ export const ptBR = {
     busy: "Disponível quando o processamento terminar",
   },
 
-  /** Mensagens de progresso (backend e reducer), por chave da `Msg`. */
+  /** Progress messages (backend and reducer), by `Msg` key. */
   msg: {
     "stage.saved": () => "Resultado salvo no projeto",
     "stage.queued": () => "Na fila",

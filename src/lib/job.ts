@@ -5,7 +5,7 @@ export type StageStatus = "idle" | "queued" | "running" | "done" | "error" | "ke
 export interface StageState {
   status: StageStatus;
   fraction: number;
-  /** Traduzida na hora de exibir (src/i18n). */
+  /** Translated at display time (src/i18n). */
   message: Msg | null;
   seconds?: number;
 }
@@ -13,7 +13,7 @@ export interface StageState {
 export interface TrainProgress {
   iter: number;
   splats: number;
-  /** Passos por segundo, média móvel. */
+  /** Steps per second, moving average. */
   rate: number | null;
   lastAt: number;
 }
@@ -23,12 +23,12 @@ export interface JobState {
   stages: Record<Stage, StageState>;
   frames: FrameInfo[];
   masks: MaskStats | null;
-  /** Pasta das máscaras + versão (cache-buster das miniaturas). */
+  /** Masks folder + version (thumbnail cache-buster). */
   masksDir: { path: string; version: number } | null;
   poses: ModelStats | null;
   train: TrainProgress | null;
   evals: { iter: number; psnr: number; ssim: number }[];
-  /** .ply mais recente a exibir (snapshot durante o treino, final depois). */
+  /** Latest .ply to show (snapshot during training, final afterwards). */
   splat: { path: string; iter: number | null; version: number } | null;
   finalPly: string | null;
   error: { stage: Stage | null; message: string } | null;
@@ -53,15 +53,15 @@ export const initialJob: JobState = {
 };
 
 export type JobAction =
-  /** `masksForPoses`: o recorte entra nas poses (refazê-lo invalida as poses). */
+  /** `masksForPoses`: masks feed into poses (redoing them invalidates poses). */
   | { type: "start"; from: Stage; to: Stage; masksForPoses: boolean }
   | { type: "event"; event: JobEvent }
   | { type: "load"; project: ProjectState }
-  /** Frames recusados ou aceitos de volta (`Api.setFramesRejected`). */
+  /** Frames rejected or restored (`Api.setFramesRejected`). */
   | { type: "framesEdited"; project: ProjectState };
 
-/** Etapas cujo resultado um job de `from` a `to` descarta, as mesmas regras
- *  dos backends: as que ele roda e as seguintes que dependiam delas. */
+/** Stages whose results a job from `from` to `to` discards, with the same
+ *  rules as the backends: those it runs and the later ones depending on them. */
 export function discardedBy(from: Stage, to: Stage, masksForPoses: boolean): Set<Stage> {
   const f = STAGES.indexOf(from);
   const t = Math.max(f, STAGES.indexOf(to));
@@ -69,7 +69,7 @@ export function discardedBy(from: Stage, to: Stage, masksForPoses: boolean): Set
   const out = new Set<Stage>();
   if (runs("frames")) STAGES.forEach((st) => out.add(st));
   if (runs("masks")) out.add("masks");
-  // Recortar de novo sem usar o recorte nas poses as reaproveita.
+  // Re-masking without using masks for poses keeps the poses.
   if ((runs("poses") && from !== "masks") || (runs("masks") && masksForPoses)) out.add("poses");
   if (runs("train") || out.has("poses")) out.add("train");
   return out;
@@ -155,7 +155,7 @@ function applyEvent(s: JobState, e: JobEvent): JobState {
     case "masksReady":
       return { ...s, masks: e.stats, masksDir: { path: e.dir, version: Date.now() } };
     case "stageSkipped": {
-      // Poses reaproveitadas continuam valendo; recorte desativado some.
+      // Reused poses stay valid; disabled masking is cleared.
       const next = patchStage(s, e.stage, { status: "skipped", fraction: 1, message: e.reason });
       return e.stage === "masks" ? { ...next, masks: null, masksDir: null } : next;
     }
@@ -168,7 +168,7 @@ function applyEvent(s: JobState, e: JobEvent): JobState {
         ...s,
         running: false,
         totalSeconds: e.seconds,
-        // Sem ply: o job parou antes do treino.
+        // No ply: the job stopped before training.
         ...(e.ply ? { finalPly: e.ply, splat: { path: e.ply, iter: null, version: Date.now() } } : {}),
       };
     case "failed": {

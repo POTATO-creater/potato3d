@@ -1,5 +1,5 @@
-//! Execução de processos externos (ffmpeg, colmap, brush) com streaming de
-//! saída linha a linha e cancelamento cooperativo.
+//! Runs external processes (ffmpeg, colmap, brush) with line-by-line output
+//! streaming and cooperative cancellation.
 
 use std::collections::VecDeque;
 use std::process::Stdio;
@@ -10,13 +10,13 @@ use tokio::process::Command;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-/// Erro sentinela para distinguir "usuário cancelou" de falha real.
+/// Sentinel error to tell "user cancelled" apart from a real failure.
 #[derive(Debug)]
 pub struct Cancelled;
 
 impl std::fmt::Display for Cancelled {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("cancelado")
+        f.write_str("cancelled")
     }
 }
 
@@ -26,8 +26,8 @@ pub fn is_cancelled(err: &anyhow::Error) -> bool {
     err.downcast_ref::<Cancelled>().is_some()
 }
 
-/// No Windows, um app gráfico que lança programas de console abre uma janela
-/// preta para cada um. `CREATE_NO_WINDOW` evita isso.
+/// On Windows, a GUI app that launches console programs opens a black window
+/// for each one. `CREATE_NO_WINDOW` prevents that.
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
@@ -48,8 +48,8 @@ pub fn hide_console_std(cmd: &mut std::process::Command) {
     let _ = cmd;
 }
 
-/// Lê um stream quebrando em `\n` **e** `\r`, para capturar barras de
-/// progresso que só reescrevem a mesma linha.
+/// Reads a stream splitting on `\n` **and** `\r`, to catch progress bars
+/// that keep rewriting the same line.
 async fn pump_lines<R: AsyncRead + Unpin>(mut reader: R, tx: mpsc::UnboundedSender<String>) {
     let mut buf = vec![0u8; 8192];
     let mut pending: Vec<u8> = Vec::new();
@@ -77,9 +77,9 @@ async fn pump_lines<R: AsyncRead + Unpin>(mut reader: R, tx: mpsc::UnboundedSend
     }
 }
 
-/// Roda `cmd` até o fim, chamando `on_line` para cada linha de stdout/stderr.
-/// Mata o processo se `cancel` disparar. Em falha, o erro inclui as últimas
-/// linhas de saída para diagnóstico.
+/// Runs `cmd` to completion, calling `on_line` for each stdout/stderr line.
+/// Kills the process if `cancel` fires. On failure, the error includes the
+/// last output lines for diagnosis.
 pub async fn run_streaming(
     mut cmd: Command,
     cancel: &CancellationToken,
@@ -94,7 +94,7 @@ pub async fn run_streaming(
 
     let mut child = cmd
         .spawn()
-        .with_context(|| format!("não foi possível executar {program}"))?;
+        .with_context(|| format!("could not run {program}"))?;
 
     let (tx, mut rx) = mpsc::unbounded_channel();
     tokio::spawn(pump_lines(child.stdout.take().unwrap(), tx.clone()));
@@ -136,7 +136,7 @@ pub async fn run_streaming(
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or(program);
         bail!(
-            "{name} terminou com código {}\n{}",
+            "{name} exited with code {}\n{}",
             status.code().map_or("?".into(), |c| c.to_string()),
             tail.into_iter().collect::<Vec<_>>().join("\n")
         );
@@ -144,7 +144,7 @@ pub async fn run_streaming(
     Ok(())
 }
 
-/// Roda e captura a saída completa (para comandos curtos como ffprobe).
+/// Runs and captures the full output (for short commands such as ffprobe).
 pub async fn run_capture(mut cmd: Command) -> Result<String> {
     let program = cmd.as_std().get_program().to_string_lossy().into_owned();
     hide_console(&mut cmd);
@@ -152,10 +152,10 @@ pub async fn run_capture(mut cmd: Command) -> Result<String> {
         .stdin(Stdio::null())
         .output()
         .await
-        .with_context(|| format!("não foi possível executar {program}"))?;
+        .with_context(|| format!("could not run {program}"))?;
     if !out.status.success() {
         bail!(
-            "{program} falhou: {}",
+            "{program} failed: {}",
             String::from_utf8_lossy(&out.stderr).trim()
         );
     }

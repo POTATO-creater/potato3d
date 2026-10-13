@@ -1,4 +1,4 @@
-/* Página do link compartilhado: mesmas cores do app (src/styles.css). */
+/* Shared-link page: same colors as the app (src/styles.css). */
 
 :root {
   --bg: #0d0e10;
@@ -50,7 +50,7 @@ body {
   height: 100%;
   display: block;
   outline: none;
-  /* Os gestos de toque são da câmera, não da página. */
+  /* Touch gestures belong to the camera, not the page. */
   touch-action: none;
 }
 
