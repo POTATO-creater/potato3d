@@ -125,25 +125,43 @@ export interface SelectOption<T> {
   hint?: string;
 }
 
+/** Texto sem acentos e em minúsculas, para a busca do Select. */
+const fold = (t: string) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+
 /** Lista suspensa no estilo do app, no lugar do `<select>` nativo. O menu vai
  *  num portal com posição fixa (não é cortado pela barra lateral rolável) e
  *  abre para cima quando falta espaço embaixo. Teclado: setas, Home/End,
- *  Enter/Espaço e Esc. */
+ *  Enter/Espaço e Esc. Com `searchable`, o menu ganha uma caixa de busca que
+ *  filtra pelo rótulo e pela linha de apoio (todas as palavras digitadas). */
 export function Select<T extends string | number | null>(props: {
   value: T;
   options: SelectOption<T>[];
   onChange: (v: T) => void;
   disabled?: boolean;
   "aria-label"?: string;
+  searchable?: boolean;
+  searchPlaceholder?: string;
 }) {
   const button = useRef<HTMLButtonElement>(null);
+  const menu = useRef<HTMLElement>(null);
   const list = useRef<HTMLUListElement>(null);
+  const search = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const [place, setPlace] = useState<{ left: number; width: number; top?: number; bottom?: number; maxHeight: number } | null>(null);
   const id = useId();
   const current = props.options.findIndex((o) => o.value === props.value);
   const selected = props.options[current];
+  // Opções visíveis (com o índice original), filtradas pela busca.
+  const terms = fold(query).split(/\s+/).filter(Boolean);
+  const shown = props.options
+    .map((o, i) => ({ o, i }))
+    .filter(({ o }) => {
+      if (!terms.length) return true;
+      const text = fold(`${o.label} ${o.hint ?? ""}`);
+      return terms.every((t) => text.includes(t));
+    });
 
   const position = useCallback(() => {
     const r = button.current?.getBoundingClientRect();
@@ -152,23 +170,25 @@ export function Select<T extends string | number | null>(props: {
     const up = below < 180 && above > below;
     setPlace({
       left: r.left,
-      width: r.width,
+      width: Math.max(r.width, props.searchable ? 260 : 0),
       ...(up ? { bottom: window.innerHeight - r.top + 4 } : { top: r.bottom + 4 }),
-      maxHeight: Math.min(280, up ? above : below),
+      maxHeight: Math.min(props.searchable ? 340 : 280, up ? above : below),
     });
-  }, []);
+  }, [props.searchable]);
 
   function show() {
     if (props.disabled) return;
     position();
+    setQuery("");
     setActive(Math.max(current, 0));
     setOpen(true);
   }
 
-  function choose(i: number) {
+  function choose(k: number) {
     setOpen(false);
     button.current?.focus();
-    if (props.options[i] && i !== current) props.onChange(props.options[i].value);
+    const pick = shown[k];
+    if (pick && pick.i !== current) props.onChange(pick.o.value);
   }
 
   // Fecha ao clicar fora; acompanha rolagem e redimensionamento.
@@ -176,7 +196,7 @@ export function Select<T extends string | number | null>(props: {
     if (!open) return;
     const away = (e: PointerEvent) => {
       const t = e.target as Node;
-      if (!button.current?.contains(t) && !list.current?.contains(t)) setOpen(false);
+      if (!button.current?.contains(t) && !menu.current?.contains(t)) setOpen(false);
     };
     document.addEventListener("pointerdown", away, true);
     window.addEventListener("resize", position);
@@ -192,9 +212,14 @@ export function Select<T extends string | number | null>(props: {
     if (open) list.current?.querySelector<HTMLElement>(`[data-index="${active}"]`)?.scrollIntoView({ block: "nearest" });
   }, [open, active]);
 
+  useEffect(() => {
+    if (open && props.searchable) search.current?.focus();
+  }, [open, props.searchable]);
+
   function onKeyDown(e: React.KeyboardEvent) {
-    const last = props.options.length - 1;
-    const move = (i: number) => (open ? setActive(Math.min(Math.max(i, 0), last)) : show());
+    const last = shown.length - 1;
+    const inSearch = e.target === search.current;
+    const move = (i: number) => (open ? setActive(Math.min(Math.max(i, 0), Math.max(last, 0))) : show());
     switch (e.key) {
       case "ArrowDown":
         move(active + 1);
@@ -203,19 +228,26 @@ export function Select<T extends string | number | null>(props: {
         move(active - 1);
         break;
       case "Home":
+        if (inSearch) return;
         move(0);
         break;
       case "End":
+        if (inSearch) return;
         move(last);
         break;
       case "Enter":
+        if (open) choose(active);
+        else show();
+        break;
       case " ":
+        if (inSearch) return;
         if (open) choose(active);
         else show();
         break;
       case "Escape":
         if (!open) return;
         setOpen(false);
+        button.current?.focus();
         break;
       case "Tab":
         setOpen(false);
@@ -225,6 +257,44 @@ export function Select<T extends string | number | null>(props: {
     }
     e.preventDefault();
   }
+
+  const options = (
+    <ul
+      ref={(el) => {
+        list.current = el;
+        if (!props.searchable) menu.current = el;
+      }}
+      id={id}
+      role="listbox"
+      className={props.searchable ? "select-list" : "select-menu"}
+      style={props.searchable ? undefined : place ?? undefined}
+      tabIndex={-1}
+    >
+      {shown.map(({ o, i }, k) => (
+        <li
+          key={String(o.value)}
+          id={`${id}-${k}`}
+          data-index={k}
+          role="option"
+          aria-selected={i === current}
+          className={`select-option ${k === active ? "active" : ""} ${i === current ? "selected" : ""}`}
+          onPointerEnter={() => setActive(k)}
+          onClick={() => choose(k)}
+        >
+          <span className="select-option-text">
+            {o.label}
+            {o.hint && <span className="select-option-hint">{o.hint}</span>}
+          </span>
+          {i === current && (
+            <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden>
+              <path d="M2.5 6.2 5 8.5 9.5 3.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          )}
+        </li>
+      ))}
+      {!shown.length && <li className="select-empty">—</li>}
+    </ul>
+  );
 
   return (
     <>
@@ -236,7 +306,7 @@ export function Select<T extends string | number | null>(props: {
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={id}
-        aria-activedescendant={open ? `${id}-${active}` : undefined}
+        aria-activedescendant={open && shown.length ? `${id}-${active}` : undefined}
         aria-label={props["aria-label"]}
         disabled={props.disabled}
         onClick={() => (open ? setOpen(false) : show())}
@@ -250,30 +320,27 @@ export function Select<T extends string | number | null>(props: {
       {open &&
         place &&
         createPortal(
-          <ul ref={list} id={id} role="listbox" className="select-menu" style={place} tabIndex={-1}>
-            {props.options.map((o, i) => (
-              <li
-                key={String(o.value)}
-                id={`${id}-${i}`}
-                data-index={i}
-                role="option"
-                aria-selected={i === current}
-                className={`select-option ${i === active ? "active" : ""} ${i === current ? "selected" : ""}`}
-                onPointerEnter={() => setActive(i)}
-                onClick={() => choose(i)}
-              >
-                <span className="select-option-text">
-                  {o.label}
-                  {o.hint && <span className="select-option-hint">{o.hint}</span>}
-                </span>
-                {i === current && (
-                  <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden>
-                    <path d="M2.5 6.2 5 8.5 9.5 3.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                )}
-              </li>
-            ))}
-          </ul>,
+          props.searchable ? (
+            <div ref={(el) => void (menu.current = el)} className="select-menu select-menu-search" style={place}>
+              <input
+                ref={search}
+                className="input select-search"
+                type="search"
+                value={query}
+                placeholder={props.searchPlaceholder}
+                aria-label={props.searchPlaceholder}
+                aria-controls={id}
+                onChange={(e) => {
+                  setQuery(e.currentTarget.value);
+                  setActive(0);
+                }}
+                onKeyDown={onKeyDown}
+              />
+              {options}
+            </div>
+          ) : (
+            options
+          ),
           document.body,
         )}
     </>

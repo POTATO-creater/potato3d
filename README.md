@@ -575,6 +575,84 @@ limite de taxa simulados em `.wrangler/`) e abrir `http://localhost:8787`.
 Para testar a interface do desktop contra ele: `VITE_SHARE_ORIGIN=http://localhost:8787 pnpm dev:mock`
 e `wrangler dev --var SHARE_ORIGINS:http://localhost:1430`.
 
+### Retoque com o ComfyUI (só na versão web, por enquanto)
+
+Depois do treino, o painel **Retoque** melhora ângulos que o vídeo orbital não
+filmou bem (por baixo, por cima, a vista mirada no 3D). O fluxo:
+
+1. Gera uma trajetória que sai de uma foto real, passa por esses ângulos e
+   volta para uma foto real. O movimento sai de um select:
+   - **Desta vista**: passa pela câmera atual do 3D. O botão **Enquadrar** do
+     3D escurece o que fica fora do quadro do vídeo, para mirar.
+   - **Volta 360°**: parte da vista atual e gira em volta do sujeito na mesma
+     altura, até voltar a ela. Com a distância "Da vista atual", serve para
+     refinar de perto: o primeiro frame é exatamente o que o Enquadrar mostra.
+   - **Volta 360° inclinada**: na inclinação da vista atual (por cima ou por
+     baixo), em três fases: sobe reto da altura das fotos até a vista, num
+     arco em torno do ponto que ela mira (como uma grua), com a câmera
+     começando nivelada e inclinando aos poucos até a inclinação da vista;
+     dá a volta nessa inclinação em torno desse ponto; desce de volta. O
+     primeiro frame (a referência do modelo de vídeo) fica numa altura bem
+     coberta pelas fotos, já enquadrando o que a vista enquadra.
+   - **Arco por baixo/por cima**: um terço da órbita em volta da foto mais
+     próxima, desviando na altura.
+   - **Volta 360° por baixo/por cima/sobe e desce**: a volta inteira em outra
+     altura, começando e terminando na direção da mesma foto.
+
+   A duração (em segundos, arredondada para 8n + 1 frames), a inclinação e a
+   distância ficam ao lado; a trajetória se refaz quando mudam. A distância
+   vale para o clipe inteiro, sem aproximar nem afastar: a das fotos ou a da
+   vista atual (no "Desta vista", sempre a da vista). A câmera não
+   para nas pontas, anda em velocidade angular constante mesmo com as fotos
+   espaçadas de forma irregular, e o painel mostra o pico de velocidade, avisando acima de 30°/s
+   (o modelo de vídeo borra o que passa rápido) com a duração que resolve.
+2. Renderiza o splat nessa trajetória: é o vídeo de referência.
+   - O render usa o Spark fora da tela, com a mistura em sRGB igual à da tela
+     e à do Brush.
+   - O vídeo sai em MP4 (Mediabunny), no fps escolhido no painel (padrão: o
+     do workflow). A proporção (a da
+     lente ou 9:16 a 16:9, mantendo a altura do quadro das fotos) e a
+     resolução (lado maior de 512 a 1920, múltiplos de 32) são escolhidas no
+     painel; o padrão é a lente em 480×960.
+3. Envia o vídeo ao ComfyUI com um workflow de restauração.
+   - Configure em **Integrações**: o endereço do ComfyUI e o `.json` exportado
+     com *Export (API)*, com o nó de entrada e o de saída de cada workflow.
+   - **Campos personalizados** (opcional, por workflow): escolha nó e campo
+     (prompt, seed, força da LoRA...) e dê um nome. Eles aparecem no painel
+     de retoque para editar antes de enviar; o valor do workflow é o padrão,
+     e o que mudar fica salvo neste navegador.
+   - O workflow deve seguir o vídeo de entrada (duração, resolução e
+     proporção); o app só troca o arquivo no nó de entrada. O fps padrão do
+     vídeo de referência é o primeiro `fps` fixo do workflow (30 no do LTX),
+     ou 24.
+   - O restaurado precisa ter o mesmo número de frames e a mesma proporção da
+     referência. O tamanho pode mudar: o ajuste usa os frames no tamanho em
+     que chegaram, com os intrínsecos na mesma escala.
+   - O progresso chega pelo WebSocket do ComfyUI.
+4. **Aplicar retoque** ajusta o splat a partir dele mesmo, com as fotos mais os
+   frames restaurados.
+   - Usa o Brush com `init.ply`, 3 mil passos, `lr-mean` 10× menor, num
+     `dataset_retouch/` à parte.
+   - Só uma parte dos frames restaurados entra: por padrão até 25% do número
+     de fotos, repartidos entre os clipes e espaçados por igual (sem as
+     pontas). Restaurados demais puxam o splat para os detalhes que o modelo
+     de vídeo reinventou, e o centro, que as fotos veem bem, perde nitidez.
+     No `scripts/restore-test`, usar 1 a cada 3 frames recuperou 2 dB nas
+     fotos e manteve o fantasma removido. O limite é ajustável no painel.
+   - O splat de antes fica guardado: **Desfazer retoque** volta para ele e
+     **Comparar com o de antes** mostra os dois.
+
+O ComfyUI precisa rodar com `--enable-cors-header`, para o navegador poder
+chamá-lo. No Chrome, a página HTTPS também pede permissão de rede local para
+`http://127.0.0.1`. Para desenvolver sem GPU, há o ComfyUI simulado:
+`node scripts/comfy-mock.mjs [--output video.mp4]`, ou a entrada `comfy-mock`
+do `.claude/launch.json`.
+
+`scripts/web-bench/retouch.mjs` roda o fluxo inteiro num Chrome headless,
+contra o `pnpm web:dev` com `WEB_FS_ANY=1`. Ele abre um `.gorbit`, cria o
+clipe, restaura, aplica e grava o splat. O painel do app de desktop não serve
+para isso: lá o treino WebGPU não anda.
+
 ## Testes
 
 ```bash

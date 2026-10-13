@@ -22,12 +22,14 @@ import { revealLabel, stageBlurbs } from "./lib/platform";
 import { ToolsSetup } from "./components/ToolsSetup";
 import { PRESETS, presetById, type PresetId } from "./lib/presets";
 import { Sidebar, type PackageStatus } from "./components/Sidebar";
-import { Viewer } from "./components/Viewer";
+import { Viewer, type ViewerHandle } from "./components/Viewer";
+import { RetouchPanel } from "./components/RetouchPanel";
 import { StageStrip } from "./components/StageStrip";
 import { FrameLightbox, FramesGrid, LogView } from "./components/FramesGrid";
 import { ExportPanel } from "./components/ExportPanel";
 import { maskMethods } from "./components/MasksPanel";
 import { LanguageSelect } from "./components/LanguageSelect";
+import { ComfySettingsButton } from "./components/ComfySettings";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { useSidebarWidth } from "./components/SidebarResizer";
 import { promptInTrim } from "./lib/prompt";
@@ -169,6 +171,11 @@ function AppView() {
   const [lastExport, setLastExport] = useState<ExportStats | null>(null);
   /** Mostra a exportação no 3D em vez do splat do treino. */
   const [previewExport, setPreviewExport] = useState<{ version: number } | null>(null);
+  const viewerRef = useRef<ViewerHandle>(null);
+  /** Retoque em andamento (usa a GPU: o pipeline espera). */
+  const [retouchBusy, setRetouchBusy] = useState(false);
+  /** Splat que o retoque pede para mostrar: prévias do ajuste ou o de antes. */
+  const [retouchSplat, setRetouchSplat] = useState<{ path: string; label: string; iter: number | null; version: number } | null>(null);
   const [pack, setPack] = useState<PackageStatus | null>(null);
   const packBusy = pack?.kind === "saving" || pack?.kind === "opening";
 
@@ -473,8 +480,9 @@ function AppView() {
     setCamFrame(i >= 0 ? i : job.frames[n] ? n : null);
   }
 
-  const viewerSplat =
-    previewExport && lastExport
+  const viewerSplat = retouchSplat
+    ? { path: retouchSplat.path, iter: retouchSplat.iter, version: retouchSplat.version, label: retouchSplat.label || undefined }
+    : previewExport && lastExport
       ? { path: lastExport.path, iter: null, version: previewExport.version, label: t.app.exported(basename(lastExport.path)) }
       : job.splat;
 
@@ -572,13 +580,14 @@ function AppView() {
         onFromStage={setFromStage}
         available={available}
         running={job.running}
-        canRun={startable(fromStage) && !packBusy && missingFor(fromStage, "train").length === 0}
+        canRun={startable(fromStage) && !packBusy && !retouchBusy && missingFor(fromStage, "train").length === 0}
         onRun={() => run(fromStage)}
         onCancel={() => api.cancelJob()}
         exportPanel={
           projectDir &&
           job.finalPly &&
           !job.running && (
+            <>
             <ExportPanel
               os={tools?.os}
               projectDir={projectDir}
@@ -597,6 +606,31 @@ function AppView() {
                 if (on) setTab("viewer");
               }}
             />
+            {api.retouch && job.poses && frame && (
+              <RetouchPanel
+                projectDir={projectDir}
+                viewer={viewerRef}
+                train={settings.train}
+                masks={maskOpts.enabled && job.masks ? maskOpts : null}
+                disabled={job.running || packBusy}
+                onBusy={setRetouchBusy}
+                onViewerSplat={(sp) => {
+                  setRetouchSplat(sp && { ...sp, version: Date.now() });
+                  if (sp) {
+                    setPreviewExport(null);
+                    setTab("viewer");
+                  }
+                }}
+                onLog={pushLog}
+                onSplatChanged={async () => {
+                  const project = await api.loadProject(projectDir);
+                  dispatch({ type: "load", project });
+                  setLastExport(project.lastExport ?? null);
+                  setPreviewExport(null);
+                }}
+              />
+            )}
+            </>
           )
         }
       />
@@ -623,6 +657,7 @@ function AppView() {
               {revealLabel(t, tools?.os, ".ply")}
             </button>
           )}
+          {api.retouch && <ComfySettingsButton />}
           <LanguageSelect />
         </div>
 
@@ -650,6 +685,7 @@ function AppView() {
         <div className="content">
           <div className={`pane ${tab === "viewer" ? "" : "hidden"}`}>
             <Viewer
+              ref={viewerRef}
               splat={viewerSplat}
               frame={frame}
               onPickCamera={job.frames.length ? pickCamera : undefined}

@@ -727,6 +727,28 @@ body.resizing canvas {
     transform: translateY(-3px);
   }
 }
+.select-menu-search {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow: hidden;
+}
+.select-search {
+  flex: none;
+  height: 28px;
+}
+.select-list {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+}
+.select-empty {
+  padding: 6px 8px;
+  color: var(--muted);
+}
 .select-option {
   display: flex;
   align-items: center;
@@ -1073,6 +1095,7 @@ body.resizing canvas {
 .viewer {
   position: absolute;
   inset: 0;
+  overflow: hidden;
   background: radial-gradient(ellipse at 50% 40%, #1a1d22 0%, var(--bg) 70%);
 }
 .viewer-canvas,
@@ -1109,6 +1132,24 @@ body.resizing canvas {
 }
 .placeholder strong {
   color: var(--text);
+}
+/* Máscara de enquadramento do retoque: o quadro do vídeo, o resto escurecido. */
+.viewer-guide {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  outline: 1px solid rgba(127, 211, 255, 0.85);
+  box-shadow: 0 0 0 200vmax rgba(8, 9, 11, 0.62);
+  pointer-events: none;
+}
+.viewer-guide span {
+  position: absolute;
+  left: 6px;
+  top: 6px;
+  font: 500 11px/1 var(--mono);
+  color: rgba(127, 211, 255, 0.95);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
 }
 .viewer-hud {
   position: absolute;
@@ -1760,4 +1801,331 @@ body.resizing canvas {
   font-size: 11px;
   white-space: nowrap;
   pointer-events: none;
+}
+
+/* ---------- diálogo (integrações) ---------- */
+
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  padding: 24px 16px;
+  background: rgba(0, 0, 0, 0.6);
+}
+.modal-card {
+  width: min(560px, 100%);
+  max-height: 100%;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 18px 18px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--panel);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.modal-head h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+}
+.modal-close {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--panel-3);
+  color: var(--text);
+}
+.modal-close svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+.modal-section h3 {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-2);
+}
+.modal-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.modal-section-head h3 {
+  margin: 0;
+}
+.modal-section p {
+  margin: 6px 0 0;
+  font-size: 12px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.comfy-url-row {
+  display: flex;
+  gap: 6px;
+}
+.comfy-url-row .input {
+  flex: 1;
+  min-width: 0;
+}
+.comfy-url-row .btn-sm {
+  height: 28px;
+  flex: none;
+}
+.comfy-wf {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+}
+.comfy-wf-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.comfy-wf-head .input {
+  flex: 1;
+  min-width: 0;
+  font-weight: 550;
+}
+.comfy-wf-head .muted {
+  flex: none;
+}
+.comfy-params {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.comfy-params-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.comfy-param {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+  margin-top: 6px;
+}
+.comfy-param-problem {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+.topbar-settings {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+.topbar-settings svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+}
+
+/* ---------- retoque ---------- */
+
+.retouch-intro {
+  margin-top: 0;
+}
+.retouch-move {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+.retouch-move > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+.retouch-move .btn-sm {
+  flex: none;
+}
+.retouch-motion {
+  margin-top: 10px;
+}
+.retouch-params {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+.retouch-param {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.retouch-param-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.retouch-param-text {
+  resize: vertical;
+  min-height: 72px;
+  font: inherit;
+  line-height: 1.4;
+}
+.retouch-actions,
+.retouch-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.retouch-draft,
+.retouch-clip,
+.retouch-applied {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.retouch-draft {
+  border-color: rgba(127, 211, 255, 0.45);
+}
+.retouch-sub {
+  margin: 14px 0 0;
+  font-size: 11px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-2);
+}
+.retouch-clip-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.retouch-clip-name {
+  font-weight: 550;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.retouch-chip {
+  flex: none;
+  font-size: 10.5px;
+  padding: 1px 7px;
+  border-radius: 99px;
+  background: var(--panel-3);
+  color: var(--muted);
+}
+.retouch-chip.on {
+  background: rgba(76, 195, 138, 0.14);
+  color: var(--good);
+}
+.retouch-progress {
+  margin-top: 8px;
+}
+.retouch-progress-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 4px;
+}
+.retouch-field {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.retouch-apply {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.retouch-apply-btn {
+  width: 100%;
+  height: 30px;
+}
+.retouch-error {
+  margin: 10px 0 0;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.retouch-review {
+  width: min(980px, 100%);
+}
+.retouch-review-videos {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+.retouch-review-videos figure {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+/* O palco tem fundo xadrez escuro para o cinza do vídeo (fundo do clipe)
+   não se confundir com a área sobrando em volta. */
+.retouch-stage {
+  display: grid;
+  place-items: center;
+  height: 62vh;
+  padding: 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: repeating-conic-gradient(#15171a 0% 25%, #1c1f23 0% 50%) 0 0 / 18px 18px;
+  overflow: hidden;
+}
+.retouch-review-videos video {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  min-height: 0;
+  object-fit: contain;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18), 0 6px 24px rgba(0, 0, 0, 0.45);
+}
+.retouch-review-videos.single {
+  grid-template-columns: minmax(0, 1fr);
+}
+.retouch-review-videos figcaption {
+  font-size: 12px;
+  color: var(--text-2);
+}
+.retouch-review-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.retouch-review-controls input[type="range"] {
+  flex: 1;
+  min-width: 0;
 }

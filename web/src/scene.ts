@@ -68,6 +68,34 @@ export function readLens(camerasBin: ArrayBuffer): SceneFrame["lens"] {
   return { fovY: 2 * Math.atan(h / 2 / fy), aspect: w / h };
 }
 
+/** Largura, altura e focais da primeira câmera do cameras.bin. */
+export function readIntrinsics(camerasBin: ArrayBuffer): { width: number; height: number; fx: number; fy: number } | null {
+  const r = new Bin(camerasBin);
+  if (!r.u64()) return null;
+  r.u32(); // id
+  const model = r.u32();
+  const width = r.u64(), height = r.u64();
+  const f0 = r.f64(), f1 = r.f64();
+  return { width, height, fx: f0, fy: SINGLE_FOCAL.has(model) ? f0 : f1 };
+}
+
+/** Poses do images.bin (mundo → câmera), em ordem de nome. */
+export function readPoses(imagesBin: ArrayBuffer): { name: string; qvec: [number, number, number, number]; tvec: [number, number, number] }[] {
+  const r = new Bin(imagesBin);
+  const n = r.u64();
+  const out: { name: string; qvec: [number, number, number, number]; tvec: [number, number, number] }[] = [];
+  for (let i = 0; i < n; i++) {
+    r.u32();
+    const qvec: [number, number, number, number] = [r.f64(), r.f64(), r.f64(), r.f64()];
+    const tvec: [number, number, number] = [r.f64(), r.f64(), r.f64()];
+    r.u32();
+    const name = r.cstr();
+    r.skip(r.u64() * 24);
+    out.push({ name, qvec, tvec });
+  }
+  return out.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+}
+
 export function readFrame(imagesBin: ArrayBuffer, pointsBin: ArrayBuffer | null): SceneFrame | null {
   // images.bin: centro = -Rᵀt; "para cima" da câmera COLMAP = -Y → Rᵀ(0,-1,0).
   const r = new Bin(imagesBin);

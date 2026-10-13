@@ -85,8 +85,10 @@ function applyOptions(cfg: Record<string, unknown>, o: TrainOptions, masked: boo
     "max-resolution": o.maxResolution,
     "ssim-weight": Math.max(o.ssimWeight, 0),
     "eval-split-every": o.evalSplitEvery || null,
-    "eval-every": o.evalSplitEvery ? o.exportEvery : 0,
   };
+  // Só com avaliação ligada, como no desktop: o Brush calcula iter % eval-every
+  // mesmo sem vistas de avaliação, e 0 ali derruba o treino (pânico no WASM).
+  if (o.evalSplitEvery) set["eval-every"] = o.exportEvery;
   if (o.scaleLossWeight != null) set["scale-loss-weight"] = o.scaleLossWeight;
   if (o.contribPruneMinViews) set["contrib-prune-min-views"] = o.contribPruneMinViews;
   if (o.contribPruneRatio != null) set["contrib-prune-ratio"] = o.contribPruneRatio;
@@ -94,6 +96,8 @@ function applyOptions(cfg: Record<string, unknown>, o: TrainOptions, masked: boo
   if (o.opacSolidWeight) set["opac-solid-weight"] = o.opacSolidWeight;
   if (o.opacBinaryWeight) set["opac-binary-weight"] = o.opacBinaryWeight;
   if (o.volumeRegWeight) set["volume-reg-weight"] = o.volumeRegWeight;
+  if (o.lrMean != null) set["lr-mean"] = o.lrMean;
+  if (o.growthStopIter != null) set["growth-stop-iter"] = o.growthStopIter;
   if (masked) {
     set["background-color"] = MASKED_BACKGROUND.color;
     set["background-noise-strength"] = MASKED_BACKGROUND.noise;

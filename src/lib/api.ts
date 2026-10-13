@@ -151,6 +151,11 @@ export interface TrainOptions {
   opacBinaryWeight?: number;
   /** Peso do tamanho médio das gaussianas, relativo à cena (compactas). */
   volumeRegWeight?: number;
+  /** Taxa de aprendizado inicial das posições; omitido = padrão do Brush
+   *  (2e-5). O ajuste do retoque usa bem menos, para não desmontar o splat. */
+  lrMean?: number;
+  /** Passo em que o crescimento de splats para; omitido = padrão do Brush. */
+  growthStopIter?: number;
 }
 
 export interface Settings {
@@ -205,6 +210,9 @@ export interface ProjectState {
   finalPly: string | null;
   lastPsnr: number | null;
   lastExport?: ExportStats | null;
+  /** Retoque aplicado: `base` é o splat de antes (para desfazer e para
+   *  reaplicar sem acumular ajustes); `clips`, os clipes usados. */
+  retouch?: { base: string; clips: string[]; appliedAt: number } | null;
 }
 
 export interface ExportOptions {
@@ -320,6 +328,78 @@ export type InstallEvent =
   | { type: "failed"; error: string }
   | { type: "cancelled" };
 
+/** Pose de um frame de clipe, em convenção COLMAP (mundo → câmera). */
+export interface RetouchPose {
+  qvec: [number, number, number, number];
+  tvec: [number, number, number];
+  /** Frame real (nome no dataset) quando a pose é exatamente a de uma foto. */
+  anchor: string | null;
+}
+
+/** Clipe de retoque: trajetória renderizada do splat (vídeo de referência),
+ *  restaurada fora do app (ComfyUI) e usada no treino incremental. */
+export interface RetouchClip {
+  id: string;
+  label: string;
+  createdAt: number;
+  /** Largura e altura do vídeo de referência (múltiplos de 32). */
+  size: [number, number];
+  fps: number;
+  /** PINHOLE, no tamanho do clipe. */
+  intrinsics: { fx: number; fy: number; cx: number; cy: number };
+  poses: RetouchPose[];
+  /** Caminhos dos vídeos já gravados (para `fileUrl`/`readBlob`). */
+  reference: string | null;
+  restored: string | null;
+  restoredWith: { workflow: string; at: number } | null;
+  /** Tamanho do vídeo restaurado (mesma proporção da referência). O ajuste
+   *  usa os frames nesse tamanho, com os intrínsecos na mesma escala. */
+  restoredSize?: [number, number] | null;
+}
+
+export interface RetouchOptions {
+  /** Passos do ajuste a partir do splat atual. */
+  steps: number;
+  /** Taxa de aprendizado das posições no início (o Brush usa 2e-5). */
+  lrMean: number;
+  /** Ajustes do treino normal reaproveitados (grau SH, resolução etc.). */
+  train: TrainOptions;
+  /** Recorte com que o projeto treinou (os frames entram com fundo
+   *  transparente, como no treino); null = sem recorte. */
+  masks: MaskOptions | null;
+  /** Total máximo de frames restaurados no ajuste (somando os clipes);
+   *  ausente = todos. */
+  maxRestored?: number;
+}
+
+export type RetouchEvent =
+  | { kind: "progress"; fraction: number; message: Msg }
+  | { kind: "train"; event: TrainEvent }
+  | { kind: "log"; line: string };
+
+/** Câmeras reais do projeto, para montar as trajetórias. */
+export interface RetouchCameras {
+  lens: { width: number; height: number; fx: number; fy: number };
+  /** Em ordem de nome (= ordem dos frames). */
+  cameras: { name: string; qvec: [number, number, number, number]; tvec: [number, number, number] }[];
+}
+
+/** Só no web, por enquanto. */
+export interface RetouchApi {
+  cameras(projectDir: string): Promise<RetouchCameras>;
+  listClips(projectDir: string): Promise<RetouchClip[]>;
+  /** Grava o clipe e os arquivos dados, por caminho relativo à pasta dele:
+   *  `reference.mp4`, `restored.mp4`, `alpha/00000.png`… */
+  saveClip(projectDir: string, clip: RetouchClip, files: Record<string, Blob>): Promise<RetouchClip>;
+  deleteClip(projectDir: string, id: string): Promise<void>;
+  /** Treino incremental com os clipes restaurados; substitui o splat do
+   *  projeto e guarda o anterior para desfazer. */
+  apply(projectDir: string, clipIds: string[], options: RetouchOptions, onEvent: (e: RetouchEvent) => void): Promise<ProjectState>;
+  cancel(): Promise<void>;
+  /** Volta ao splat de antes do retoque. */
+  undo(projectDir: string): Promise<ProjectState>;
+}
+
 /** Comandos do backend: o Rust via Tauri no desktop, o pipeline em
  *  TypeScript + WebGPU na versão web. */
 export interface Api {
@@ -350,6 +430,8 @@ export interface Api {
   installTools(rmbg: boolean, onEvent: (e: InstallEvent) => void): Promise<void>;
   /** Volta logo; o andamento chega por `onEvent`. */
   startJob(config: JobConfig, onEvent: (e: JobEvent) => void): Promise<void>;
+  /** Retoque com o ComfyUI; ausente onde ainda não há suporte (desktop). */
+  retouch?: RetouchApi;
 }
 
 /** Prévia do recorte num quadro, com os mesmos modelos do pipeline. */

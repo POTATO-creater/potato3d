@@ -79,6 +79,16 @@
         "WEB_FS_ANY": "1"
       },
       "port": 1441
+    },
+    {
+      "name": "comfy-mock",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "scripts/comfy-mock.mjs",
+        "--port",
+        "8188"
+      ],
+      "port": 8188
     }
   ]
 }

@@ -16,7 +16,7 @@
     "web:dev": "vite --config web/vite.config.ts",
     "web:build": "vite build --config web/vite.config.ts",
     "web:deploy": "pnpm web:build && wrangler deploy",
-    "test:web": "node --test web/src/*/*.test.ts src/lib/*.test.ts worker/*.test.ts"
+    "test:web": "node --test web/src/*/*.test.ts src/lib/*.test.ts src/lib/*/*.test.ts worker/*.test.ts"
   },
   "dependencies": {
     "@sparkjsdev/spark": "^2.3.1",
@@ -24,6 +24,7 @@
     "@tauri-apps/plugin-dialog": "^2.8.1",
     "@tauri-apps/plugin-opener": "^2",
     "@techstark/opencv-js": "4.12.0-release.1",
+    "mediabunny": "1.60.0",
     "onnxruntime-web": "1.30.0",
     "playcanvas": "2.23.2",
     "qrcode-generator": "2.0.4",
