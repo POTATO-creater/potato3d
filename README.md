@@ -10,6 +10,17 @@
 </p>
 
 <p align="center">
+  <a href="https://orbit.gausify.com"><img alt="Live demo" src="https://img.shields.io/badge/demo-orbit.gausify.com-ff9a4d?logo=googlechrome&logoColor=white"></a>
+  <a href="package.json"><img alt="Version" src="https://img.shields.io/github/package-json/v/obraia/gausify-orbit?label=version&color=orange"></a>
+  <a href="https://github.com/obraia/gausify-orbit/actions/workflows/web.yml"><img alt="Web build" src="https://img.shields.io/github/actions/workflow/status/obraia/gausify-orbit/web.yml?branch=main&label=web%20build"></a>
+  <img alt="Platforms: macOS, Windows, Web" src="https://img.shields.io/badge/platforms-macOS%20%7C%20Windows%20%7C%20Web-555">
+  <a href="https://v2.tauri.app"><img alt="Tauri 2" src="https://img.shields.io/badge/Tauri-2-24C8D8?logo=tauri&logoColor=white"></a>
+  <a href="docs/web.md"><img alt="WebGPU" src="https://img.shields.io/badge/WebGPU-in%20the%20browser-005A9C?logo=webgpu&logoColor=white"></a>
+  <img alt="Languages: English, Português, Español" src="https://img.shields.io/badge/i18n-en%20%7C%20pt--BR%20%7C%20es-8A2BE2">
+  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-yellow"></a>
+</p>
+
+<p align="center">
   <a href="https://orbit.gausify.com"><b>Try it in the browser</b></a> ·
   <a href="#desktop-app">Desktop app</a> ·
   <a href="docs/web.md">How the web version works</a> ·
