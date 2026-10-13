@@ -1,6 +1,6 @@
 [package]
 name = "splatforge"
-version = "0.4.1"
+version = "0.5.0"
 description = "Orbit video → Gaussian Splatting, 100% local"
 authors = ["Bryan Diniz"]
 license = "MIT"

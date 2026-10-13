@@ -59,8 +59,15 @@ jobs:
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || format('build-{0}', github.run_number) }}
           releaseName: Gausify Orbit ${{ github.ref_type == 'tag' && github.ref_name || format('build {0}', github.run_number) }}
           releaseBody: |
-            Windows: download the `*-setup.exe`. On first run the app offers to
-            install COLMAP and ffmpeg (≈ 590 MB with CUDA).
-            macOS: download the `.dmg` and install the dependencies with `brew install ffmpeg colmap`.
+            **Windows:** download the `*-setup.exe`. On first run the app offers to
+            install COLMAP and ffmpeg (≈ 590 MB with CUDA). The installer isn't
+            code-signed, so SmartScreen asks for confirmation (More info → Run anyway).
+
+            **macOS (Apple Silicon, macOS 14+):** download the `.dmg` and install the
+            dependencies with `brew install ffmpeg colmap`. The app isn't notarized:
+            if macOS blocks the first launch, go to System Settings → Privacy &
+            Security and click "Open Anyway".
+
+            No install needed for the web version: https://orbit.gausify.com
           releaseDraft: true
           prerelease: false
