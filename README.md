@@ -27,6 +27,10 @@
   <a href="LICENSE">MIT License</a>
 </p>
 
+<p align="center">
+  <img src="assets/screenshot.png" width="900" alt="Gausify Orbit after a full run in the browser: the trained splat of a puppy in the 3D view with the camera orbit drawn above it, the SAM 2.1 cutout preview in the sidebar and the four completed stages (frames, cutout, camera poses, splat training) with their metrics">
+</p>
+
 ---
 
 Drop in a video that circles around a subject (a person, a product, a sculpture,
