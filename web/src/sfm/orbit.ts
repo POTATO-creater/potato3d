@@ -355,16 +355,22 @@ export function fillMissing(
   const e1 = unit(sub(d0, scale(n, dot(d0, n))));
   const e2 = cross(n, e1);
   const th: number[] = [], rad: number[] = [], hgt: number[] = [];
-  centers.forEach((c) => {
+  const raw = centers.map((c) => {
     const d = sub(c, o);
     const hh = dot(d, n);
     const p = sub(d, scale(n, hh));
-    let a = Math.atan2(dot(p, e2), dot(p, e1));
-    // Unwrap: less than half a turn between neighbouring registered frames.
-    if (th.length) a += 2 * Math.PI * Math.round((th[th.length - 1] - a) / (2 * Math.PI));
-    th.push(a);
     rad.push(Math.hypot(...p));
     hgt.push(hh);
+    return Math.atan2(dot(p, e2), dot(p, e1));
+  });
+  // Unwrap following the angular speed (median of neighbouring steps): a gap
+  // can be more than half a turn (half the orbit unregistered), and taking the
+  // shortest way there sends the inferred cameras back over the registered arc.
+  const wrap = (a: number) => a - 2 * Math.PI * Math.round(a / (2 * Math.PI));
+  const speed = median(raw.slice(1).map((a, k) => wrap(a - raw[k]) / Math.max(s[k + 1] - s[k], 1e-9)));
+  raw.forEach((a, k) => {
+    const expected = k ? th[k - 1] + speed * (s[k] - s[k - 1]) : a;
+    th.push(a + 2 * Math.PI * Math.round((expected - a) / (2 * Math.PI)));
   });
   // "On-orbit" orientation: the camera rotated back to θ = 0.
   const q0: Quat[] = [];

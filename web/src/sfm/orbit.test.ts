@@ -68,6 +68,19 @@ test("fillMissing recovers frames lost in the middle and at the ends", () => {
   assert.ok(Math.abs(Math.hypot(c[0], c[1]) - 4) < 0.01);
 });
 
+test("fillMissing goes the long way round when more than half a turn is lost", () => {
+  const { at, truth, model } = orbit();
+  // θ(9) ≈ 24°, θ(76) ≈ 232°: the shortest way between them is backwards.
+  const lost = Array.from({ length: 66 }, (_, k) => k + 10);
+  for (const i of lost) model.poses[i] = null;
+  fillMissing(model, at);
+  let worst = 0;
+  for (const i of lost) worst = Math.max(worst, Math.hypot(...sub(centerOf(model.poses[i]!), centerOf(truth[i]))) / 4);
+  // The speed changes by half along the gap, so Hermite drifts some; the
+  // shortest way would put them on the other side of the orbit (200%).
+  assert.ok(worst < 0.15, `center off by up to ${(worst * 100).toFixed(2)}% of the radius`);
+});
+
 test("flattenOrbit levels the cameras and keeps the subject centered", () => {
   const { model } = orbit((i) => 1 + 0.3 * Math.sin(i / 5));
   // Points observed by the cameras, for the point BA.

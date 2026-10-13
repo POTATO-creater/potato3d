@@ -762,19 +762,25 @@ pub fn fill_missing(
     let d0 = sub(centers[0], o);
     let e1 = unit(sub(d0, scale(n, dot(d0, n))));
     let e2 = cross(n, e1);
-    let (mut th, mut rad, mut hgt): (Vec<f64>, Vec<f64>, Vec<f64>) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut raw, mut rad, mut hgt): (Vec<f64>, Vec<f64>, Vec<f64>) = (Vec::new(), Vec::new(), Vec::new());
     for c in &centers {
         let d = sub(*c, o);
         let h = dot(d, n);
         let p = sub(d, scale(n, h));
-        let mut a = dot(p, e2).atan2(dot(p, e1));
-        // Unwrap: less than half a turn between neighbouring registered frames.
-        if let Some(&prev) = th.last() {
-            a += std::f64::consts::TAU * ((prev - a) / std::f64::consts::TAU).round();
-        }
-        th.push(a);
+        raw.push(dot(p, e2).atan2(dot(p, e1)));
         rad.push(dot(p, p).sqrt());
         hgt.push(h);
+    }
+    // Unwrap following the angular speed (median of neighbouring steps): a gap
+    // can be more than half a turn (half the orbit unregistered), and taking the
+    // shortest way there sends the inferred cameras back over the registered arc.
+    use std::f64::consts::TAU;
+    let wrap = |a: f64| a - TAU * (a / TAU).round();
+    let speed = median((1..raw.len()).map(|k| wrap(raw[k] - raw[k - 1]) / (s[k] - s[k - 1]).max(1e-9)).collect());
+    let mut th: Vec<f64> = Vec::with_capacity(raw.len());
+    for (k, &a) in raw.iter().enumerate() {
+        let expected = if k == 0 { a } else { th[k - 1] + speed * (s[k] - s[k - 1]) };
+        th.push(a + TAU * ((expected - a) / TAU).round());
     }
     // Orientation "in the orbit": the camera rotated back to θ = 0.
     let mut q0: Vec<[f64; 4]> = Vec::new();
@@ -1061,14 +1067,13 @@ mod tests {
         assert!(refine_pose(m0, c0, 1.0, &corr[..10], &k).is_none());
     }
 
-    #[test]
-    fn fill_missing_follows_the_orbit() {
-        let root = std::env::temp_dir().join("splatforge_fill_test");
-        let _ = std::fs::remove_dir_all(&root);
+    /// Writes the `truth` orbit as a COLMAP model under `root`, without the
+    /// `lost` frames; returns (model, images, times).
+    fn write_orbit(root: &Path, lost: &[usize]) -> (std::path::PathBuf, std::path::PathBuf, std::collections::HashMap<String, f64>) {
+        let _ = std::fs::remove_dir_all(root);
         let (model, images) = (root.join("sparse"), root.join("images"));
         std::fs::create_dir_all(&model).unwrap();
         std::fs::create_dir_all(&images).unwrap();
-        let lost = [0usize, 1, 20, 21, 22, 23, 50, 94, 95];
         let mut times = std::collections::HashMap::new();
         let (mut img, mut frames, mut count) = (Vec::new(), Vec::new(), 0u64);
         for i in 0..96 {
@@ -1107,7 +1112,14 @@ mod tests {
         pts.extend_from_slice(&0f64.to_le_bytes());
         pts.extend_from_slice(&0u64.to_le_bytes());
         std::fs::write(model.join("points3D.bin"), pts).unwrap();
+        (model, images, times)
+    }
 
+    #[test]
+    fn fill_missing_follows_the_orbit() {
+        let root = std::env::temp_dir().join("splatforge_fill_test");
+        let lost = [0usize, 1, 20, 21, 22, 23, 50, 94, 95];
+        let (model, images, times) = write_orbit(&root, &lost);
         let none = std::collections::HashMap::new();
         let opts = FillOptions { flat: false, correspondences: &none };
         let filled = fill_missing(&model, &images, &times, &opts).unwrap().inferred;
@@ -1125,6 +1137,26 @@ mod tests {
         assert_eq!(fb.len(), 8 + 96 * (8 + 56 + 4 + 16));
         // Running again changes nothing.
         assert!(fill_missing(&model, &images, &times, &opts).unwrap().inferred.is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn fill_missing_goes_the_long_way_round() {
+        // θ(9) ≈ 24°, θ(76) ≈ 232°: the shortest way between them is backwards.
+        let root = std::env::temp_dir().join("splatforge_fill_long_test");
+        let lost: Vec<usize> = (10..76).collect();
+        let (model, images, times) = write_orbit(&root, &lost);
+        let none = std::collections::HashMap::new();
+        let opts = FillOptions { flat: false, correspondences: &none };
+        fill_missing(&model, &images, &times, &opts).unwrap();
+        let frame = read(&model).unwrap();
+        let worst = lost
+            .iter()
+            .map(|&i| dot(sub(frame.cameras[i], truth(i)), sub(frame.cameras[i], truth(i))).sqrt() / 4.0)
+            .fold(0.0, f64::max);
+        // The speed changes by half along the gap, so Hermite drifts some; the
+        // shortest way would put them on the other side of the orbit (200%).
+        assert!(worst < 0.15, "center off by up to {:.2}% of radius", worst * 100.0);
         let _ = std::fs::remove_dir_all(&root);
     }
 
