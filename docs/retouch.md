@@ -24,10 +24,33 @@ cover well (from below, from above, or the view you aimed at in 3D). The flow:
      deviating in height.
    - **360° turn below / above / up and down:** the full loop at another
      height, starting and ending facing the same photo.
+   - **Record motion:** **Record** samples the 3D camera every frame while you
+     move it (drag, wheel, Spin) until **Stop** (or 30 s). The still start and
+     the glide after the last input are cut. The recording is then resampled
+     to the clip, with these options:
+     - **Uniform speed:** 0% keeps the recorded pace, 100% moves at a constant
+       speed along the path with no pauses. Speed counts zooms too, as how much
+       the image changes.
+     - **Stabilization:** smooths position and aim (at 100%, a Gaussian
+       with sigma 10% of the recording); the first and last frames stay where
+       they were recorded.
+     - **Only while the button is pressed:** the clock runs only with a button
+       pressed on the 3D view, or while the camera still glides after you
+       release it (wheel zoom glides too), so pauses between strokes don't
+       count.
+     - **Fixed duration:** keeps the Duration field and fits the motion to it,
+       instead of using the recorded time.
+
+   The **Anchor** button in the 3D view shows the point the camera orbits
+   around with a move gizmo. Drag its axes to place it (on the head, say): on
+   release the camera turns to aim at it. Once placed, the preset motions turn
+   around it too. The 360° turns circle its vertical axis. Arcs and turns at
+   another height still start and end at real photos and aim at the anchor in
+   between. **Recenter** clears it. **Lock angle** starts off.
 
    Duration (in seconds, rounded to 8n + 1 frames), tilt and distance sit next
-   to it, and the path is rebuilt when they change. Distance holds for the whole
-   clip, with no zooming in or out: either the photos' distance or the current
+   to it, and the path is rebuilt when they change. Except in recorded motions,
+   distance holds for the whole clip, with no zooming in or out: either the photos' distance or the current
    view's (always the view's for "From this view"). The camera doesn't stop at
    the ends and moves at a constant angular speed even when the photos are
    unevenly spaced. The panel shows the peak speed and warns above 30°/s (the

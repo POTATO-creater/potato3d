@@ -47,6 +47,9 @@ export interface ClipOptions {
   ramp: number;
   /** Width/height aspect ratio; defaults to the lens's. */
   aspect?: number;
+  /** Point to move around instead of the photos' center (the viewer's
+   *  anchor), in COLMAP coordinates. */
+  pivot?: Vec3;
 }
 
 /** No held ends: each transition uses 40% of the clip, which makes the camera
@@ -68,6 +71,8 @@ const sub = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const scale = (a: Vec3, s: number): Vec3 => [a[0] * s, a[1] * s, a[2] * s];
 const norm = (a: Vec3) => Math.hypot(a[0], a[1], a[2]);
 const unit = (a: Vec3): Vec3 => scale(a, 1 / (norm(a) || 1));
+/** Angle between two rotations, in radians. */
+const quatAngle = (a: Quat, b: Quat) => 2 * Math.acos(Math.min(1, Math.abs(a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3])));
 const cross = (a: Vec3, b: Vec3): Vec3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 
 export function quatToMat([w, x, y, z]: Quat): Mat3 {
@@ -273,22 +278,56 @@ function atRadius<T extends { center: Vec3; anchor: string | null }>(p: T, orbit
   return { ...p, center: add(orbitC, scale(r, radius / d)), anchor: null };
 }
 
-/** Distance from a pose to the photos' orbit center. */
-export function orbitDistance(cams: CameraPose[], pose: { qvec: Quat; tvec: Vec3 }): number {
-  return norm(sub(toWorld(pose).center, orbitFrame(cams).center));
+/** Distance from a pose to `center` (default: the photos' orbit center). */
+export function orbitDistance(cams: CameraPose[], pose: { qvec: Quat; tvec: Vec3 }, center?: Vec3): number {
+  return norm(sub(toWorld(pose).center, center ?? orbitFrame(cams).center));
+}
+
+/** Centers for a move: `walk`, the photos' orbit center, which times walks
+ *  along the photos (by their azimuth); `center`, what the move turns around:
+ *  the pivot when there is one, otherwise the same. */
+function moveFrame(cams: CameraPose[], pivot?: Vec3) {
+  const { center, up } = orbitFrame(cams);
+  return { walk: center, center: pivot ?? center, up };
+}
+
+/** Turns a camera (camera → world rotation) by fraction `w` of the way
+ *  toward aiming at `target` (the shortest rotation of its optical axis). */
+function aimToward(rot: Mat3, from: Vec3, target: Vec3, w: number): Mat3 {
+  if (w <= 0) return rot;
+  const fwd: Vec3 = [rot[0][2], rot[1][2], rot[2][2]];
+  const dir = unit(sub(target, from));
+  const axis = cross(fwd, dir);
+  const s = norm(axis);
+  if (s < 1e-9) return rot;
+  return mulMM(axisAngle(axis, Math.atan2(s, dot(fwd, dir)) * Math.min(1, w)), rot);
 }
 
 /** Peak camera angular speed in degrees per second (averaged over windows of
- *  `window` frames, to ignore single-frame noise). */
-export function peakSpeed(poses: { qvec: Quat }[], fps: number, window = 3): number {
+ *  `window` frames, to ignore single-frame noise). With `center`, travel
+ *  counts too (see `viewChange`): a zoom rotates nothing but changes the
+ *  image as much as a turn. */
+export function peakSpeed(poses: { qvec: Quat; tvec: Vec3 }[], fps: number, window = 3, center?: Vec3): number {
+  const change = center ? viewChange(poses, center) : null;
   let peak = 0;
   for (let i = window; i < poses.length; i++) {
-    const a = poses[i - window].qvec, b = poses[i].qvec;
-    const d = Math.abs(a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3]);
-    const deg = (2 * Math.acos(Math.min(1, d)) * 180) / Math.PI;
-    peak = Math.max(peak, (deg * fps) / window);
+    const rad = change ? change(i - window, i) : quatAngle(poses[i - window].qvec, poses[i].qvec);
+    peak = Math.max(peak, (((rad * 180) / Math.PI) * fps) / window);
   }
   return peak;
+}
+
+/** How much the image changes between two poses, as an angle in radians:
+ *  the larger of the camera's rotation and its travel over its distance to
+ *  `center`. Orbiting the center, both match the angle turned; zooming, the
+ *  travel over the distance is the change in image scale. The distance has a
+ *  floor (5% of the median) so passing through the center doesn't explode. */
+function viewChange(poses: { qvec: Quat; tvec: Vec3 }[], center: Vec3) {
+  const centers = poses.map((p) => toWorld(p).center);
+  const dist = centers.map((c) => norm(sub(c, center)));
+  const floor = 0.05 * ([...dist].sort((a, b) => a - b)[dist.length >> 1] ?? 0) || 1e-9;
+  return (i: number, j: number) =>
+    Math.max(quatAngle(poses[i].qvec, poses[j].qvec), norm(sub(centers[j], centers[i])) / Math.max(floor, (dist[i] + dist[j]) / 2));
 }
 
 /** Nearest real camera, by angle around the orbit center. */
@@ -321,11 +360,11 @@ export interface PresetOptions extends ClipOptions {
 /** Preset: walks the orbit around a photo, rising or dropping `elevDeg` in
  *  the middle (rigid rotation about the center). */
 export function presetPath(cams: CameraPose[], lens: Lens, o: PresetOptions): ClipPlan {
-  const { center: orbitC, up } = orbitFrame(cams);
+  const { walk: walkC, center: orbitC, up } = moveFrame(cams, o.pivot);
   const n = o.frames;
   const span = o.span ?? (n - 1) / 2;
   const start = o.center - span / 2;
-  const walk = orbitWalk(cams, orbitC, up, start, span);
+  const walk = orbitWalk(cams, walkC, up, start, span);
   const poses: PathPose[] = [];
   for (let i = 0; i < n; i++) {
     const u = i / (n - 1);
@@ -343,7 +382,11 @@ export function presetPath(cams: CameraPose[], lens: Lens, o: PresetOptions): Cl
       center = add(orbitC, mulMV(R, r));
       rot = mulMM(R, rot);
     }
-    poses.push({ ...fromWorld(rot, center), anchor: w === 0 ? base.anchor : null });
+    // With a pivot, the camera turns to aim at it away from the photos (which
+    // aim at their own center). The wave has no ramp: give the aim one.
+    const aim = o.pivot ? profile(u, o.hold, o.ramp || 0.15) : 0;
+    rot = aimToward(rot, center, orbitC, aim);
+    poses.push({ ...fromWorld(rot, center), anchor: w === 0 && aim === 0 ? base.anchor : null });
   }
   return { ...clipLens(lens, o.longSide, o.aspect), poses };
 }
@@ -359,10 +402,10 @@ export interface ViewOptions extends ClipOptions {
  *  small sweep around it) and ends in another photo's direction. The whole
  *  clip stays at the view's distance: no moving in or out. */
 export function viewPath(cams: CameraPose[], lens: Lens, target: { qvec: Quat; tvec: Vec3 }, o: ViewOptions): ClipPlan {
-  const { center: orbitC, up } = orbitFrame(cams);
+  const { walk: walkC, center: orbitC, up } = moveFrame(cams, o.pivot);
   const mid = nearestCamera(cams, target, orbitC);
   const start = mid - o.span / 2;
-  const walk = orbitWalk(cams, orbitC, up, start, o.span);
+  const walk = orbitWalk(cams, walkC, up, start, o.span);
   const t = toWorld(target);
   const radius = norm(sub(t.center, orbitC));
   const n = o.frames;
@@ -407,8 +450,8 @@ function orbitSense(cams: CameraPose[], orbitC: Vec3, up: Vec3): number {
  *  started. Constant angular speed. `radius` moves the view to another
  *  distance from the center (same view direction); defaults to the view's own. */
 export function turnPath(cams: CameraPose[], lens: Lens, target: { qvec: Quat; tvec: Vec3 }, o: ClipOptions & { radius?: number }): ClipPlan {
-  const { center: orbitC, up } = orbitFrame(cams);
-  const sense = orbitSense(cams, orbitC, up);
+  const { walk: walkC, center: orbitC, up } = moveFrame(cams, o.pivot);
+  const sense = orbitSense(cams, walkC, up);
   const t = atRadius({ ...toWorld(target), anchor: null }, orbitC, o.radius);
   const n = o.frames;
   const poses: PathPose[] = [];
@@ -486,8 +529,8 @@ function levelRotation(rot: Mat3, up: Vec3): Mat3 {
  *  Each phase's duration is proportional to the angle covered, and the camera
  *  slows down at phase changes (no corners). */
 export function tiltTurnPath(cams: CameraPose[], lens: Lens, target: { qvec: Quat; tvec: Vec3 }, o: ClipOptions & { radius?: number }): ClipPlan {
-  const { center: orbitC, up } = orbitFrame(cams);
-  const sense = orbitSense(cams, orbitC, up);
+  const { walk: walkC, center: orbitC, up } = moveFrame(cams, o.pivot);
+  const sense = orbitSense(cams, walkC, up);
   const t = atRadius({ ...toWorld(target), anchor: null }, orbitC, o.radius);
   const fwd: Vec3 = [t.rot[0][2], t.rot[1][2], t.rot[2][2]];
   const focus = focusPoint(t.center, fwd, orbitC, up);
@@ -518,6 +561,158 @@ export function tiltTurnPath(cams: CameraPose[], lens: Lens, target: { qvec: Qua
     else p = lifting(1 - ease((u - (1 - lift)) / lift));
     poses.push({ ...fromWorld(p.rot, p.center), anchor: null });
   }
+  return { ...clipLens(lens, o.longSide, o.aspect), poses };
+}
+
+/** Viewer camera sampled while recording a motion. */
+export interface RecordedSample {
+  /** Milliseconds (any origin; only differences matter). */
+  t: number;
+  qvec: Quat;
+  tvec: Vec3;
+}
+
+/** Recorded time span with movement: the pauses before the first move and
+ *  after the last one are cut, keeping the last still sample before the move
+ *  (and the first one after) so the clip starts and ends at rest. Null when the
+ *  camera never moved. */
+export function recordedSpan(samples: RecordedSample[]): [number, number] | null {
+  if (samples.length < 2) return null;
+  const world = samples.map((s) => toWorld(s));
+  // Thresholds relative to the size of the movement: OrbitControls damping
+  // leaves a tail of tiny moves after the last input, which counts as stillness.
+  let extent = 0;
+  for (const w of world) extent = Math.max(extent, norm(sub(w.center, world[0].center)), norm(sub(w.center, world[world.length - 1].center)));
+  const posEps = Math.max(extent * 2e-3, 1e-9);
+  const angEps = (0.1 * Math.PI) / 180;
+  const moved = (i: number, j: number, k = 1) =>
+    norm(sub(world[i].center, world[j].center)) > posEps * k || quatAngle(samples[i].qvec, samples[j].qvec) > angEps * k;
+  if (!samples.some((_, i) => moved(i, 0))) return null;
+  // Before the first input the camera is exactly still: strict thresholds, so
+  // a slow start is not cut.
+  let first = 1;
+  while (!moved(first, 0, 1e-3)) first++;
+  const n = samples.length - 1;
+  let last = n - 1;
+  while (last > first && !moved(last, n)) last--;
+  return [first - 1, last + 1];
+}
+
+/** Recorded duration with movement, in seconds (0 when nothing moved). */
+export function recordedSeconds(samples: RecordedSample[]): number {
+  const span = recordedSpan(samples);
+  return span ? (samples[span[1]].t - samples[span[0]].t) / 1000 : 0;
+}
+
+/** The camera barely moved between two samples (OrbitControls damping keeps
+ *  nudging it by vanishing amounts long after the last input). */
+export function poseStill(a: { qvec: Quat; tvec: Vec3 }, b: { qvec: Quat; tvec: Vec3 }): boolean {
+  const scaleT = Math.max(norm(a.tvec), norm(b.tvec), 1e-9);
+  return quatAngle(a.qvec, b.qvec) < (1e-3 * Math.PI) / 180 && norm(sub(toWorld(a).center, toWorld(b).center)) < 1e-5 * scaleT;
+}
+
+export interface RecordedOptions extends ClipOptions {
+  /** 0 keeps the recorded pace; 1 moves at constant speed along the recorded
+   *  path (pauses in the middle disappear); in between, a blend. */
+  uniform?: number;
+  /** 0 keeps the recorded shake; 1 smooths the path with a Gaussian of sigma
+   *  10% of the recording (position and aim). The ends stay where recorded. */
+  stabilize?: number;
+  /** Orbit center: the path is measured with `viewChange` around it. */
+  center: Vec3;
+}
+
+/** Point of a path: camera center and world → camera rotation. */
+interface TrackPoint {
+  center: Vec3;
+  q: Quat;
+}
+
+/** Points of `pts` at curve parameters `targets` (ascending), where `param`
+ *  (non-decreasing) is each point's parameter. Linear in position, slerp in
+ *  rotation. */
+function resample(pts: TrackPoint[], param: number[], targets: number[]): TrackPoint[] {
+  let k = 0;
+  return targets.map((p) => {
+    while (k < pts.length - 2 && param[k + 1] < p) k++;
+    const dp = param[k + 1] - param[k];
+    const f = dp > 0 ? Math.min(1, Math.max(0, (p - param[k]) / dp)) : 1;
+    const a = pts[k], b = pts[k + 1];
+    return { center: add(scale(a.center, 1 - f), scale(b.center, f)), q: slerp(a.q, b.q, f) };
+  });
+}
+
+/** Moving average of radius `r` with odd reflection at the ends (the ends
+ *  extend their own trend), which keeps the first and last values exactly. */
+function boxPass(v: Vec3[], r: number): Vec3[] {
+  const m = v.length;
+  const at = (i: number): Vec3 => (i < 0 ? sub(scale(v[0], 2), v[-i]) : i >= m ? sub(scale(v[m - 1], 2), v[2 * (m - 1) - i]) : v[i]);
+  const sums: Vec3[] = [[0, 0, 0]];
+  for (let i = -r; i < m + r; i++) sums.push(add(sums[sums.length - 1], at(i)));
+  return v.map((_, j) => scale(sub(sums[j + 2 * r + 1], sums[j]), 1 / (2 * r + 1)));
+}
+
+/** Gaussian blur of `sigma` samples (three moving averages). */
+function blur(v: Vec3[], sigma: number): Vec3[] {
+  const r = Math.min(v.length - 1, Math.round(Math.sqrt(4 * sigma * sigma + 1) / 2));
+  return r < 1 ? v : boxPass(boxPass(boxPass(v, r), r), r);
+}
+
+/** Smooths a path evenly spaced in time: position, and the aim through the
+ *  camera's forward and down axes, which are then made orthonormal again. */
+function stabilizeTrack(pts: TrackPoint[], sigma: number): TrackPoint[] {
+  const rots = pts.map((p) => transpose(quatToMat(p.q)));
+  const col = (m: Mat3, j: number): Vec3 => [m[0][j], m[1][j], m[2][j]];
+  const centers = blur(pts.map((p) => p.center), sigma);
+  const fwd = blur(rots.map((m) => col(m, 2)), sigma);
+  const down = blur(rots.map((m) => col(m, 1)), sigma);
+  return pts.map((_, i) => {
+    const f = unit(fwd[i]);
+    const r = unit(cross(down[i], f));
+    const d = cross(f, r);
+    const c2w: Mat3 = [
+      [r[0], d[0], f[0]],
+      [r[1], d[1], f[1]],
+      [r[2], d[2], f[2]],
+    ];
+    return { center: centers[i], q: matToQuat(transpose(c2w)) };
+  });
+}
+
+/** Trajectory recorded from the viewer camera: the moving part of the
+ *  recording (see `recordedSpan`) on a dense, evenly timed grid, smoothed by
+ *  `stabilize`, then resampled at `frames` instants. With `uniform` 0 the
+ *  instants are evenly spaced in time, so the camera keeps the pace it was
+ *  recorded at (stretched to the clip's duration); with 1 they are evenly
+ *  spaced along the (smoothed) path, measured by how much the image changes
+ *  (`viewChange`), for a constant speed, zooms included. */
+export function recordedPath(samples: RecordedSample[], lens: Lens, o: RecordedOptions): ClipPlan | null {
+  const span = recordedSpan(samples);
+  if (!span) return null;
+  const seg = samples.slice(span[0], span[1] + 1);
+  const n = o.frames;
+  // Dense grid: finer than both the recording and the clip.
+  const m = Math.min(4096, Math.max(256, 2 * seg.length, 4 * n));
+  const t0 = seg[0].t, dur = seg[seg.length - 1].t - t0 || 1;
+  const even = (count: number) => Array.from({ length: count }, (_, i) => i / (count - 1));
+  let dense = resample(
+    seg.map((s) => ({ center: toWorld(s).center, q: s.qvec })),
+    seg.map((s) => (s.t - t0) / dur),
+    even(m),
+  );
+  const stab = Math.min(1, Math.max(0, o.stabilize ?? 0));
+  if (stab > 0) dense = stabilizeTrack(dense, stab * 0.1 * (m - 1));
+  // Curve parameter of each point, from 0 to 1: time, path length or a blend.
+  const change = viewChange(dense.map((p) => ({ qvec: p.q, tvec: fromWorld(transpose(quatToMat(p.q)), p.center).tvec })), o.center);
+  const len = [0];
+  for (let k = 1; k < m; k++) len.push(len[k - 1] + change(k - 1, k));
+  const total = len[m - 1];
+  const w = total > 1e-9 ? Math.min(1, Math.max(0, o.uniform ?? 0)) : 0;
+  const param = len.map((l, k) => (1 - w) * (k / (m - 1)) + (w * l) / (total || 1));
+  const poses: PathPose[] = resample(dense, param, even(n)).map((p) => ({
+    ...fromWorld(transpose(quatToMat(p.q)), p.center),
+    anchor: null,
+  }));
   return { ...clipLens(lens, o.longSide, o.aspect), poses };
 }
 

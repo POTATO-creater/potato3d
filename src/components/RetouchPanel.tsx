@@ -5,7 +5,7 @@ import { ComfyClient } from "../lib/comfy/client";
 import { progressFraction, type ComfyProgress } from "../lib/comfy/progress";
 import { COMFY_CHANGED, loadComfy, loadParamValues, saveParamValues, workflowsOf } from "../lib/comfy/settings";
 import { DEFAULT_FPS, paramDefault, withInput, withParams, workflowFps, type ParamValue, type WorkflowParam } from "../lib/comfy/workflow";
-import { clipFrames, clipLens, DEFAULT_CLIP, nearestCamera, orbitDistance, orbitFrame, peakSpeed, presetPath, tiltTurnPath, turnPath, viewPath, type ClipPlan } from "../lib/retouch/trajectory";
+import { clipFrames, clipLens, DEFAULT_CLIP, nearestCamera, orbitDistance, orbitFrame, peakSpeed, poseStill, presetPath, recordedPath, recordedSeconds, tiltTurnPath, turnPath, viewPath, type ClipPlan, type RecordedSample, type Vec3 } from "../lib/retouch/trajectory";
 import { DEFAULT_RESTORED_RATIO, restoredLimit } from "../lib/retouch/frames";
 import { alphaPng, createClipEncoder, videoInfo } from "../lib/retouch/video";
 import { comfyErrorText } from "./ComfySettings";
@@ -24,8 +24,14 @@ const DEFAULT_TILT = 30;
 /** Above this the camera moves too fast and the video model blurs
  *  (estimate; tune with experience). */
 const MAX_SPEED = 30;
+/** Recording limit, in seconds (the duration field's maximum). */
+const MAX_RECORD = 30;
+/** Most a single frame adds to the recording clock, in ms. Damping glides a
+ *  fixed amount per frame, not per second: when the browser throttles frames
+ *  (hitch, window in the background) each one would otherwise add its whole gap. */
+const MAX_FRAME_MS = 100;
 
-const KINDS = ["view", "orbit", "tiltOrbit", "below", "above", "orbitBelow", "orbitAbove", "wave"] as const;
+const KINDS = ["view", "orbit", "tiltOrbit", "below", "above", "orbitBelow", "orbitAbove", "wave", "record"] as const;
 type Kind = (typeof KINDS)[number];
 /** Moves that start from the current view: height comes from it (no tilt). */
 const FROM_VIEW: Kind[] = ["view", "orbit", "tiltOrbit"];
@@ -36,6 +42,10 @@ interface Draft {
   pose: ColmapPose | null;
   /** Index of the photo closest to the view at click time. */
   nearest: number;
+  /** Recorded motion: viewer camera samples and the seconds with movement. */
+  recorded?: { samples: RecordedSample[]; seconds: number };
+  /** Viewer anchor at click time: the moves turn around it. */
+  pivot?: Vec3;
 }
 
 type Distance = "photos" | "view";
@@ -52,6 +62,15 @@ interface Motion {
   aspect: string;
   /** Reference video frame rate; null = the workflow's. */
   fps: number | null;
+  /** Recorded motion: 0 keeps the recorded pace, 1 constant speed. */
+  uniform: number;
+  /** Recorded motion: 0 keeps the shake, 1 smooths the most. */
+  stabilize: number;
+  /** Recording: the clock only runs with a button pressed on the 3D view. */
+  pressOnly: boolean;
+  /** Recording: keep the set duration (the motion is fitted to it) instead
+   *  of taking the recorded one. */
+  fixed: boolean;
 }
 
 const FPS_OPTIONS = [12, 15, 16, 24, 25, 30, 48, 50, 60];
@@ -69,8 +88,12 @@ const LONG_SIDES = [512, 640, 768, 960, 1088, 1280, 1536, 1920];
 
 function loadMotion(): Motion {
   try {
-    const raw = JSON.parse(localStorage.getItem(MOTION_KEY) ?? "null") as { kind?: unknown; seconds?: unknown; tilt?: unknown; distance?: unknown; longSide?: unknown; aspect?: unknown; fps?: unknown } | null;
+    const raw = JSON.parse(localStorage.getItem(MOTION_KEY) ?? "null") as { kind?: unknown; seconds?: unknown; tilt?: unknown; distance?: unknown; longSide?: unknown; aspect?: unknown; fps?: unknown; uniform?: unknown; stabilize?: unknown; pressOnly?: unknown; fixed?: unknown } | null;
     return {
+      uniform: typeof raw?.uniform === "number" ? Math.min(1, Math.max(0, raw.uniform)) : 0,
+      stabilize: typeof raw?.stabilize === "number" ? Math.min(1, Math.max(0, raw.stabilize)) : 0,
+      pressOnly: raw?.pressOnly === true,
+      fixed: raw?.fixed === true,
       distance: raw?.distance === "view" ? "view" : "photos",
       longSide: LONG_SIDES.includes(raw?.longSide as number) ? (raw!.longSide as number) : DEFAULT_CLIP.longSide,
       fps: typeof raw?.fps === "number" && raw.fps > 0 ? raw.fps : null,
@@ -80,7 +103,7 @@ function loadMotion(): Motion {
       tilt: typeof raw?.tilt === "number" && raw.tilt > 0 ? raw.tilt : DEFAULT_TILT,
     };
   } catch {
-    return { kind: "view", seconds: null, tilt: DEFAULT_TILT, distance: "photos", longSide: DEFAULT_CLIP.longSide, aspect: "lens", fps: null };
+    return { kind: "view", seconds: null, tilt: DEFAULT_TILT, distance: "photos", longSide: DEFAULT_CLIP.longSide, aspect: "lens", fps: null, uniform: 0, stabilize: 0, pressOnly: false, fixed: false };
   }
 }
 interface Task {
@@ -156,6 +179,10 @@ export function RetouchPanel(props: {
       return null;
     }
   });
+  /** Recording the viewer camera; `elapsed` in seconds, for the button. */
+  const [recording, setRecording] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const samples = useRef<RecordedSample[]>([]);
   const importFor = useRef<string | null>(null);
   const importInput = useRef<HTMLInputElement>(null);
   const { projectDir, viewer, onBusy } = props;
@@ -169,6 +196,7 @@ export function RetouchPanel(props: {
   useEffect(() => {
     setCams(null);
     setDraft(null);
+    setRecording(false);
     setError(null);
     setComparing(false);
     void reload().catch((e) => setError(String(e)));
@@ -212,7 +240,7 @@ export function RetouchPanel(props: {
   };
   const seconds = motion.seconds ?? Math.round((DEFAULT_CLIP.frames / fps) * 10) / 10;
   const frames = clipFrames(seconds, fps);
-  const busy = !!task || props.disabled;
+  const busy = !!task || props.disabled || recording;
 
   const updateMotion = (patch: Partial<Motion>) => {
     const next = { ...motion, seconds, ...patch };
@@ -245,23 +273,90 @@ export function RetouchPanel(props: {
     if (!cams || !v) return;
     const pose = v.viewPose();
     if (FROM_VIEW.includes(kind) && !pose) return;
-    const nearest = pose ? nearestCamera(cams.cameras, pose, orbitFrame(cams.cameras).center) : 0;
-    setDraft({ kind, pose, nearest });
+    const pivot = v.anchorPoint() ?? undefined;
+    const nearest = pose ? nearestCamera(cams.cameras, pose, pivot ?? orbitFrame(cams.cameras).center) : 0;
+    setDraft({ kind, pose, nearest, pivot });
   };
+
+  // Recording: samples the viewer camera every frame until Stop (or the limit).
+  const startRecording = () => {
+    if (!viewer.current?.viewPose()) return;
+    samples.current = [];
+    setDraft(null);
+    setError(null);
+    setElapsed(0);
+    setRecording(true);
+  };
+  const stopRecording = () => {
+    setRecording(false);
+    const recorded = samples.current;
+    samples.current = [];
+    const s = recordedSeconds(recorded);
+    if (!s) {
+      setError(tr.recordStill);
+      return;
+    }
+    // The clip lasts what was recorded (unless the duration is fixed); changing
+    // the duration afterwards speeds up or slows down the same motion.
+    if (!motion.fixed) updateMotion({ seconds: Math.min(MAX_RECORD, Math.max(0.5, Math.round(s * 10) / 10)) });
+    setDraft({ kind: "record", pose: null, nearest: 0, recorded: { samples: recorded, seconds: s } });
+  };
+  const stopRef = useRef(stopRecording);
+  stopRef.current = stopRecording;
+  const pressOnly = motion.pressOnly;
+  useEffect(() => {
+    if (!recording) return;
+    let raf = 0;
+    let prev: { t: number; pose: ColmapPose } | null = null;
+    // Recording clock, in ms: with `pressOnly` it stands still while no button
+    // is pressed on the 3D view and the camera is at rest. It keeps running
+    // while the camera still glides after the release (damping), otherwise the
+    // video would jump to where the camera stopped.
+    let clock = 0;
+    let shown = 0;
+    const tick = (t: number) => {
+      const v = viewer.current;
+      const pose = v?.viewPose();
+      if (pose) {
+        const runs = !pressOnly || v!.pointerDown() || (prev !== null && !poseStill(prev.pose, pose));
+        if (prev && runs) clock += Math.min(t - prev.t, MAX_FRAME_MS);
+        // Paused frames are left out: the next sample continues the same time.
+        if (!prev || runs) samples.current.push({ t: clock, ...pose });
+        prev = { t, pose };
+      }
+      const s = clock / 1000;
+      // Button text at 10 Hz: no need to redraw the panel every frame.
+      if (s - shown >= 0.1) {
+        shown = s;
+        setElapsed(s);
+      }
+      if (s >= MAX_RECORD) stopRef.current();
+      else raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [recording, viewer, pressOnly]);
 
   // Draft trajectory, rebuilt whenever duration or tilt changes.
   const tilt = motion.tilt;
   const distance = motion.distance;
   const longSide = motion.longSide;
   const aspect = aspectValue(motion.aspect);
+  const uniform = motion.uniform;
+  const stabilize = motion.stabilize;
   const draftPlan = useMemo((): ClipPlan | null => {
     if (!draft || !cams || (FROM_VIEW.includes(draft.kind) && !draft.pose)) return null;
     const { cameras, lens } = cams;
     const m = cameras.length;
-    const clip = { ...DEFAULT_CLIP, frames, longSide, aspect };
+    const pivot = draft.pivot;
+    const clip = { ...DEFAULT_CLIP, frames, longSide, aspect, pivot };
     // Arcs and loops at the photos' distance or the clicked view's.
-    const radius = distance === "view" && draft.pose ? orbitDistance(cameras, draft.pose) : undefined;
+    const radius = distance === "view" && draft.pose ? orbitDistance(cameras, draft.pose, pivot) : undefined;
     switch (draft.kind) {
+      case "record":
+        return draft.recorded
+          ? recordedPath(draft.recorded.samples, lens, { ...clip, uniform, stabilize, center: orbitFrame(cameras).center })
+          : null;
       case "view":
         // One sixth of the orbit end to end; the aimed view sits in the middle.
         return viewPath(cameras, lens, draft.pose!, { ...clip, span: Math.max(6, Math.round(m / 6)), sweepDeg: 12 });
@@ -270,14 +365,14 @@ export function RetouchPanel(props: {
         // one (the view's or the photos').
         return turnPath(cameras, lens, draft.pose!, {
           ...clip,
-          radius: distance === "photos" ? orbitDistance(cameras, cameras[draft.nearest]) : undefined,
+          radius: distance === "photos" ? orbitDistance(cameras, cameras[draft.nearest], pivot) : undefined,
         });
       case "tiltOrbit":
         // Straight climb from the photos' height (well-covered reference frame)
         // to the view, a loop at its tilt, then back down.
         return tiltTurnPath(cameras, lens, draft.pose!, {
           ...clip,
-          radius: distance === "photos" ? orbitDistance(cameras, cameras[draft.nearest]) : undefined,
+          radius: distance === "photos" ? orbitDistance(cameras, cameras[draft.nearest], pivot) : undefined,
         });
       case "below":
       case "above":
@@ -300,8 +395,10 @@ export function RetouchPanel(props: {
           shape: draft.kind === "wave" ? "wave" : "arc",
         });
     }
-  }, [draft, cams, frames, tilt, distance, longSide, aspect]);
-  const speed = draftPlan ? peakSpeed(draftPlan.poses, fps) : 0;
+  }, [draft, cams, frames, tilt, distance, longSide, aspect, uniform, stabilize]);
+  // Recorded motions may zoom: the peak counts travel too (presets keep
+  // their distance, so rotation alone measures them).
+  const speed = draftPlan && cams ? peakSpeed(draftPlan.poses, fps, 3, draft?.kind === "record" ? orbitFrame(cams.cameras).center : undefined) : 0;
 
   // Trajectory in 3D: the draft's or, with no draft, the hovered clip's.
   // Derived from state, not mouseenter/mouseleave: a card that disappears under
@@ -352,7 +449,7 @@ export function RetouchPanel(props: {
       }
       const clip: RetouchClip = {
         id: `clip-${Date.now().toString(36)}`,
-        label: tr.labels[kind](tilt),
+        label: tr.labels[kind](tilt) + (draft.pivot ? tr.anchored : ""),
         createdAt: Date.now(),
         size: p.size,
         fps: clipFps,
@@ -509,18 +606,31 @@ export function RetouchPanel(props: {
           options={KINDS.map((k) => ({ value: k, label: tr.moves[k].label, hint: tr.moves[k].hint }))}
           onChange={(kind) => {
             updateMotion({ kind });
-            // With a trajectory open, switch the move but keep the clicked view.
-            if (draft) setDraft({ ...draft, kind });
+            // With a trajectory open, switch the move but keep the clicked view
+            // (a recording has no clicked view, and a preset has no recording).
+            if (draft) setDraft(kind === "record" || draft.kind === "record" ? null : { ...draft, kind });
           }}
         />
-        <button className="btn-sm" disabled={busy || !cams} onClick={() => plan()} title={tr.plotTitle}>
-          {tr.plot}
-        </button>
+        {motion.kind === "record" ? (
+          <button
+            className={`btn-sm ${recording ? "on" : ""}`}
+            disabled={recording ? false : busy || !cams}
+            onClick={recording ? stopRecording : startRecording}
+            title={tr.recordTitle}
+          >
+            {recording ? tr.stop(elapsed) : tr.record}
+          </button>
+        ) : (
+          <button className="btn-sm" disabled={busy || !cams} onClick={() => plan()} title={tr.plotTitle}>
+            {tr.plot}
+          </button>
+        )}
       </div>
+      {recording && <p className="help retouch-recording">{tr.recording(MAX_RECORD)}</p>}
       <div className="grid2 retouch-motion">
         <NumField
           label={tr.duration}
-          hint={tr.durationHint(frames)}
+          hint={draft?.recorded ? tr.recordedHint(frames, draft.recorded.seconds, seconds) : tr.durationHint(frames)}
           value={seconds}
           min={0.5}
           max={30}
@@ -541,31 +651,62 @@ export function RetouchPanel(props: {
           />
         </Field>
       </div>
-      <div className="grid2">
-        <NumField
-          label={tr.tilt}
-          hint={tr.tiltHint}
-          value={tilt}
-          min={5}
-          max={80}
-          step={5}
-          suffix="°"
-          disabled={busy || FROM_VIEW.includes(motion.kind)}
-          onChange={(v) => v > 0 && updateMotion({ tilt: v })}
-        />
-        <Field label={tr.distance} hint={motion.kind === "view" ? tr.distanceViewHint : tr.distanceHint}>
-          <Select
-            value={motion.kind === "view" ? "view" : distance}
-            aria-label={tr.distance}
-            disabled={busy || motion.kind === "view"}
-            options={[
-              { value: "photos" as const, label: tr.distances.photos },
-              { value: "view" as const, label: tr.distances.view },
-            ]}
-            onChange={(d) => updateMotion({ distance: d })}
+      {motion.kind === "record" ? (
+        <>
+          <div className="grid2">
+            <NumField
+              label={tr.uniform}
+              hint={tr.uniformHint}
+              value={Math.round(uniform * 100)}
+              min={0}
+              max={100}
+              step={10}
+              suffix="%"
+              disabled={busy}
+              onChange={(v) => updateMotion({ uniform: Math.min(1, Math.max(0, v / 100)) })}
+            />
+            <NumField
+              label={tr.stabilize}
+              hint={tr.stabilizeHint}
+              value={Math.round(stabilize * 100)}
+              min={0}
+              max={100}
+              step={10}
+              suffix="%"
+              disabled={busy}
+              onChange={(v) => updateMotion({ stabilize: Math.min(1, Math.max(0, v / 100)) })}
+            />
+          </div>
+          <Toggle label={tr.pressOnly} hint={tr.pressOnlyHint} checked={motion.pressOnly} disabled={busy} onChange={(v) => updateMotion({ pressOnly: v })} />
+          <Toggle label={tr.fixed} hint={tr.fixedHint(seconds)} checked={motion.fixed} disabled={busy} onChange={(v) => updateMotion({ fixed: v })} />
+        </>
+      ) : (
+        <div className="grid2">
+          <NumField
+            label={tr.tilt}
+            hint={tr.tiltHint}
+            value={tilt}
+            min={5}
+            max={80}
+            step={5}
+            suffix="°"
+            disabled={busy || FROM_VIEW.includes(motion.kind)}
+            onChange={(v) => v > 0 && updateMotion({ tilt: v })}
           />
-        </Field>
-      </div>
+          <Field label={tr.distance} hint={motion.kind === "view" ? tr.distanceViewHint : tr.distanceHint}>
+            <Select
+              value={motion.kind === "view" ? "view" : distance}
+              aria-label={tr.distance}
+              disabled={busy || motion.kind === "view"}
+              options={[
+                { value: "photos" as const, label: tr.distances.photos },
+                { value: "view" as const, label: tr.distances.view },
+              ]}
+              onChange={(d) => updateMotion({ distance: d })}
+            />
+          </Field>
+        </div>
+      )}
       <div className="grid2">
         <Field label={tr.aspect} hint={tr.aspectHint}>
           <Select
@@ -611,7 +752,8 @@ export function RetouchPanel(props: {
       {draft && draftPlan && (
         <div className="retouch-draft">
           <span className="small">
-            {tr.labels[draft.kind](tilt)} · {tr.draft(draftPlan.poses.length, draftPlan.poses.length / fps, draftPlan.size[0], draftPlan.size[1], Math.round(speed))}
+            {tr.labels[draft.kind](tilt)}
+            {draft.pivot && tr.anchored} · {tr.draft(draftPlan.poses.length, draftPlan.poses.length / fps, draftPlan.size[0], draftPlan.size[1], Math.round(speed))}
           </span>
           {speed > MAX_SPEED && <span className="help warn">{tr.tooFast(Math.round(speed), Math.ceil((seconds * speed) / MAX_SPEED), MAX_SPEED)}</span>}
           <div className="retouch-row">

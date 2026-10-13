@@ -1985,6 +1985,10 @@ body.resizing canvas {
 .retouch-motion {
   margin-top: 10px;
 }
+.retouch-recording {
+  margin: 6px 0 0;
+  color: var(--accent);
+}
 .retouch-params {
   display: flex;
   flex-direction: column;
