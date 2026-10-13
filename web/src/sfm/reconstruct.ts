@@ -99,13 +99,42 @@ export function reconstruct(
     }
     return x;
   };
-  for (const v of verified)
-    for (let k = 0; k < v.ia.length; k++) {
-      const ra = find(off[v.a] + v.ia[k]), rb = find(off[v.b] + v.ib[k]);
-      if (ra !== rb) parent[ra] = rb;
-    }
   const nodeImg = new Int32Array(nodes);
   imgs.forEach((im, i) => nodeImg.fill(i, off[i], off[i] + im.n));
+  // Closest pairs first (most reliable), and a merge that would put two
+  // features of the same image in one track is refused: otherwise a single
+  // wrong match (repetitive floor between frames far apart) joins two whole
+  // tracks, and dropping the ambiguous observations afterwards takes the
+  // right ones with it.
+  const gapOf = (v: { a: number; b: number }) => (closedLoop ? Math.min(v.b - v.a, N - (v.b - v.a)) : v.b - v.a);
+  const byTrust = [...verified].sort((x, y) => gapOf(x) - gapOf(y) || y.ia.length - x.ia.length);
+  const members = new Map<number, number[]>(); // root → images in the track (sorted), if > 1
+  const imagesOf = (r: number) => members.get(r) ?? [nodeImg[r]];
+  let refused = 0;
+  for (const v of byTrust)
+    for (let k = 0; k < v.ia.length; k++) {
+      const ra = find(off[v.a] + v.ia[k]), rb = find(off[v.b] + v.ib[k]);
+      if (ra === rb) continue;
+      const ia = imagesOf(ra), ib = imagesOf(rb);
+      const merged: number[] = [];
+      let i = 0, j = 0, clash = false;
+      while (i < ia.length && j < ib.length) {
+        if (ia[i] === ib[j]) {
+          clash = true;
+          break;
+        }
+        merged.push(ia[i] < ib[j] ? ia[i++] : ib[j++]);
+      }
+      if (clash) {
+        refused++;
+        continue;
+      }
+      while (i < ia.length) merged.push(ia[i++]);
+      while (j < ib.length) merged.push(ib[j++]);
+      parent[ra] = rb;
+      members.delete(ra);
+      members.set(rb, merged);
+    }
   const groups = new Map<number, number[]>();
   for (let x = 0; x < nodes; x++) {
     const r = find(x);
@@ -130,7 +159,7 @@ export function reconstruct(
     for (const x of g) featTrack[nodeImg[x]][x - off[nodeImg[x]]] = id;
   }
   const pairInliers = new Map(verified.map((v) => [`${v.a},${v.b}`, v.ia.length]));
-  log(`Tracks: ${trackObs.length} (${dropped} ambiguous observations dropped)`);
+  log(`Tracks: ${trackObs.length} (${refused} conflicting merges refused, ${dropped} ambiguous observations dropped)`);
 
   // ---- 3. initial pair candidates ----
   // Parallax (median triangulation angle ≥ 2°) and point count, not distance
