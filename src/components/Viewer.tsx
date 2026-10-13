@@ -1,6 +1,7 @@
 import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
 import { SparkRenderer, SplatFileType, SplatMesh } from "@sparkjsdev/spark";
 import { fileUrl, type SceneFrame } from "../lib/api";
 import { polarRange } from "../lib/share";
@@ -37,12 +38,17 @@ export interface ViewerHandle {
   /** Draws a retouch trajectory (null clears it). With `frame` (video size and
    *  vertical focal length), also draws the camera at a few points. */
   showPath(poses: ColmapPose[] | null, frame?: { size: [number, number]; fy: number }): void;
-  /** Moves the camera to a pose, looking at the orbit center. */
+  /** Moves the camera to a pose, looking at the anchor (or the orbit center). */
   goTo(pose: ColmapPose): void;
   /** Releases the angle lock (aim below or above the filmed range). */
   unlockAngle(): void;
   /** A splat is loaded on screen. */
   hasSplat(): boolean;
+  /** A mouse button (or finger) is pressed on the 3D view. */
+  pointerDown(): boolean;
+  /** Orbit pivot placed with the Anchor gizmo, in COLMAP coordinates; null
+   *  until it is moved (and after Recenter). */
+  anchorPoint(): [number, number, number] | null;
   /** Video frame for the framing mask (null removes the option). */
   setFrameGuide(guide: FrameGuide | null): void;
   /** Renders each pose offscreen with the displayed splat. `onFrame` gets
@@ -78,6 +84,15 @@ interface Ctx {
   retouchPath: THREE.Object3D | null;
   /** Requests a few render frames (the scene only redraws on change). */
   invalidate: () => void;
+  /** Pointers pressed on the canvas (released anywhere). */
+  pressed: Set<number>;
+  /** Orbit pivot (`controls.target`) shown and moved with a gizmo. */
+  anchor: THREE.Object3D;
+  anchorGizmo: TransformControls;
+  /** Where the pivot is gliding to after a gizmo drag (null = at rest). */
+  anchorGoal: THREE.Vector3 | null;
+  /** The pivot was placed with the gizmo (it then follows pans too). */
+  anchored: boolean;
 }
 
 // Extra frames after each change: cover orbit damping and Spark's async
@@ -87,6 +102,10 @@ const SETTLE_FRAMES = 45;
 const ACCENT = 0xff9a4d;
 /** Radius, in px, for hitting a camera point with the mouse. */
 const PICK_RADIUS = 10;
+/** Fraction of the pending wheel zoom applied per frame. */
+const ZOOM_EASE = 0.2;
+/** Fraction of the way to its new spot the pivot moves per frame. */
+const ANCHOR_EASE = 0.15;
 /** Default viewer vertical field of view, in degrees. */
 const BASE_FOV = 50;
 /** Maximum fraction of the screen the framing box takes. */
@@ -101,7 +120,8 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
   const [loadError, setLoadError] = useState<string | null>(null);
   const [showCams, setShowCams] = useState(true);
   const [spin, setSpin] = useState(false);
-  const [clampView, setClampView] = useState(true);
+  const [clampView, setClampView] = useState(false);
+  const [anchorOn, setAnchorOn] = useState(false);
   const [hasMesh, setHasMesh] = useState(false);
   const [guide, setGuide] = useState<FrameGuide | null>(null);
   const [guideOn, setGuideOn] = useState(false);
@@ -156,15 +176,90 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
     ro.observe(el);
     resize();
 
+    // Smooth wheel zoom. OrbitControls applies each wheel notch at once (a jump
+    // in a single frame); here the zoom glides like the rotation damping, so a
+    // recorded retouch motion zooms continuously instead of in steps. Listens
+    // in the capture phase on the container so OrbitControls never sees it.
+    let zoomPending = 0; // log of the distance factor still to apply
+    const onWheel = (e: WheelEvent) => {
+      if (!controls.enabled || !controls.enableZoom) return;
+      e.preventDefault();
+      e.stopPropagation();
+      // Same scale as OrbitControls: 5% per 100 px, lines and pages in px,
+      // trackpad pinch (ctrl) 10× stronger.
+      let dy = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 100 : 1);
+      if (e.ctrlKey) dy *= 10;
+      zoomPending += (dy / 100) * -Math.log(0.95) * controls.zoomSpeed;
+      invalidate();
+    };
+    el.addEventListener("wheel", onWheel, { capture: true, passive: false });
+    const offset = new THREE.Vector3();
+    const stepZoom = () => {
+      const step = Math.abs(zoomPending) < 1e-4 ? zoomPending : zoomPending * ZOOM_EASE;
+      zoomPending -= step;
+      offset.copy(camera.position).sub(controls.target);
+      const d = THREE.MathUtils.clamp(offset.length() * Math.exp(step), controls.minDistance, controls.maxDistance);
+      camera.position.copy(controls.target).add(offset.setLength(d));
+    };
+
+    // Orbit pivot: a point with a translate gizmo. While the gizmo is dragged
+    // the camera stays put (if it kept aiming at the pivot, the gizmo would
+    // stay pinned to the screen center); on release the pivot glides to the
+    // new spot and the camera turns to aim at it.
+    const anchor = new THREE.Object3D();
+    anchor.add(
+      new THREE.Points(
+        new THREE.BufferGeometry().setFromPoints([new THREE.Vector3()]),
+        new THREE.PointsMaterial({ color: 0xffffff, size: 8, sizeAttenuation: false, depthTest: false, transparent: true }),
+      ),
+    );
+    anchor.children[0].renderOrder = 10;
+    anchor.visible = false;
+    scene.add(anchor);
+    const gizmo = new TransformControls(camera, renderer.domElement);
+    gizmo.setMode("translate");
+    gizmo.setSize(0.8);
+    gizmo.enabled = false;
+    gizmo.attach(anchor);
+    const gizmoHelper = gizmo.getHelper();
+    gizmoHelper.visible = false;
+    scene.add(gizmoHelper);
+    gizmo.addEventListener("change", invalidate);
+    gizmo.addEventListener("dragging-changed", (e) => {
+      controls.enabled = !e.value;
+      if (!e.value && ctx.current) {
+        ctx.current.anchorGoal = anchor.position.clone();
+        ctx.current.anchored = true;
+      }
+    });
+    const stepAnchor = () => {
+      const c = ctx.current!;
+      if (gizmo.dragging) return;
+      if (c.anchorGoal) {
+        controls.target.lerp(c.anchorGoal, ANCHOR_EASE);
+        if (controls.target.distanceToSquared(c.anchorGoal) < 1e-10) {
+          controls.target.copy(c.anchorGoal);
+          c.anchorGoal = null;
+        }
+        dirty = SETTLE_FRAMES;
+      } else if (!anchor.position.equals(controls.target)) {
+        // Panning and recentering move the pivot: the gizmo follows.
+        anchor.position.copy(controls.target);
+        dirty = SETTLE_FRAMES;
+      }
+    };
+
     controls.addEventListener("change", invalidate);
     renderer.setAnimationLoop(() => {
+      if (zoomPending) stepZoom();
+      if (ctx.current) stepAnchor();
       if (controls.update() || controls.autoRotate) dirty = SETTLE_FRAMES;
       if (dirty <= 0) return;
       dirty--;
       renderer.render(scene, camera);
     });
 
-    ctx.current = { renderer, scene, camera, controls, root, splatRoot, splatAligned: false, mesh: null, path: null, hover: null, retouchPath: null, invalidate };
+    ctx.current = { renderer, scene, camera, controls, root, splatRoot, splatAligned: false, mesh: null, path: null, hover: null, retouchPath: null, invalidate, pressed: new Set(), anchor, anchorGizmo: gizmo, anchorGoal: null, anchored: false };
 
     // Camera point closest to the cursor, in screen pixels.
     const v = new THREE.Vector3();
@@ -206,8 +301,11 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
     // Click = release near the same spot; dragging still orbits.
     let down: { x: number; y: number } | null = null;
     const onDown = (e: PointerEvent) => {
+      ctx.current?.pressed.add(e.pointerId);
       down = e.button === 0 ? { x: e.clientX, y: e.clientY } : null;
     };
+    // The release may happen outside the canvas.
+    const onRelease = (e: PointerEvent) => ctx.current?.pressed.delete(e.pointerId);
     const onUp = (e: PointerEvent) => {
       if (!down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 4) return;
       down = null;
@@ -221,14 +319,21 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
     canvas.addEventListener("pointerup", onUp);
     canvas.addEventListener("pointermove", onMove);
     canvas.addEventListener("pointerleave", onLeave);
+    window.addEventListener("pointerup", onRelease);
+    window.addEventListener("pointercancel", onRelease);
 
     return () => {
       canvas.removeEventListener("pointerdown", onDown);
       canvas.removeEventListener("pointerup", onUp);
       canvas.removeEventListener("pointermove", onMove);
       canvas.removeEventListener("pointerleave", onLeave);
+      window.removeEventListener("pointerup", onRelease);
+      window.removeEventListener("pointercancel", onRelease);
+      el.removeEventListener("wheel", onWheel, { capture: true });
       ro.disconnect();
       renderer.setAnimationLoop(null);
+      gizmo.detach();
+      gizmo.dispose();
       controls.dispose();
       ctx.current?.mesh?.dispose();
       renderer.dispose();
@@ -292,6 +397,15 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
   useEffect(() => {
     if (ctx.current) ctx.current.controls.autoRotate = spin;
   }, [spin]);
+
+  useEffect(() => {
+    const c = ctx.current;
+    if (!c) return;
+    c.anchorGizmo.enabled = anchorOn;
+    c.anchorGizmo.getHelper().visible = anchorOn;
+    c.anchor.visible = anchorOn;
+    c.invalidate();
+  }, [anchorOn]);
 
   // Framing mask: darkens whatever is outside the retouch video frame. The
   // video lens may be wider than the viewer's; then the viewer widens its
@@ -450,7 +564,10 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
         c.controls.minPolarAngle = 0;
         c.controls.maxPolarAngle = Math.PI;
         c.root.updateMatrixWorld(true);
-        c.controls.target.set(0, 0, 0);
+        // Looks at the anchor when there is one, otherwise at the orbit center.
+        if (c.anchorGoal) c.controls.target.copy(c.anchorGoal);
+        c.anchorGoal = null;
+        if (!c.anchored) c.controls.target.set(0, 0, 0);
         c.camera.position.copy(centerOf(pose).applyMatrix4(c.root.matrixWorld));
         c.controls.update();
         c.invalidate();
@@ -464,6 +581,16 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
       },
       hasSplat() {
         return !!ctx.current?.mesh;
+      },
+      pointerDown() {
+        return !!ctx.current?.pressed.size;
+      },
+      anchorPoint() {
+        const c = ctx.current;
+        if (!c?.anchored || !frameRef.current) return null;
+        c.root.updateMatrixWorld(true);
+        const p = (c.anchorGoal ?? c.controls.target).clone().applyMatrix4(c.root.matrixWorld.clone().invert());
+        return [p.x, p.y, p.z];
       },
       setFrameGuide(g) {
         setGuide(g);
@@ -483,7 +610,7 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
         cam.updateProjectionMatrix();
         cam.matrixAutoUpdate = false;
         // Camera and trajectory lines must not show up in the video.
-        const hidden = [c.path, c.retouchPath].filter((o): o is THREE.Object3D => !!o && o.visible);
+        const hidden = [c.path, c.retouchPath, c.anchor, c.anchorGizmo.getHelper()].filter((o): o is THREE.Object3D => !!o && o.visible);
         hidden.forEach((o) => (o.visible = false));
         const row = w * 4;
         const out = new Uint8ClampedArray(w * h * 4);
@@ -566,6 +693,8 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
   function resetView() {
     const c = ctx.current;
     if (!c) return;
+    c.anchorGoal = null;
+    c.anchored = false;
     c.controls.target.set(0, 0, 0);
     if (frame && frame.cameras.length) {
       c.root.updateMatrixWorld(true);
@@ -623,6 +752,9 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
           title={tv.lockAngleTitle}
         >
           {tv.lockAngle}
+        </button>
+        <button className={`tool ${anchorOn ? "on" : ""}`} onClick={() => setAnchorOn((v) => !v)} disabled={!hasMesh} title={tv.anchorTitle}>
+          {tv.anchor}
         </button>
         {guide && (
           <button className={`tool ${guideOn ? "on" : ""}`} onClick={() => setGuideOn((v) => !v)} title={tv.guideTitle}>

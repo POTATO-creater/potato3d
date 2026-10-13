@@ -13,6 +13,9 @@ import {
   tiltTurnPath,
   turnPath,
   quatToMat,
+  poseStill,
+  recordedPath,
+  recordedSeconds,
   viewPath,
   type CameraPose,
   type Quat,
@@ -256,3 +259,141 @@ test("tilted 360° turn: view from below starts level and reaches the view at th
   for (let i = 1; i < p.length; i++) assert.ok(angleBetween(p[i - 1].qvec, p[i].qvec) < 6, `jump at frame ${i}`);
 });
 
+
+test("recorded motion: pauses trimmed, resampled by time, ends on the recorded poses", () => {
+  // 1 s still, 2 s turning 0° → 90° at an uneven pace, 1 s of tiny damping
+  // drift, then still. Samples at ~60 Hz with jitter.
+  const samples = [];
+  let t = 0;
+  for (let i = 0; t < 4500; i++) {
+    const u = Math.min(1, Math.max(0, (t - 1000) / 2000));
+    const drift = t > 3000 && t < 4000 ? 1e-4 * Math.sin(t) : 0;
+    samples.push({ t, ...lookAt(90 * u * u + drift, 10, 3) });
+    t += 16 + (i % 3);
+  }
+  assert.ok(Math.abs(recordedSeconds(samples) - 2) < 0.05, `duration ${recordedSeconds(samples)}`);
+  const plan = recordedPath(samples, lens, { ...DEFAULT_CLIP, frames: 49, center: [0, 0, 0] })!;
+  const p = plan.poses;
+  assert.equal(p.length, 49);
+  assert.ok(angleBetween(p[0].qvec, lookAt(0, 10, 3).qvec) < 0.2, "starts at the first pose");
+  assert.ok(angleBetween(p[48].qvec, lookAt(90, 10, 3).qvec) < 0.2, "ends at the last pose");
+  // Halfway in time is a quarter of the way in angle (u² pace kept).
+  assert.ok(angleBetween(p[24].qvec, lookAt(22.5, 10, 3).qvec) < 0.5, "keeps the recorded pace");
+  assert.ok(Math.abs(elevation(p[24]) - 10) < 0.1);
+  assert.ok(p.every((q) => q.anchor === null));
+});
+
+test("recorded motion: nothing moved → no path", () => {
+  const still = Array.from({ length: 30 }, (_, i) => ({ t: i * 16, ...lookAt(30, 10, 3) }));
+  assert.equal(recordedPath(still, lens, { ...DEFAULT_CLIP, center: [0, 0, 0] }), null);
+  assert.equal(recordedSeconds(still), 0);
+});
+
+test("recorded motion: uniform speed evens out the pace and drops pauses", () => {
+  // 0° → 45° fast, a 1 s pause, then 45° → 90° slowly.
+  const samples = [];
+  for (let t = 0; t <= 4000; t += 16) {
+    const az = t < 500 ? (45 * t) / 500 : t < 1500 ? 45 : 45 + (45 * (t - 1500)) / 2500;
+    samples.push({ t, ...lookAt(az, 10, 3) });
+  }
+  const steps = (u: number) => {
+    const p = recordedPath(samples, lens, { ...DEFAULT_CLIP, frames: 49, uniform: u, center: [0, 0, 0] })!.poses;
+    return p.slice(1).map((q, i) => angleBetween(p[i].qvec, q.qvec));
+  };
+  const timed = steps(0), even = steps(1);
+  assert.ok(Math.max(...timed) / Math.min(...timed.filter((d) => d > 1e-3)) > 4, "recorded pace is uneven");
+  assert.ok(timed.some((d) => d < 1e-3), "the recorded pause holds the camera");
+  assert.ok(Math.max(...even) / Math.min(...even) < 1.05, `constant speed (${Math.min(...even)}–${Math.max(...even)})`);
+  const half = steps(0.5);
+  const held = (d: number[]) => d.filter((x) => x < 1e-3).length;
+  assert.ok(Math.max(...half) < Math.max(...timed), "the blend slows the fast part");
+  assert.ok(held(half) > 0 && held(half) < held(timed), "and shortens the pause");
+});
+
+test("pose still: damping-sized nudges count as still", () => {
+  assert.ok(poseStill(lookAt(30, 10, 3), lookAt(30 + 1e-5, 10, 3)));
+  assert.ok(!poseStill(lookAt(30, 10, 3), lookAt(30.1, 10, 3)));
+});
+
+test("recorded motion: a zoom counts as movement at uniform speed and in the peak speed", () => {
+  // Fast zoom from 3 to 0.75 (0.2 s), then a slow 60° turn up close (3 s).
+  const samples = [];
+  for (let t = 0; t <= 3200; t += 16) {
+    const r = t < 200 ? 3 * Math.pow(0.25, t / 200) : 0.75;
+    const az = t < 200 ? 0 : (60 * (t - 200)) / 3000;
+    samples.push({ t, ...lookAt(az, 10, r) });
+  }
+  const opts = { ...DEFAULT_CLIP, frames: 97, center: [0, 0, 0] as Vec3 };
+  const timed = recordedPath(samples, lens, { ...opts, uniform: 0 })!.poses;
+  const even = recordedPath(samples, lens, { ...opts, uniform: 1 })!.poses;
+  const zoomFrames = (p: typeof even) => p.filter((q) => Math.hypot(...poseToWorld(q).center) > 0.76).length;
+  // ln 4 ≈ 79° of image change vs 60° of turn: the zoom gets over half the clip.
+  assert.ok(zoomFrames(timed) < 10, `recorded: zoom in a few frames (${zoomFrames(timed)})`);
+  assert.ok(zoomFrames(even) > 45, `uniform: zoom spread out (${zoomFrames(even)})`);
+  const fast = peakSpeed(timed, 24, 3, [0, 0, 0]);
+  assert.ok(fast > 5 * peakSpeed(timed, 24), `zoom shows in the peak (${fast})`);
+  assert.ok(peakSpeed(even, 24, 3, [0, 0, 0]) < fast / 5);
+});
+
+test("recorded motion: stabilize removes shake, keeps the ends and the overall move", () => {
+  // 90° turn in 3 s at a steady pace, with a hand shake (~9 Hz) in azimuth,
+  // elevation and aim.
+  const samples = [];
+  for (let t = 0; t <= 3000; t += 16) {
+    const shake = (f: number, ph: number) => (t > 0 && t < 3000 ? 1.5 * Math.sin((2 * Math.PI * f * t) / 1000 + ph) : 0);
+    const cam = poseToWorld(lookAt((90 * t) / 3000 + shake(9, 0), 10 + shake(7, 1), 3)).center;
+    samples.push({ t, ...aim(cam, [shake(11, 2) * 0.02, shake(8, 3) * 0.02, 0]) });
+  }
+  const opts = { ...DEFAULT_CLIP, frames: 97, center: [0, 0, 0] as Vec3 };
+  // Jerk: change in step angle from frame to frame.
+  const jerk = (stabilize: number) => {
+    const p = recordedPath(samples, lens, { ...opts, stabilize })!.poses;
+    const steps = p.slice(1).map((q, i) => angleBetween(p[i].qvec, q.qvec));
+    return { p, jerk: Math.max(...steps.slice(1).map((d, i) => Math.abs(d - steps[i]))) };
+  };
+  const raw = jerk(0), smooth = jerk(0.5);
+  assert.ok(smooth.jerk < raw.jerk / 5, `shake reduced (${raw.jerk.toFixed(3)} → ${smooth.jerk.toFixed(3)})`);
+  assert.ok(angleBetween(smooth.p[0].qvec, raw.p[0].qvec) < 1e-6, "same first frame");
+  assert.ok(angleBetween(smooth.p[96].qvec, raw.p[96].qvec) < 1e-6, "same last frame");
+  assert.ok(Math.abs(elevation(smooth.p[48]) - 10) < 0.5, `middle on the path (${elevation(smooth.p[48])})`);
+});
+
+// Anchor off the photos' center: up at the "head" and a bit to the side.
+const PIVOT: Vec3 = [0.3, -0.8, 0.2];
+const aimsAt = (p: { qvec: Quat; tvec: Vec3 }, at: Vec3) => dot(forward(p), unit(sub(at, poseToWorld(p).center)));
+const axisDist = (p: { qvec: Quat; tvec: Vec3 }, at: Vec3) => {
+  const r = sub(poseToWorld(p).center, at);
+  return Math.hypot(...sub(r, [UP[0] * dot(r, UP), UP[1] * dot(r, UP), UP[2] * dot(r, UP)]));
+};
+
+test("anchor: 360° turn circles the anchor's vertical axis, aiming at it", () => {
+  const view = aim(poseToWorld(lookAt(40, 25, 2)).center, PIVOT);
+  const p = turnPath(orbit, lens, view, { ...DEFAULT_CLIP, pivot: PIVOT }).poses;
+  const d0 = axisDist(p[0], PIVOT);
+  for (const q of p) {
+    assert.ok(Math.abs(axisDist(q, PIVOT) - d0) < 1e-6, "same distance from the anchor's axis");
+    assert.ok(aimsAt(q, PIVOT) > 0.9999, "aims at the anchor");
+  }
+});
+
+test("anchor: tilted turn circles the anchor", () => {
+  const view = aim(poseToWorld(lookAt(40, 45, 2)).center, PIVOT);
+  const p = tiltTurnPath(orbit, lens, view, { ...DEFAULT_CLIP, pivot: PIVOT }).poses;
+  const mid = p[p.length >> 1];
+  assert.ok(aimsAt(mid, PIVOT) > 0.999, `middle aims at the anchor (${aimsAt(mid, PIVOT)})`);
+  assert.ok(Math.abs(axisDist(mid, PIVOT) - axisDist(view, PIVOT)) < 1e-6, "at the view's distance from the anchor's axis");
+});
+
+test("anchor: presets leave and return to real photos and aim at the anchor in between", () => {
+  for (const shape of ["arc", "wave"] as const) {
+    const plan = presetPath(orbit, lens, { ...DEFAULT_CLIP, center: 20, span: 60, ramp: shape === "wave" ? 0 : 0.25, elevDeg: -30, shape, pivot: PIVOT });
+    const p = plan.poses;
+    assert.ok(p[0].anchor && p[p.length - 1].anchor, `${shape}: ends at photos`);
+    assert.ok(aimsAt(p[p.length >> 2], PIVOT) > 0.9999, `${shape}: aims at the anchor`);
+    for (let i = 1; i < p.length; i++) assert.ok(angleBetween(p[i - 1].qvec, p[i].qvec) < 8, `${shape}: jump at frame ${i}`);
+  }
+  // Without an anchor nothing changes.
+  const a = presetPath(orbit, lens, { ...DEFAULT_CLIP, center: 20, elevDeg: -30 }).poses;
+  const b = presetPath(orbit, lens, { ...DEFAULT_CLIP, center: 20, elevDeg: -30, pivot: undefined }).poses;
+  assert.deepEqual(a, b);
+});
