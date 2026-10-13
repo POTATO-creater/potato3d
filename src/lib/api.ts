@@ -367,6 +367,9 @@ export interface RetouchOptions {
   /** Recorte com que o projeto treinou (os frames entram com fundo
    *  transparente, como no treino); null = sem recorte. */
   masks: MaskOptions | null;
+  /** Total máximo de frames restaurados no ajuste (somando os clipes);
+   *  ausente = todos. */
+  maxRestored?: number;
 }
 
 export type RetouchEvent =

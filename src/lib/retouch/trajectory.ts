@@ -420,6 +420,109 @@ export function turnPath(cams: CameraPose[], lens: Lens, target: { qvec: Quat; t
   return { ...clipLens(lens, o.longSide, o.aspect), poses };
 }
 
+
+/** Rotação rígida de uma pose (câmera → mundo) em torno de `orbitC`. */
+const rotateAbout = (p: { rot: Mat3; center: Vec3 }, R: Mat3, orbitC: Vec3) => ({
+  rot: mulMM(R, p.rot),
+  center: add(orbitC, mulMV(R, sub(p.center, orbitC))),
+});
+
+/** Eixo horizontal para subir ou descer uma câmera (ângulo positivo = para
+ *  cima): o "direita" da própria câmera, achatado no plano da órbita. Com o
+ *  eixo tirado da posição (o radial), uma vista quase vertical desceria pelo
+ *  lado errado e a imagem viraria de ponta-cabeça, porque a mira do viewer não
+ *  é exatamente o centro da órbita. */
+function pitchAxis(p: { rot: Mat3; center: Vec3 }, orbitC: Vec3, up: Vec3): Vec3 | null {
+  const right: Vec3 = [p.rot[0][0], p.rot[1][0], p.rot[2][0]];
+  const axis = sub(right, scale(up, dot(right, up)));
+  if (norm(axis) >= 1e-6) return scale(unit(axis), -1);
+  // Câmera de lado (rolada 90°): cai para o radial.
+  const r = sub(p.center, orbitC);
+  const radial = sub(r, scale(up, dot(r, up)));
+  return norm(radial) < 1e-9 ? null : cross(unit(radial), up);
+}
+
+/** Ponto que a câmera mira: onde o eixo óptico passa mais perto do eixo
+ *  vertical do sujeito (a reta por `orbitC` na direção `up`). Olhando quase
+ *  na vertical (eixos paralelos), o ponto do eixo óptico mais perto do centro. */
+function focusPoint(c: Vec3, fwd: Vec3, orbitC: Vec3, up: Vec3): Vec3 {
+  const w = sub(c, orbitC);
+  const b = dot(fwd, up);
+  const den = 1 - b * b;
+  const minT = 0.2 * norm(w);
+  let t = den < 1e-4 ? -dot(w, fwd) : (b * dot(w, up) - dot(w, fwd)) / den;
+  if (!(t > minT)) t = Math.max(minT, -dot(w, fwd));
+  return add(c, scale(fwd, t));
+}
+
+const ease = (x: number) => 0.5 - 0.5 * Math.cos(Math.PI * Math.min(1, Math.max(0, x)));
+
+/** Rotação (câmera → mundo) de uma câmera nivelada, sem rolagem, virada para
+ *  o mesmo lado que `rot` (o "para a frente" no plano horizontal). Olhando
+ *  quase na vertical, o lado vem do "para cima" da imagem: ele aponta para a
+ *  frente quando a câmera olha para baixo e para trás quando olha para cima. */
+function levelRotation(rot: Mat3, up: Vec3): Mat3 {
+  const flat = (v: Vec3) => sub(v, scale(up, dot(v, up)));
+  const fwd: Vec3 = [rot[0][2], rot[1][2], rot[2][2]];
+  const imgUp: Vec3 = [-rot[0][1], -rot[1][1], -rot[2][1]];
+  const pitch = dot(fwd, up);
+  const face = unit(add(flat(fwd), scale(flat(imgUp), -Math.sign(pitch))));
+  const down = scale(up, -1);
+  const right = cross(down, face);
+  return [
+    [right[0], down[0], face[0]],
+    [right[1], down[1], face[1]],
+    [right[2], down[2], face[2]],
+  ];
+}
+
+/** Volta 360° na inclinação de uma vista, em três fases:
+ *  1. subida reta: parte da altura das fotos (o primeiro frame, a referência
+ *     do modelo de vídeo, fica numa altura bem coberta), com a câmera
+ *     nivelada, na direção e distância da vista, e sobe (ou desce) até ela
+ *     num arco em torno do ponto que a vista mira, como uma grua; a câmera
+ *     inclina aos poucos da horizontal até a inclinação da vista;
+ *  2. volta de 360° nessa inclinação, em torno do eixo vertical que passa
+ *     pelo ponto mirado;
+ *  3. descida reta de volta ao primeiro frame.
+ *  O tempo de cada fase é proporcional ao ângulo percorrido, e a câmera
+ *  desacelera nas trocas de fase (sem quina). */
+export function tiltTurnPath(cams: CameraPose[], lens: Lens, target: { qvec: Quat; tvec: Vec3 }, o: ClipOptions & { radius?: number }): ClipPlan {
+  const { center: orbitC, up } = orbitFrame(cams);
+  const sense = orbitSense(cams, orbitC, up);
+  const t = atRadius({ ...toWorld(target), anchor: null }, orbitC, o.radius);
+  const fwd: Vec3 = [t.rot[0][2], t.rot[1][2], t.rot[2][2]];
+  const focus = focusPoint(t.center, fwd, orbitC, up);
+  const axis = pitchAxis(t, orbitC, up);
+  const r = sub(t.center, focus);
+  const rho = norm(r);
+  // Elevação da câmera em torno do ponto mirado, no plano da subida.
+  const elView = axis ? Math.atan2(dot(r, up), dot(r, cross(up, axis))) : Math.PI / 2;
+  // Início na altura média das fotos (limitado a ±30° em torno do ponto mirado).
+  const photoH = cams.reduce((a, c) => a + dot(sub(toWorld(c).center, orbitC), up), 0) / cams.length;
+  const focusH = dot(sub(focus, orbitC), up);
+  const elStart = Math.asin(Math.max(-0.5, Math.min(0.5, (photoH - focusH) / (rho || 1))));
+  const delta = elView - elStart;
+  const crane = (ang: number) => (axis && Math.abs(ang) > 1e-12 ? rotateAbout(t, axisAngle(axis, ang), focus) : t);
+  // Na subida, a posição segue o arco e a rotação vai da nivelada à da vista.
+  const levelQ = matToQuat(transpose(levelRotation(t.rot, up)));
+  const viewQ = matToQuat(transpose(t.rot));
+  const lifting = (e: number) => ({ center: crane(-delta * (1 - e)).center, rot: transpose(quatToMat(slerp(levelQ, viewQ, e))) });
+  // Frações do clipe: subida e descida proporcionais ao ângulo (10% a 30%).
+  const lift = Math.min(0.3, Math.max(0.1, Math.abs(delta) / (2 * Math.abs(delta) + 2 * Math.PI)));
+  const n = o.frames;
+  const poses: PathPose[] = [];
+  for (let i = 0; i < n; i++) {
+    const u = i / (n - 1);
+    let p;
+    if (u < lift) p = lifting(ease(u / lift));
+    else if (u <= 1 - lift) p = rotateAbout(t, axisAngle(up, sense * 2 * Math.PI * ease((u - lift) / (1 - 2 * lift))), focus);
+    else p = lifting(1 - ease((u - (1 - lift)) / lift));
+    poses.push({ ...fromWorld(p.rot, p.center), anchor: null });
+  }
+  return { ...clipLens(lens, o.longSide, o.aspect), poses };
+}
+
 /** Interpola dois pontos em coordenadas esféricas em torno de `c` (eixo `up`). */
 function blendOrbit(a: Vec3, b: Vec3, w: number, c: Vec3, up: Vec3): Vec3 {
   if (w <= 0) return a;

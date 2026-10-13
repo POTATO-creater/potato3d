@@ -3,6 +3,7 @@
 
 import type { Msg, ProjectState, RetouchApi, RetouchClip, RetouchEvent } from "../../../src/lib/api";
 import { appendCameras, appendImages, type NewImage } from "../../../src/lib/retouch/colmap";
+import { pickRestoredFrames } from "../../../src/lib/retouch/frames";
 import { videoFrames } from "../../../src/lib/retouch/video";
 import { train } from "../brush";
 import { buildAlpha } from "../pipeline/masks";
@@ -185,7 +186,13 @@ async function applyRetouch(
   // Frames restaurados: no tamanho em que o restaurador os devolveu (não
   // reduz o que veio maior que a referência), com o alpha do render ampliado.
   const newImages: NewImage[] = [];
-  const total = clips.reduce((n, c) => n + c.poses.length, 0);
+  // Só uma parte dos frames entra (restaurados demais tiram a nitidez do que
+  // as fotos veem); o vídeo é lido inteiro, frame a frame, de qualquer jeito.
+  const picked = pickRestoredFrames(
+    clips.map((c) => c.poses.length),
+    options.maxRestored ?? Infinity,
+  ).map((idx) => new Set(idx));
+  const total = picked.reduce((n, s) => n + s.size, 0);
   const trainSize = (c: RetouchClip) => c.restoredSize ?? c.size;
   let done = 0;
   for (const [ci, clip] of clips.entries()) {
@@ -195,6 +202,10 @@ async function applyRetouch(
     for await (const frame of videoFrames(await readFile(clip.restored!), w, h)) {
       if (signal.aborted) throw cancelled();
       if (i >= clip.poses.length) break;
+      if (!picked[ci].has(i)) {
+        i++;
+        continue;
+      }
       const alpha = erodedAlpha(await imageDataOf(await readFile(alphas[i]), w, h), w, h);
       const rgba = new Uint8ClampedArray(frame.data);
       for (let k = 0; k < alpha.length; k++) rgba[k * 4 + 3] = alpha[k];
@@ -228,7 +239,9 @@ async function applyRetouch(
   await writeFile(`${ds}/sparse/0/points3D.bin`, await readFile(`${l.model}/points3D.bin`));
   // O Brush começa do splat que achar em init.ply, em vez dos pontos do COLMAP.
   await writeFile(`${ds}/init.ply`, base);
-  log(`retoque: ${realImages.length} fotos + ${newImages.length} frames restaurados de ${clips.length} clipe(s)`);
+  log(
+    `retoque: ${realImages.length} fotos + ${newImages.length} de ${clips.reduce((n, c) => n + c.poses.length, 0)} frames restaurados de ${clips.length} clipe(s)`,
+  );
 
   // Ajuste curto, sem avaliação (as vistas novas cairiam no conjunto de teste).
   const steps = Math.max(options.steps, 1);

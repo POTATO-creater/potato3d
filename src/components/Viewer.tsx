@@ -34,8 +34,9 @@ export interface FrameGuide {
 export interface ViewerHandle {
   /** Câmera atual; null antes do enquadramento. */
   viewPose(): ColmapPose | null;
-  /** Desenha uma trajetória de retoque (null apaga). */
-  showPath(poses: ColmapPose[] | null): void;
+  /** Desenha uma trajetória de retoque (null apaga). Com `frame` (tamanho e
+   *  focal vertical do vídeo), desenha também a câmera em alguns pontos. */
+  showPath(poses: ColmapPose[] | null, frame?: { size: [number, number]; fy: number }): void;
   /** Leva a câmera a uma pose, olhando para o centro da órbita. */
   goTo(pose: ColmapPose): void;
   /** Solta a trava de ângulo (mirar por baixo ou por cima da filmagem). */
@@ -396,7 +397,7 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
         const c2w = c.root.matrixWorld.clone().invert().multiply(c.camera.matrixWorld).multiply(FLIP_YZ);
         return colmapFromC2W(c2w);
       },
-      showPath(poses) {
+      showPath(poses, frame) {
         const c = ctx.current;
         if (!c) return;
         if (c.retouchPath) {
@@ -422,6 +423,18 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
           const start = new THREE.Points(new THREE.BufferGeometry().setFromPoints([pts[0]]), pathMaterial(PATH_START, 1, 11));
           const g = new THREE.Group();
           g.add(line, ticks, end, mid, start);
+          // Câmeras nas marcas (e no início e no meio): pirâmide com a base no
+          // formato do quadro e um triângulo no lado de cima da imagem.
+          if (frame) {
+            const depth = (frameRef.current?.radius ?? 1) * 0.07;
+            const marks = poses.map((_, i) => i).filter((i) => i % step === 0 && i !== 0 && i !== poses.length >> 1);
+            const frustums = (idx: number[], color: number, opacity: number) =>
+              new THREE.LineSegments(
+                new THREE.BufferGeometry().setFromPoints(idx.flatMap((i) => frustumSegments(poses[i], frame, depth))),
+                pathMaterial(color, opacity),
+              );
+            g.add(frustums(marks, RETOUCH, 0.75), frustums([poses.length >> 1], 0xffffff, 0.95), frustums([0], PATH_START, 1));
+          }
           g.children.forEach((o, i) => (o.renderOrder = 2 + i));
           c.root.add(g);
           c.retouchPath = g;
@@ -673,6 +686,20 @@ function c2wFromColmap({ qvec: [w, x, y, z], tvec }: ColmapPose) {
 }
 
 const centerOf = (p: ColmapPose) => new THREE.Vector3().setFromMatrixPosition(c2wFromColmap(p));
+
+/** Segmentos (pares de pontos) de uma câmera desenhada: pirâmide da posição
+ *  até o quadro a `depth` à frente, o quadro e um triângulo no lado de cima da
+ *  imagem. Coordenadas do COLMAP (+Z à frente, +Y para baixo). */
+function frustumSegments(p: ColmapPose, frame: { size: [number, number]; fy: number }, depth: number): THREE.Vector3[] {
+  const c2w = c2wFromColmap(p);
+  const hh = (depth * frame.size[1]) / 2 / frame.fy;
+  const hw = (hh * frame.size[0]) / frame.size[1];
+  const v = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z).applyMatrix4(c2w);
+  const o = v(0, 0, 0);
+  const [tl, tr, br, bl] = [v(-hw, -hh, depth), v(hw, -hh, depth), v(hw, hh, depth), v(-hw, hh, depth)];
+  const [ul, ur, ut] = [v(-hw * 0.35, -hh * 1.08, depth), v(hw * 0.35, -hh * 1.08, depth), v(0, -hh * 1.45, depth)];
+  return [o, tl, o, tr, o, br, o, bl, tl, tr, tr, br, br, bl, bl, tl, ul, ut, ut, ur, ur, ul];
+}
 
 function colmapFromC2W(c2w: THREE.Matrix4): ColmapPose {
   const w2c = c2w.clone().invert();

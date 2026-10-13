@@ -5,7 +5,8 @@ import { ComfyClient } from "../lib/comfy/client";
 import { progressFraction, type ComfyProgress } from "../lib/comfy/progress";
 import { COMFY_CHANGED, loadComfy, loadParamValues, saveParamValues, workflowsOf } from "../lib/comfy/settings";
 import { DEFAULT_FPS, paramDefault, withInput, withParams, workflowFps, type ParamValue, type WorkflowParam } from "../lib/comfy/workflow";
-import { clipFrames, clipLens, DEFAULT_CLIP, nearestCamera, orbitDistance, orbitFrame, peakSpeed, presetPath, turnPath, viewPath, type ClipPlan } from "../lib/retouch/trajectory";
+import { clipFrames, clipLens, DEFAULT_CLIP, nearestCamera, orbitDistance, orbitFrame, peakSpeed, presetPath, tiltTurnPath, turnPath, viewPath, type ClipPlan } from "../lib/retouch/trajectory";
+import { DEFAULT_RESTORED_RATIO, restoredLimit } from "../lib/retouch/frames";
 import { alphaPng, createClipEncoder, videoInfo } from "../lib/retouch/video";
 import { comfyErrorText } from "./ComfySettings";
 import { Field, NumField, Select, Toggle } from "./fields";
@@ -15,6 +16,8 @@ const DEFAULT_STEPS = 3000;
 /** Taxa de aprendizado das posições: 10× menor que a do treino do zero. */
 const LR_MEAN = 2e-6;
 const WF_KEY = "splatforge.retouchWorkflow.v1";
+/** Limite de frames restaurados no ajuste, em fração das fotos. */
+const RATIO_KEY = "splatforge.retouchRestoredRatio.v1";
 /** Duração e inclinação escolhidas por último. */
 const MOTION_KEY = "splatforge.retouchMotion.v1";
 const DEFAULT_TILT = 30;
@@ -22,10 +25,10 @@ const DEFAULT_TILT = 30;
  *  (estimativa; ajustar com a experiência). */
 const MAX_SPEED = 30;
 
-const KINDS = ["view", "orbit", "below", "above", "orbitBelow", "orbitAbove", "wave"] as const;
+const KINDS = ["view", "orbit", "tiltOrbit", "below", "above", "orbitBelow", "orbitAbove", "wave"] as const;
 type Kind = (typeof KINDS)[number];
 /** Movimentos que partem da vista atual: a altura vem dela (sem inclinação). */
-const FROM_VIEW: Kind[] = ["view", "orbit"];
+const FROM_VIEW: Kind[] = ["view", "orbit", "tiltOrbit"];
 /** O que a trajetória guarda do clique: a vista mirada ou a foto do meio. A
  *  trajetória em si é refeita quando a duração ou a inclinação mudam. */
 interface Draft {
@@ -47,7 +50,11 @@ interface Motion {
   longSide: number;
   /** Proporção do vídeo: "lens" (a da lente das fotos) ou "L:A". */
   aspect: string;
+  /** Quadros por segundo do vídeo de referência; null = o do workflow. */
+  fps: number | null;
 }
+
+const FPS_OPTIONS = [12, 15, 16, 24, 25, 30, 48, 50, 60];
 
 const ASPECTS = ["lens", "9:16", "2:3", "3:4", "1:1", "4:3", "3:2", "16:9"];
 /** Largura/altura de uma proporção "L:A"; undefined = a da lente. */
@@ -62,17 +69,18 @@ const LONG_SIDES = [512, 640, 768, 960, 1088, 1280, 1536, 1920];
 
 function loadMotion(): Motion {
   try {
-    const raw = JSON.parse(localStorage.getItem(MOTION_KEY) ?? "null") as { kind?: unknown; seconds?: unknown; tilt?: unknown; distance?: unknown; longSide?: unknown; aspect?: unknown } | null;
+    const raw = JSON.parse(localStorage.getItem(MOTION_KEY) ?? "null") as { kind?: unknown; seconds?: unknown; tilt?: unknown; distance?: unknown; longSide?: unknown; aspect?: unknown; fps?: unknown } | null;
     return {
       distance: raw?.distance === "view" ? "view" : "photos",
       longSide: LONG_SIDES.includes(raw?.longSide as number) ? (raw!.longSide as number) : DEFAULT_CLIP.longSide,
+      fps: typeof raw?.fps === "number" && raw.fps > 0 ? raw.fps : null,
       aspect: ASPECTS.includes(raw?.aspect as string) ? (raw!.aspect as string) : "lens",
       kind: KINDS.includes(raw?.kind as Kind) ? (raw!.kind as Kind) : "view",
       seconds: typeof raw?.seconds === "number" && raw.seconds > 0 ? raw.seconds : null,
       tilt: typeof raw?.tilt === "number" && raw.tilt > 0 ? raw.tilt : DEFAULT_TILT,
     };
   } catch {
-    return { kind: "view", seconds: null, tilt: DEFAULT_TILT, distance: "photos", longSide: DEFAULT_CLIP.longSide, aspect: "lens" };
+    return { kind: "view", seconds: null, tilt: DEFAULT_TILT, distance: "photos", longSide: DEFAULT_CLIP.longSide, aspect: "lens", fps: null };
   }
 }
 interface Task {
@@ -124,6 +132,22 @@ export function RetouchPanel(props: {
   const [applied, setApplied] = useState<{ clips: string[]; appliedAt: number; base: string } | null>(null);
   const [comparing, setComparing] = useState(false);
   const [steps, setSteps] = useState(DEFAULT_STEPS);
+  const [ratio, setRatio] = useState(() => {
+    try {
+      const v = Number(localStorage.getItem(RATIO_KEY));
+      return v > 0 ? v : DEFAULT_RESTORED_RATIO;
+    } catch {
+      return DEFAULT_RESTORED_RATIO;
+    }
+  });
+  const updateRatio = (v: number) => {
+    setRatio(v);
+    try {
+      localStorage.setItem(RATIO_KEY, String(v));
+    } catch {
+      /* armazenamento indisponível */
+    }
+  };
   const [reviewing, setReviewing] = useState<RetouchClip | null>(null);
   const [workflowId, setWorkflowId] = useState<string | null>(() => {
     try {
@@ -173,7 +197,9 @@ export function RetouchPanel(props: {
   }, []);
   const restoreWorkflows = workflowsOf(loadComfy(), "restore");
   const workflow = restoreWorkflows.find((w) => w.id === workflowId) ?? restoreWorkflows[0] ?? null;
-  const fps = workflow ? workflowFps(workflow.graph) : DEFAULT_FPS;
+  // FPS do vídeo de referência: o escolhido ou, sem escolha, o do workflow.
+  const workflowRate = workflow ? workflowFps(workflow.graph) : DEFAULT_FPS;
+  const fps = motion.fps ?? workflowRate;
   // Valores dos campos personalizados do workflow escolhido.
   const [paramValues, setParamValues] = useState<Record<string, ParamValue>>({});
   useEffect(() => setParamValues(workflow ? loadParamValues(workflow.id) : {}), [workflow?.id]);
@@ -246,6 +272,13 @@ export function RetouchPanel(props: {
           ...clip,
           radius: distance === "photos" ? orbitDistance(cameras, cameras[draft.nearest]) : undefined,
         });
+      case "tiltOrbit":
+        // Subida reta da altura das fotos (frame de referência bem coberto)
+        // até a vista, volta na inclinação dela e descida de volta.
+        return tiltTurnPath(cameras, lens, draft.pose!, {
+          ...clip,
+          radius: distance === "photos" ? orbitDistance(cameras, cameras[draft.nearest]) : undefined,
+        });
       case "below":
       case "above":
         // Arco de um terço da órbita em volta da foto mais próxima.
@@ -273,11 +306,19 @@ export function RetouchPanel(props: {
   // Trajetória no 3D: a do rascunho ou, sem rascunho, a do clipe sob o mouse.
   // Sai do estado, e não de mouseenter/mouseleave: um cartão que some sob o
   // cursor (clipe excluído) não dispara mouseleave e deixaria o desenho preso.
-  const hoveredPoses = clips.find((c) => c.id === hovered)?.poses ?? null;
-  const shownPath = draftPlan?.poses ?? hoveredPoses;
+  const hoveredClip = clips.find((c) => c.id === hovered) ?? null;
+  const shown = draftPlan
+    ? { poses: draftPlan.poses, size: draftPlan.size, fy: draftPlan.intrinsics.fy }
+    : hoveredClip
+      ? { poses: hoveredClip.poses, size: hoveredClip.size, fy: hoveredClip.intrinsics.fy }
+      : null;
+  const shownPoses = shown?.poses ?? null;
+  const shownSize = shown?.size.join("x");
+  const shownFy = shown?.fy;
   useEffect(() => {
-    viewer.current?.showPath(shownPath);
-  }, [shownPath, viewer]);
+    const [w, h] = shownSize ? shownSize.split("x").map(Number) : [0, 0];
+    viewer.current?.showPath(shownPoses, shownFy ? { size: [w, h], fy: shownFy } : undefined);
+  }, [shownPoses, shownSize, shownFy, viewer]);
 
   const generate = () =>
     draft &&
@@ -384,6 +425,10 @@ export function RetouchPanel(props: {
   // --------------------------------------------------------------- aplicar --
 
   const ready = clips.filter(restoredOk);
+  const restoredTotal = ready.reduce((n, c) => n + c.poses.length, 0);
+  const photos = cams?.cameras.length ?? 0;
+  const restoredMax = photos ? restoredLimit(photos, ratio) : restoredTotal;
+  const restoredUsed = Math.min(restoredTotal, Math.max(restoredMax, ready.length));
   const apply = () =>
     run("apply", async ({ abort }, progress) => {
       props.onViewerSplat(null);
@@ -395,7 +440,7 @@ export function RetouchPanel(props: {
         await rt.apply(
           projectDir,
           ready.map((c) => c.id),
-          { steps, lrMean: LR_MEAN, train: props.train, masks: props.masks },
+          { steps, lrMean: LR_MEAN, train: props.train, masks: props.masks, maxRestored: restoredMax },
           (e) => {
             if (e.kind === "log") props.onLog(`[retoque] ${e.line}`);
             else if (e.kind === "progress") progress(e.fraction, tm(e.message));
@@ -475,7 +520,7 @@ export function RetouchPanel(props: {
       <div className="grid2 retouch-motion">
         <NumField
           label={tr.duration}
-          hint={tr.durationHint(frames, fps)}
+          hint={tr.durationHint(frames)}
           value={seconds}
           min={0.5}
           max={30}
@@ -484,6 +529,19 @@ export function RetouchPanel(props: {
           disabled={busy}
           onChange={(v) => v > 0 && updateMotion({ seconds: v })}
         />
+        <Field label={tr.fps} hint={tr.fpsHint(workflowRate)}>
+          <Select
+            value={fps}
+            aria-label={tr.fps}
+            disabled={busy}
+            options={[...new Set([...FPS_OPTIONS, workflowRate])]
+              .sort((x, y) => x - y)
+              .map((r) => ({ value: r, label: `${r} fps`, hint: r === workflowRate ? tr.fpsWorkflow : undefined }))}
+            onChange={(r) => updateMotion({ fps: r === workflowRate ? null : r })}
+          />
+        </Field>
+      </div>
+      <div className="grid2">
         <NumField
           label={tr.tilt}
           hint={tr.tiltHint}
@@ -495,19 +553,19 @@ export function RetouchPanel(props: {
           disabled={busy || FROM_VIEW.includes(motion.kind)}
           onChange={(v) => v > 0 && updateMotion({ tilt: v })}
         />
+        <Field label={tr.distance} hint={motion.kind === "view" ? tr.distanceViewHint : tr.distanceHint}>
+          <Select
+            value={motion.kind === "view" ? "view" : distance}
+            aria-label={tr.distance}
+            disabled={busy || motion.kind === "view"}
+            options={[
+              { value: "photos" as const, label: tr.distances.photos },
+              { value: "view" as const, label: tr.distances.view },
+            ]}
+            onChange={(d) => updateMotion({ distance: d })}
+          />
+        </Field>
       </div>
-      <Field label={tr.distance} hint={motion.kind === "view" ? tr.distanceViewHint : tr.distanceHint}>
-        <Select
-          value={motion.kind === "view" ? "view" : distance}
-          aria-label={tr.distance}
-          disabled={busy || motion.kind === "view"}
-          options={[
-            { value: "photos" as const, label: tr.distances.photos },
-            { value: "view" as const, label: tr.distances.view },
-          ]}
-          onChange={(d) => updateMotion({ distance: d })}
-        />
-      </Field>
       <div className="grid2">
         <Field label={tr.aspect} hint={tr.aspectHint}>
           <Select
@@ -647,7 +705,20 @@ export function RetouchPanel(props: {
 
       {clips.length > 0 && (
         <div className="retouch-apply">
-          <NumField label={tr.steps} value={steps} min={500} max={20000} step={500} disabled={busy} onChange={setSteps} />
+          <div className="grid2">
+            <NumField label={tr.steps} value={steps} min={500} max={20000} step={500} disabled={busy} onChange={setSteps} />
+            <NumField
+              label={tr.restoredRatio}
+              hint={tr.restoredRatioHint(restoredUsed, restoredTotal, photos)}
+              value={Math.round(ratio * 100)}
+              min={5}
+              max={300}
+              step={5}
+              suffix="%"
+              disabled={busy}
+              onChange={(v) => v > 0 && updateRatio(v / 100)}
+            />
+          </div>
           <button className="btn-primary retouch-apply-btn" disabled={busy || ready.length === 0} onClick={apply}>
             {tr.apply(ready.length)}
           </button>

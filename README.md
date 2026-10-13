@@ -587,6 +587,13 @@ filmou bem (por baixo, por cima, a vista mirada no 3D). O fluxo:
    - **Volta 360°**: parte da vista atual e gira em volta do sujeito na mesma
      altura, até voltar a ela. Com a distância "Da vista atual", serve para
      refinar de perto: o primeiro frame é exatamente o que o Enquadrar mostra.
+   - **Volta 360° inclinada**: na inclinação da vista atual (por cima ou por
+     baixo), em três fases: sobe reto da altura das fotos até a vista, num
+     arco em torno do ponto que ela mira (como uma grua), com a câmera
+     começando nivelada e inclinando aos poucos até a inclinação da vista;
+     dá a volta nessa inclinação em torno desse ponto; desce de volta. O
+     primeiro frame (a referência do modelo de vídeo) fica numa altura bem
+     coberta pelas fotos, já enquadrando o que a vista enquadra.
    - **Arco por baixo/por cima**: um terço da órbita em volta da foto mais
      próxima, desviando na altura.
    - **Volta 360° por baixo/por cima/sobe e desce**: a volta inteira em outra
@@ -602,7 +609,8 @@ filmou bem (por baixo, por cima, a vista mirada no 3D). O fluxo:
 2. Renderiza o splat nessa trajetória: é o vídeo de referência.
    - O render usa o Spark fora da tela, com a mistura em sRGB igual à da tela
      e à do Brush.
-   - O vídeo sai em MP4 (Mediabunny), no fps do workflow. A proporção (a da
+   - O vídeo sai em MP4 (Mediabunny), no fps escolhido no painel (padrão: o
+     do workflow). A proporção (a da
      lente ou 9:16 a 16:9, mantendo a altura do quadro das fotos) e a
      resolução (lado maior de 512 a 1920, múltiplos de 32) são escolhidas no
      painel; o padrão é a lente em 480×960.
@@ -614,8 +622,9 @@ filmou bem (por baixo, por cima, a vista mirada no 3D). O fluxo:
      de retoque para editar antes de enviar; o valor do workflow é o padrão,
      e o que mudar fica salvo neste navegador.
    - O workflow deve seguir o vídeo de entrada (duração, resolução e
-     proporção); o app só troca o arquivo no nó de entrada. O fps do vídeo de
-     referência é o primeiro `fps` fixo do workflow (30 no do LTX), ou 24.
+     proporção); o app só troca o arquivo no nó de entrada. O fps padrão do
+     vídeo de referência é o primeiro `fps` fixo do workflow (30 no do LTX),
+     ou 24.
    - O restaurado precisa ter o mesmo número de frames e a mesma proporção da
      referência. O tamanho pode mudar: o ajuste usa os frames no tamanho em
      que chegaram, com os intrínsecos na mesma escala.
@@ -624,6 +633,12 @@ filmou bem (por baixo, por cima, a vista mirada no 3D). O fluxo:
    frames restaurados.
    - Usa o Brush com `init.ply`, 3 mil passos, `lr-mean` 10× menor, num
      `dataset_retouch/` à parte.
+   - Só uma parte dos frames restaurados entra: por padrão até 25% do número
+     de fotos, repartidos entre os clipes e espaçados por igual (sem as
+     pontas). Restaurados demais puxam o splat para os detalhes que o modelo
+     de vídeo reinventou, e o centro, que as fotos veem bem, perde nitidez.
+     No `scripts/restore-test`, usar 1 a cada 3 frames recuperou 2 dB nas
+     fotos e manteve o fantasma removido. O limite é ajustável no painel.
    - O splat de antes fica guardado: **Desfazer retoque** volta para ele e
      **Comparar com o de antes** mostra os dois.
 

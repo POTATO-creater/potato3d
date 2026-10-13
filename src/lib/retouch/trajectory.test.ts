@@ -10,6 +10,7 @@ import {
   orbitFrame,
   poseToWorld,
   presetPath,
+  tiltTurnPath,
   turnPath,
   quatToMat,
   viewPath,
@@ -193,3 +194,65 @@ test("proporção escolhida: múltiplos de 32 e mesmo campo de visão vertical d
   const plan = presetPath(orbit, lens, { ...DEFAULT_CLIP, center: 0, elevDeg: -20, aspect: 16 / 9 });
   assert.deepEqual(plan.size, [960, 544]);
 });
+
+// Altura de um ponto (ao longo do "up") e para onde a câmera olha.
+const height = (p: { qvec: Quat; tvec: Vec3 }) => dot(poseToWorld(p).center, UP);
+const forward = (p: { qvec: Quat; tvec: Vec3 }): Vec3 => {
+  const w = poseToWorld(p);
+  return [w.rot[0][2], w.rot[1][2], w.rot[2][2]];
+};
+const upright = (p: { qvec: Quat; tvec: Vec3 }) => {
+  const w = poseToWorld(p);
+  return dot([-w.rot[0][1], -w.rot[1][1], -w.rot[2][1]], UP);
+};
+const photoHeight = 3 * Math.sin((10 * Math.PI) / 180);
+/** Pose olhando um ponto (UP = −Y, sem rolagem). */
+function aim(c: Vec3, at: Vec3): { qvec: Quat; tvec: Vec3 } {
+  const f = unit(sub(at, c));
+  const down = unit(sub([0, 0, 0], sub(UP, [f[0] * dot(UP, f), f[1] * dot(UP, f), f[2] * dot(UP, f)])));
+  const R: [Vec3, Vec3, Vec3] = [cross(down, f), down, f];
+  return { qvec: matToQuat(R), tvec: [0, 1, 2].map((i) => -dot(R[i], c)) as Vec3 };
+}
+
+test("volta 360° inclinada: subida reta da altura das fotos até a vista, volta nela e descida ao início", () => {
+  const target = lookAt(40, 40, 2);
+  const p = tiltTurnPath(orbit, lens, target, { ...DEFAULT_CLIP, frames: 241 }).poses;
+  const n = p.length;
+  assert.ok(Math.abs(height(p[0]) - photoHeight) < 1e-6, `começa na altura das fotos (${height(p[0])})`);
+  assert.ok(angleBetween(p[0].qvec, p[n - 1].qvec) < 1e-4 && Math.abs(height(p[n - 1]) - photoHeight) < 1e-6, "termina no início");
+  // Subida reta: os primeiros frames ficam no azimute da vista, sempre mirando
+  // o centro (o ponto da vista), e chegam à inclinação dela.
+  const az = (q: { qvec: Quat; tvec: Vec3 }) => { const c = poseToWorld(q).center; return (Math.atan2(c[0], c[2]) * 180) / Math.PI; };
+  let k = 0;
+  while (k < n && Math.abs(az(p[k]) - 40) < 1e-6) k++;
+  assert.ok(k > 3 && k < n / 3, `subida em ${k} frames`);
+  assert.ok(Math.abs(dot(forward(p[0]), UP)) < 1e-9 && upright(p[0]) > 0.9999, "começa nivelada");
+  for (let i = 1; i < k; i++) assert.ok(elevation(p[i]) >= elevation(p[i - 1]) - 1e-9, "só sobe");
+  assert.ok(Math.abs(elevation(p[k - 1]) - 40) < 1, `chega à inclinação (${elevation(p[k - 1])})`);
+  assert.ok(Math.abs(elevation(p[n >> 1]) - 40) < 1e-6, `meio na inclinação (${elevation(p[n >> 1])})`);
+  for (let i = 1; i < n; i++) assert.ok(angleBetween(p[i - 1].qvec, p[i].qvec) < 6, `salto no frame ${i}`);
+});
+
+test("volta 360° inclinada: vista por cima e por trás mirando a cabeça começa de pé, mirando a cabeça", () => {
+  const head: Vec3 = [0, -0.7, 0];
+  const az = Math.PI, el = (50 * Math.PI) / 180, r = 1;
+  const target = aim([r * Math.cos(el) * Math.sin(az), -r * Math.sin(el), r * Math.cos(el) * Math.cos(az)], head);
+  const p = tiltTurnPath(orbit, lens, target, DEFAULT_CLIP).poses;
+  assert.ok(upright(p[0]) > 0.9, `de pé (${upright(p[0])})`);
+  assert.ok(Math.abs(height(p[0]) - photoHeight) < 1e-6, `na altura das fotos (${height(p[0])})`);
+  assert.ok(Math.abs(dot(forward(p[0]), UP)) < 1e-9, "nivelada");
+  // De frente para a personagem (o lado para onde a vista olha).
+  const toHead = unit(sub(head, poseToWorld(p[0]).center));
+  assert.ok(dot(forward(p[0]), toHead) > 0.9, "virada para ela");
+});
+
+test("volta 360° inclinada: vista de baixo começa nivelada e chega à vista no fim da subida", () => {
+  const az = (20 * Math.PI) / 180, el = (-35 * Math.PI) / 180, r = 1.5;
+  const target = aim([r * Math.cos(el) * Math.sin(az), -r * Math.sin(el), r * Math.cos(el) * Math.cos(az)], [0, -0.3, 0]);
+  const p = tiltTurnPath(orbit, lens, target, { ...DEFAULT_CLIP, frames: 241 }).poses;
+  assert.ok(Math.abs(dot(forward(p[0]), UP)) < 1e-9 && upright(p[0]) > 0.9999, "começa nivelada, de pé");
+  assert.ok(Math.abs(height(p[0]) - photoHeight) < 1e-6, "na altura das fotos");
+  assert.ok(p.some((q) => angleBetween(q.qvec, target.qvec) < 0.5), "passa pela vista");
+  for (let i = 1; i < p.length; i++) assert.ok(angleBetween(p[i - 1].qvec, p[i].qvec) < 6, `salto no frame ${i}`);
+});
+
