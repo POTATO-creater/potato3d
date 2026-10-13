@@ -11,7 +11,8 @@
 
 <p align="center">
   <a href="https://orbit.gausify.com"><img alt="Live demo" src="https://img.shields.io/badge/demo-orbit.gausify.com-ff9a4d?logo=googlechrome&logoColor=white"></a>
-  <a href="package.json"><img alt="Version" src="https://img.shields.io/github/package-json/v/obraia/gausify-orbit?label=version&color=orange"></a>
+  <a href="https://github.com/obraia/gausify-orbit/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/obraia/gausify-orbit?label=release&color=orange"></a>
+  <a href="https://github.com/obraia/gausify-orbit/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/obraia/gausify-orbit/total?color=brightgreen"></a>
   <a href="https://github.com/obraia/gausify-orbit/actions/workflows/web.yml"><img alt="Web build" src="https://img.shields.io/github/actions/workflow/status/obraia/gausify-orbit/web.yml?branch=main&label=web%20build"></a>
   <img alt="Platforms: macOS, Windows, Web" src="https://img.shields.io/badge/platforms-macOS%20%7C%20Windows%20%7C%20Web-555">
   <a href="https://v2.tauri.app"><img alt="Tauri 2" src="https://img.shields.io/badge/Tauri-2-24C8D8?logo=tauri&logoColor=white"></a>
@@ -114,7 +115,7 @@ pnpm tauri dev
 ### Windows
 
 **End users:** download `Gausify Orbit_<version>_x64-setup.exe` from the
-[Releases](../../releases) page. It installs per user without admin rights. On
+[Releases](https://github.com/obraia/gausify-orbit/releases/latest) page. It installs per user without admin rights. On
 first launch, **Install tools** downloads COLMAP (CUDA build when an NVIDIA GPU
 is found) and ffmpeg, verifies their SHA-256 and installs them under
 `%LOCALAPPDATA%\SplatForge\tools`. The installer isn't code-signed, so
