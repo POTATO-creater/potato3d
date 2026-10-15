@@ -128,7 +128,12 @@ const api: Api = {
     const l = layout(dir);
     if (options.format === "glb") {
       const { exportMesh } = await import("../mesh/job");
-      const { name, bytes, stats } = await exportMesh(dir, { triangles: options.meshTriangles ?? 50_000 }, onProgress, signal);
+      const { name, bytes, stats } = await exportMesh(
+        dir,
+        { triangles: options.meshTriangles ?? 50_000, texture: options.meshTexture ?? true },
+        onProgress,
+        signal,
+      );
       const path = `${l.exports}/${name}`;
       publish(path, await writeFile(path, bytes as BufferSource));
       const result = {
@@ -140,7 +145,7 @@ const api: Api = {
         outputBytes: bytes.byteLength,
         shDegree: 0,
         seconds: (performance.now() - t0) / 1000,
-        mesh: { triangles: stats.triangles, vertices: stats.vertices },
+        mesh: { triangles: stats.triangles, vertices: stats.vertices, ...(stats.texture ? { texture: stats.texture.size } : {}) },
       };
       await saveState(dir, { ...(await readState(dir)), lastExport: result });
       return result;

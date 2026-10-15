@@ -2,6 +2,7 @@ import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "reac
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { SparkRenderer, SplatFileType, SplatMesh } from "@sparkjsdev/spark";
 import { fileUrl, type SceneFrame } from "../lib/api";
 import { polarRange } from "../lib/share";
@@ -77,6 +78,9 @@ interface Ctx {
   /** `splatRoot` already has the displayed splat's alignment. */
   splatAligned: boolean;
   mesh: SplatMesh | null;
+  /** An exported mesh (.glb), shown instead of a splat: already y-up and
+   *  centred, so outside `splatRoot`, with its own lights. */
+  glb: THREE.Group | null;
   path: THREE.Object3D | null;
   /** Highlight of the point under the cursor (child of `path`). */
   hover: THREE.Points | null;
@@ -111,6 +115,18 @@ const BASE_FOV = 50;
 /** Maximum fraction of the screen the framing box takes. */
 const GUIDE_FILL = 0.86;
 
+/** Frees the geometries, materials and textures under `o`. */
+function disposeTree(o: THREE.Object3D) {
+  o.traverse((x) => {
+    const m = x as THREE.Mesh;
+    m.geometry?.dispose();
+    for (const mat of ([] as THREE.Material[]).concat(m.material ?? [])) {
+      for (const v of Object.values(mat)) if (v instanceof THREE.Texture) v.dispose();
+      mat.dispose();
+    }
+  });
+}
+
 export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) {
   const { t, locale } = useI18n();
   const tv = t.viewer;
@@ -123,6 +139,8 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
   const [clampView, setClampView] = useState(false);
   const [anchorOn, setAnchorOn] = useState(false);
   const [hasMesh, setHasMesh] = useState(false);
+  /** An exported .glb is on screen (the training cameras don't line up with it). */
+  const [glbShown, setGlbShown] = useState(false);
   const [guide, setGuide] = useState<FrameGuide | null>(null);
   const [guideOn, setGuideOn] = useState(false);
   /** On-screen size in px of the frame box, with the mask on. */
@@ -259,7 +277,7 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
       renderer.render(scene, camera);
     });
 
-    ctx.current = { renderer, scene, camera, controls, root, splatRoot, splatAligned: false, mesh: null, path: null, hover: null, retouchPath: null, invalidate, pressed: new Set(), anchor, anchorGizmo: gizmo, anchorGoal: null, anchored: false };
+    ctx.current = { renderer, scene, camera, controls, root, splatRoot, splatAligned: false, mesh: null, glb: null, path: null, hover: null, retouchPath: null, invalidate, pressed: new Set(), anchor, anchorGizmo: gizmo, anchorGoal: null, anchored: false };
 
     // Camera point closest to the cursor, in screen pixels.
     const v = new THREE.Vector3();
@@ -381,7 +399,7 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
       group.add(line, dots, hover);
       c.hover = hover;
     }
-    group.visible = showCams;
+    group.visible = showCams && !c.glb;
     c.root.add(group);
     c.invalidate();
     c.path = group;
@@ -390,9 +408,9 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
   }, [frame]);
 
   useEffect(() => {
-    if (ctx.current?.path) ctx.current.path.visible = showCams;
+    if (ctx.current?.path) ctx.current.path.visible = showCams && !glbShown;
     ctx.current?.invalidate();
-  }, [showCams]);
+  }, [showCams, glbShown]);
 
   useEffect(() => {
     if (ctx.current) ctx.current.controls.autoRotate = spin;
@@ -455,6 +473,41 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
   useEffect(() => {
     const c = ctx.current;
     if (!c) return;
+    if (c.glb) {
+      c.scene.remove(c.glb);
+      disposeTree(c.glb);
+      c.glb = null;
+      c.invalidate();
+      setGlbShown(false);
+      if (!c.mesh) setHasMesh(false);
+    }
+    if (splat?.path.toLowerCase().endsWith(".glb")) {
+      let stale = false;
+      setLoading(true);
+      setLoadError(null);
+      new GLTFLoader()
+        .loadAsync(splat.url ?? fileUrl(splat.path, splat.version))
+        .then((gltf) => {
+          if (stale || !ctx.current) return disposeTree(gltf.scene);
+          // the splat (if any) steps aside while the mesh is shown
+          if (c.mesh) c.mesh.visible = false;
+          const g = new THREE.Group();
+          const sun = new THREE.DirectionalLight(0xffffff, 1.6);
+          sun.position.set(2, 4, 3);
+          g.add(gltf.scene, new THREE.HemisphereLight(0xffffff, 0x404040, 1.4), sun);
+          c.scene.add(g);
+          c.glb = g;
+          resetView();
+          setGlbShown(true);
+          setHasMesh(true);
+        })
+        .catch((e) => !stale && setLoadError(String(e)))
+        .finally(() => !stale && setLoading(false));
+      return () => {
+        stale = true;
+      };
+    }
+    if (c.mesh) c.mesh.visible = true;
     if (!splat) {
       if (c.mesh) {
         c.splatRoot.remove(c.mesh);
@@ -681,11 +734,16 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
   function fitToMesh(mesh: SplatMesh) {
     const c = ctx.current!;
     c.splatRoot.updateMatrixWorld(true);
-    const box = mesh.getBoundingBox(true).applyMatrix4(c.splatRoot.matrixWorld);
+    fitToBox(mesh.getBoundingBox(true).applyMatrix4(c.splatRoot.matrixWorld));
+  }
+
+  /** Frames `box` from the front: `back` and `lift` in box diagonals. */
+  function fitToBox(box: THREE.Box3, back = 0.9, lift = 0.25) {
+    const c = ctx.current!;
     const center = box.getCenter(new THREE.Vector3());
     const size = box.getSize(new THREE.Vector3()).length();
     c.controls.target.copy(center);
-    c.camera.position.copy(center).add(new THREE.Vector3(0, size * 0.25, size * 0.9));
+    c.camera.position.copy(center).add(new THREE.Vector3(0, size * lift, size * back));
   }
 
   /** Returns to the viewpoint of the video's first frame, framing the center
@@ -696,7 +754,10 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
     c.anchorGoal = null;
     c.anchored = false;
     c.controls.target.set(0, 0, 0);
-    if (frame && frame.cameras.length) {
+    if (c.glb) {
+      // a tight box (no floaters, unlike splats): step back to see it whole
+      fitToBox(new THREE.Box3().setFromObject(c.glb.children[0]), 1.3, 0.1);
+    } else if (frame && frame.cameras.length) {
       c.root.updateMatrixWorld(true);
       const first = new THREE.Vector3(...frame.cameras[0]).applyMatrix4(c.root.matrixWorld);
       // The viewer lens is fixed (50°); the video's may be much narrower

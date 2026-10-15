@@ -183,7 +183,7 @@ export function requestPersistence() {
 /** A project file vanished mid-job: in practice the browser cleared the site's
  *  storage (low disk space). */
 export function storageLost(e: unknown) {
-  return e instanceof DOMException && e.name === "NotFoundError"
-    ? new Error("the browser cleared this site's storage during the job (low disk space?); free some space and open the project again")
-    : e;
+  if (!(e instanceof DOMException && e.name === "NotFoundError")) return e;
+  console.error("file missing during the job:", e);
+  return new Error("the browser cleared this site's storage during the job (low disk space?); free some space and open the project again");
 }

@@ -69,8 +69,9 @@ video ──► Frames ──────────► Masking ─────
   palette), decimation that merges similar Gaussians, an opacity floor and
   SH band trimming. Typical output is 5–15× smaller than the raw `.ply`.
 - **Mesh export (web):** a geometric fine-tune of the splat, depth maps fused
-  into a sparse TSDF on the GPU, unseen holes closed, then a simplified,
-  feature-preserving smoothed, photo-coloured `.glb`.
+  into a sparse TSDF on the GPU, unseen holes closed, simplification and
+  feature-preserving smoothing, then a UV atlas and the photos baked into its
+  texture: a `.glb` that opens in the 3D view, Blender or three.js.
 - **Share by link:** uploads the export to Cloudflare R2 and returns a private,
   expiring `/s/<id>` link with a QR code. It opens in a PlayCanvas viewer with
   touch controls and **VR/AR** (WebXR).
@@ -205,7 +206,7 @@ cargo run --release --example cli -- export <project> [options.json]
 | [Pipeline design notes](docs/pipeline.md) | Why each stage works the way it does, masking methods, export format and measurements |
 | [Web version](docs/web.md) | Browser architecture, Brush WASM patches, SAM 2.1, in-browser SfM, benchmarks, Cloudflare deployment |
 | [Share links](docs/sharing.md) | R2 storage, the WebXR viewer, expiry and limits, self-hosting the Worker |
-| [Mesh export](docs/mesh.md) | Splat → GLB: geometric fine-tune, depth fusion, extraction, hole filling, smoothing, and why each choice |
+| [Mesh export](docs/mesh.md) | Splat → GLB: geometric fine-tune, depth fusion, extraction, hole filling, smoothing, UV and texture bake, and why each choice |
 | [Retouch with ComfyUI](docs/retouch.md) | Camera paths, reference rendering, ComfyUI integration and fine-tuning |
 | [Development](docs/development.md) | Mock UI without the backend, benchmark scripts, tests |
 

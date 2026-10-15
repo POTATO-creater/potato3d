@@ -1,7 +1,7 @@
 # Mesh export
 
-**Export → Mesh (GLB)** turns the trained splat into a triangle mesh coloured
-by the photos. Web only for now (`web/src/mesh/`); the desktop gets a Rust port
+**Export → Mesh (GLB)** turns the trained splat into a triangle mesh textured
+with the photos (or, with *Photo texture* off, coloured per vertex). Web only for now (`web/src/mesh/`); the desktop gets a Rust port
 of the same steps later.
 
 ## Pipeline
@@ -51,8 +51,25 @@ of the same steps later.
    a ray into the surface meets the other side within 2.5 mean edges
    (stilettos, fingers), stay frozen: smoothing would thin them until they
    break.
-8. The mesh is rotated so Brush's vertical axis is +Y, centred and stood on
-   y = 0; GLB with normals and linear vertex colours (`glb.ts`).
+8. **UV atlas** (`uv.ts`, xatlas compiled to WebAssembly, in the worker):
+   the mesh is cut into charts packed into one square texture (4096² from
+   50k triangles, 2048² below), 4 texels of padding.
+9. **Texture bake** (`bake.ts`, WebGPU, two passes over every photo at full
+   resolution, up to 4096 px): each texel is a point on the mesh, coloured by
+   the photos that see it:
+   - visibility: the mesh rendered from the photo's camera and that depth
+     min-pooled over 6 px; nothing nearer may lie close by, so an arm in
+     front never paints the body behind it;
+   - weight cos⁶ of the viewing angle, times a feather that fades the photo
+     out over the last 40 px of its subject mask: seams between photos become
+     gradients;
+   - the second pass drops views more than 0.12 from the first pass's mean
+     where at least three views agree (specular glints, occluders);
+   - texels only seen at grazing angles (cos < 0.4) keep the TSDF vertex
+     colour; chart borders are dilated 8 texels; JPEG at quality 0.9.
+10. The mesh is rotated so Brush's vertical axis is +Y, centred and stood on
+    y = 0; GLB with normals and the texture (`glb.ts`), or with linear vertex
+    colours without one (glTF multiplies the two). The 3D view opens it.
 
 ## Why these choices
 
@@ -68,8 +85,12 @@ Measured on a 154-frame orbit of a person (see the study notes in the PR):
 | Hole fill + biharmonic fairing | Screened Poisson | Poisson adds a slab under the feet and erases stilettos |
 | Bilateral normal filter on the simplified mesh | Taubin on the dense mesh | Taubin thins stilettos until they break |
 | Fill before simplifying, patch at ½ the final edge | Fill at the voxel size | Same shape, 7× faster (1.4 vs 10 s) |
+| Photo texture | Vertex colours | Face, eyes and fabric pattern sharp; vertex colours blur at 50k triangles |
+| Feather + robust mean | Best view per texel | The best view flips every few texels: marbled seams |
+| Vertex colour where photos only graze | Harmonic fill of the texture | No blurry patches under the arms, no extra solve |
 
 Things that stay hard: what the orbit never saw is a guess (a smooth dome on
 the head, flat soles), structures thinner than ~2 voxels (stiletto heels) can
-break in the TSDF, and hair is a smooth shell; its detail belongs in a
-texture.
+break in the TSDF, and hair is a smooth shell whose detail comes only from
+the texture. The texture keeps the lighting of the photos (no delighting),
+and exposure differences between photos are only feathered, not corrected.

@@ -131,3 +131,37 @@ test("BVH ray casts match brute force", () => {
     assert.ok(got === best || Math.abs(got - best) < 1e-5, `${got} vs ${best}`);
   }
 });
+
+test("UV atlas: every vertex inside [0, 1], no degenerate triangle, seams duplicate vertices", async () => {
+  const { unwrap } = await import("./uv.ts");
+  const { vertexNormals } = await import("./extract.ts");
+  const m = sphere(1, 20, 30);
+  const { mesh, stats } = await unwrap(m, vertexNormals(m), 512);
+  assert.ok(stats.charts >= 2, `${stats.charts} charts`);
+  assert.equal(mesh.indices.length, m.indices.length);
+  assert.ok(mesh.positions.length > m.positions.length);
+  for (const u of mesh.uvs) assert.ok(u >= 0 && u <= 1);
+  // (charts may be mirrored: the bake draws both windings)
+  const U = mesh.uvs;
+  for (let t = 0; t < mesh.indices.length; t += 3) {
+    const [a, b, c] = [0, 1, 2].map((k) => 2 * mesh.indices[t + k]);
+    const area = (U[b] - U[a]) * (U[c + 1] - U[a + 1]) - (U[c] - U[a]) * (U[b + 1] - U[a + 1]);
+    assert.ok(Math.abs(area) > 1e-9, `triangle ${t / 3} has no UV area`);
+  }
+});
+
+test("textured GLB: UVs and an embedded image, no vertex colours", async () => {
+  const { writeMeshGlb } = await import("./glb.ts");
+  const { unwrap } = await import("./uv.ts");
+  const { vertexNormals } = await import("./extract.ts");
+  const m = sphere(1, 10, 12);
+  const { mesh } = await unwrap(m, vertexNormals(m), 256);
+  const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
+  const glb = writeMeshGlb(mesh, [0, 0, 1], jpeg);
+  const dv = new DataView(glb.buffer, glb.byteOffset);
+  const json = JSON.parse(new TextDecoder().decode(glb.subarray(20, 20 + dv.getUint32(12, true))));
+  const attrs = json.meshes[0].primitives[0].attributes;
+  assert.ok("TEXCOORD_0" in attrs && "NORMAL" in attrs && !("COLOR_0" in attrs));
+  assert.equal(json.images[0].mimeType, "image/jpeg");
+  assert.equal(json.materials[0].pbrMetallicRoughness.baseColorTexture.index, 0);
+});

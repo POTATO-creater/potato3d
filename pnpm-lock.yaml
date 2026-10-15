@@ -47,6 +47,9 @@ importers:
       three:
         specifier: ^0.186.1
         version: 0.186.1
+      xatlas-wasm:
+        specifier: 0.1.3
+        version: 0.1.3
     devDependencies:
       '@cloudflare/workers-types':
         specifier: 5.20260930.2
@@ -1072,6 +1075,10 @@ packages:
       utf-8-validate:
         optional: true
 
+  xatlas-wasm@0.1.3:
+    resolution: {integrity: sha512-LGWvSyHryDda9+a3+le2bd+QWPTDMFjfu3CPlVauTm8Liqd+S9wIjQScBzlOChFTyL8OpzZ4AI0tE0zoF3kc6g==}
+    engines: {node: '>=16.0.0'}
+
   youch-core@0.3.3:
     resolution: {integrity: sha512-ho7XuGjLaJ2hWHoK8yFnsUGy2Y5uDpqSTq1FkHLK4/oqKtyUU1AFbOOxY4IpC9f0fTLjwYbslUz0Po5BpD1wrA==}
 
@@ -1805,6 +1812,8 @@ snapshots:
       - utf-8-validate
 
   ws@8.21.0: {}
+
+  xatlas-wasm@0.1.3: {}
 
   youch-core@0.3.3:
     dependencies:

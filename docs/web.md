@@ -160,7 +160,8 @@ desktop Chrome or Edge with WebGPU and the `subgroups` feature.
 **Export → Mesh (GLB)** exists only on the web for now. The pipeline, its
 parameters and the measurements behind them are in [mesh.md](mesh.md); the
 Brush side is `web/brush/geom.patch` (geometric losses and
-`Training.renderDepth`).
+`Training.renderDepth`). UVs come from xatlas (npm `xatlas-wasm`, MIT), the
+texture bake is plain WebGPU (`web/src/mesh/bake.ts`).
 
 ## Benchmarks
 

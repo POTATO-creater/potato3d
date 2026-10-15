@@ -1,21 +1,30 @@
-// TSDF volume → GLB: surface extraction, cleanup, hole filling,
-// simplification, feature-preserving smoothing, y-up placement and the binary
-// glTF. Runs in mesh.worker.ts (pure, also tested in
-// Node).
+// TSDF volume → mesh: surface extraction, cleanup, hole filling,
+// simplification, feature-preserving smoothing and (for a texture) the UV
+// atlas; runs in mesh.worker.ts (pure, also tested in Node). Then, after the
+// texture bake on the main thread, y-up placement and the binary glTF.
 
 import { MeshoptSimplifier } from "meshoptimizer";
 import type { Msg } from "../../../src/lib/api";
 import { extractSurface, keepLargeComponents, type Mesh, vertexNormals } from "./extract.ts";
-import { srgbToLinear, writeGlb } from "./glb.ts";
+import { writeMeshGlb } from "./glb.ts";
 import { fillHoles } from "./holes.ts";
 import { smoothMesh, uniformEdge } from "./smooth.ts";
 import type { Volume } from "./tsdf.ts";
+import { unwrap } from "./uv.ts";
 
 export interface BuildOptions {
   /** Target triangle count after simplification. */
   triangles: number;
   /** World "up" (unit vector); the GLB is rotated so it becomes +Y. */
   up: [number, number, number];
+  /** Texture size for the UV atlas; 0 = vertex colours only. */
+  texture: number;
+}
+
+/** World-space mesh with normals, and UVs when a texture was asked for. */
+export interface BuiltMesh extends Mesh {
+  normals: Float32Array;
+  uvs?: Float32Array;
 }
 
 export interface BuildStats {
@@ -28,6 +37,8 @@ export interface BuildStats {
   holesFilled: number;
   /** Faces folded against their neighbourhood, before and after smoothing. */
   folds: [number, number];
+  /** UV charts (0 without a texture). */
+  charts: number;
 }
 
 /** Drops unreferenced vertices (after simplification). */
@@ -56,25 +67,11 @@ function diagonal(P: Float32Array) {
   return Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]);
 }
 
-/** Rotation taking `up` to +Y (proper, right-handed), as rows. */
-function yUp(up: [number, number, number]) {
-  const u = up.map((x) => x / (Math.hypot(...up) || 1)) as [number, number, number];
-  // any axis not parallel to up, made orthogonal
-  const a: [number, number, number] = Math.abs(u[0]) < 0.9 ? [1, 0, 0] : [0, 0, 1];
-  const d = a[0] * u[0] + a[1] * u[1] + a[2] * u[2];
-  const x = a.map((v, i) => v - d * u[i]);
-  const xl = Math.hypot(...x);
-  const xr = x.map((v) => v / xl) as [number, number, number];
-  // z = x × y keeps it right-handed
-  const z: [number, number, number] = [xr[1] * u[2] - xr[2] * u[1], xr[2] * u[0] - xr[0] * u[2], xr[0] * u[1] - xr[1] * u[0]];
-  return [xr, u, z];
-}
-
-export async function buildGlb(
+export async function buildMesh(
   vol: Volume,
   o: BuildOptions,
   progress: (fraction: number, message: Msg) => void,
-): Promise<{ glb: Uint8Array; stats: BuildStats }> {
+): Promise<{ mesh: BuiltMesh; stats: BuildStats }> {
   progress(0, { key: "mesh.extracting" });
   let m = extractSurface(vol);
   const surfaceTriangles = m.indices.length / 3;
@@ -83,12 +80,12 @@ export async function buildGlb(
 
   // Holes (what no photo saw) closed at about the final edge length: finer
   // patches would only be simplified away.
-  progress(0.2, { key: "mesh.filling" });
+  progress(0.15, { key: "mesh.filling" });
   const finalEdge = uniformEdge(m.positions, m.indices) * Math.sqrt(m.indices.length / 3 / o.triangles);
   const fill = fillHoles(m, { maxExtent: 0.5 * diagonal(m.positions), edge: 0.5 * finalEdge });
   m = fill.mesh;
 
-  progress(0.4, { key: "mesh.simplifying" });
+  progress(0.3, { key: "mesh.simplifying" });
   await MeshoptSimplifier.ready;
   if (m.indices.length / 3 > o.triangles) {
     // The count governs: allow any error, the target stops it. Regularize
@@ -98,39 +95,38 @@ export async function buildGlb(
     m = compact(m, indices);
   }
 
-  progress(0.6, { key: "mesh.smoothing" });
+  progress(0.45, { key: "mesh.smoothing" });
   const smooth = smoothMesh(m);
   m = smooth.mesh;
-
-  progress(0.8, { key: "mesh.writing" });
-  // y-up, centred on the vertical axis, standing on y = 0.
-  const R = yUp(o.up);
-  const P = m.positions;
-  const out = new Float32Array(P.length);
-  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
-  for (let v = 0; v < P.length; v += 3) {
-    for (let r = 0; r < 3; r++) {
-      const x = R[r][0] * P[v] + R[r][1] * P[v + 1] + R[r][2] * P[v + 2];
-      out[v + r] = x;
-      lo[r] = Math.min(lo[r], x);
-      hi[r] = Math.max(hi[r], x);
-    }
+  let mesh: BuiltMesh = { ...m, normals: vertexNormals(m) };
+  let charts = 0;
+  if (o.texture) {
+    progress(0.6, { key: "mesh.unwrapping" });
+    const uv = await unwrap(m, mesh.normals, o.texture);
+    mesh = uv.mesh;
+    charts = uv.stats.charts;
   }
-  const shift = [(lo[0] + hi[0]) / 2, lo[1], (lo[2] + hi[2]) / 2];
-  for (let v = 0; v < out.length; v += 3) for (let r = 0; r < 3; r++) out[v + r] -= shift[r];
-  const placed: Mesh = { ...m, positions: out };
-  const colors = m.colors.map(srgbToLinear);
-  const glb = writeGlb({ positions: out, normals: vertexNormals(placed), colors, indices: m.indices });
-  progress(1, { key: "mesh.writing" });
+  progress(1, { key: "mesh.unwrapping" });
   return {
-    glb,
+    mesh,
     stats: {
       surfaceTriangles,
-      triangles: m.indices.length / 3,
-      vertices: out.length / 3,
+      triangles: mesh.indices.length / 3,
+      vertices: mesh.positions.length / 3,
       holes: fill.stats.holes,
       holesFilled: fill.stats.filled,
       folds: [smooth.stats.foldsBefore, smooth.stats.foldsAfter],
+      charts,
     },
   };
+}
+
+/** Volume → GLB with vertex colours (no texture). */
+export async function buildGlb(
+  vol: Volume,
+  o: Omit<BuildOptions, "texture">,
+  progress: (fraction: number, message: Msg) => void,
+): Promise<{ glb: Uint8Array; stats: BuildStats }> {
+  const { mesh, stats } = await buildMesh(vol, { ...o, texture: 0 }, progress);
+  return { glb: writeMeshGlb(mesh, o.up), stats };
 }

@@ -33,7 +33,8 @@
     "qrcode-generator": "2.0.4",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "three": "^0.186.1"
+    "three": "^0.186.1",
+    "xatlas-wasm": "0.1.3"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20260930.2",

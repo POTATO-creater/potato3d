@@ -1,6 +1,7 @@
 // Mesh export (web): geometric fine-tune of the trained splat, depth maps of
-// it from every photo, sparse TSDF fusion on the GPU, then surface extraction
-// and simplification in a worker. Recipe and measurements in docs/mesh.md.
+// it from every photo, sparse TSDF fusion on the GPU, surface extraction,
+// cleanup and UV atlas in a worker, then the photos baked into a texture on
+// the GPU. Recipe and measurements in docs/mesh.md.
 
 import { DEFAULT_CHROMA, type Msg, type TrainOptions } from "../../../src/lib/api";
 import { brushRuntime, train } from "../brush";
@@ -9,13 +10,17 @@ import { dirAt, exists, readFile, remove, requestPersistence, storageLost, write
 import { buildAlphaDataset } from "../host/job";
 import { layout, readState } from "../host/project";
 import { center, cameraToWorldXyzw, readViews, type View } from "./colmap";
+import { TextureBaker, type BakeStats } from "./bake";
+import { writeMeshGlb } from "./glb";
 import type { MeshReply, MeshRequest } from "./mesh.worker";
-import type { BuildStats } from "./process";
+import type { BuildStats, BuiltMesh } from "./process";
 import { BlockSet, type DepthFrame, TsdfGpu } from "./tsdf";
 
 export interface MeshOptions {
   /** Target triangle count. */
   triangles: number;
+  /** Bake the photos into a texture (else: vertex colours). */
+  texture: boolean;
 }
 
 /** Fine-tune: Brush steps over the trained splat with the geometric losses
@@ -47,6 +52,12 @@ const GEOMETRY_CONFIG = {
 const DEPTH_SCALE = 0.25;
 /** Voxel = bounding-box diagonal of the subject / this. */
 const VOXELS_PER_DIAGONAL = 1000;
+/** Photos are baked at most this size (longest side). */
+const BAKE_MAX_SIDE = 4096;
+/** JPEG quality of the baked texture. */
+const TEXTURE_QUALITY = 0.9;
+/** Progress bar: fine-tune, depth maps, fusion, worker; the rest is the bake. */
+const SHARE = { fineTune: 0.55, depth: 0.08, fuse: 0.12, worker: 0.1 };
 
 type Progress = (p: { fraction: number; message: Msg }) => void;
 
@@ -97,7 +108,7 @@ export async function exportMesh(
   options: MeshOptions,
   onProgress: Progress,
   signal: AbortSignal = new AbortController().signal,
-): Promise<{ name: string; bytes: Uint8Array; stats: BuildStats & { splats: number; seconds: number } }> {
+): Promise<{ name: string; bytes: Uint8Array; stats: BuildStats & { splats: number; seconds: number; texture: BakeStats | null } }> {
   const t0 = performance.now();
   requestPersistence();
   const l = layout(dir);
@@ -150,7 +161,8 @@ export async function exportMesh(
     evalSplitEvery: 0,
     ssimWeight: 0.2,
   };
-  const FT = 0.6; // share of the progress bar for the fine-tune
+  const FT = SHARE.fineTune;
+  const FUSED = FT + SHARE.depth + SHARE.fuse;
   try {
     progress(0, { key: "train.loading" });
     await train(
@@ -190,13 +202,13 @@ export async function exportMesh(
           };
           const set = new BlockSet(voxel);
           for (const [i, v] of views.entries()) {
-            progress(FT + (0.1 * i) / views.length, { key: "mesh.depth", args: { i: i + 1, n: views.length } });
+            progress(FT + (SHARE.depth * i) / views.length, { key: "mesh.depth", args: { i: i + 1, n: views.length } });
             set.markFrame(await frame(v, false), trunc);
           }
           const tsdf = new TsdfGpu(device, set, trunc);
           try {
             for (const [i, v] of views.entries()) {
-              progress(FT + 0.1 + (0.15 * i) / views.length, { key: "mesh.fusing", args: { i: i + 1, n: views.length } });
+              progress(FT + SHARE.depth + (SHARE.fuse * i) / views.length, { key: "mesh.fusing", args: { i: i + 1, n: views.length } });
               tsdf.integrate(await frame(v, true));
             }
             result.volume = await tsdf.read();
@@ -217,30 +229,73 @@ export async function exportMesh(
   const vol = result.volume;
   if (!vol) throw new Error("the fine-tune ended before the depth maps were made");
 
-  // Surface, cleanup, simplification and GLB in a worker.
+  // Surface, cleanup, simplification, smoothing and UV atlas in a worker.
+  const textureSize = options.texture ? (options.triangles >= 50_000 ? 4096 : 2048) : 0;
+  const workerShare = options.texture ? SHARE.worker : 1 - FUSED;
   const w = new Worker(new URL("./mesh.worker.ts", import.meta.url), { type: "module" });
   const abort = () => w.terminate();
   signal.addEventListener("abort", abort);
+  let built: { mesh: BuiltMesh; stats: BuildStats };
   try {
-    const { glb, stats } = await new Promise<{ glb: Uint8Array; stats: BuildStats }>((resolve, reject) => {
+    built = await new Promise<{ mesh: BuiltMesh; stats: BuildStats }>((resolve, reject) => {
       w.onmessage = (ev: MessageEvent<MeshReply>) => {
         const m = ev.data;
-        if (m.kind === "progress") onProgress({ fraction: 0.85 + 0.15 * m.fraction, message: m.message });
+        if (m.kind === "progress") onProgress({ fraction: FUSED + workerShare * m.fraction, message: m.message });
         else if (m.kind === "done") resolve(m);
         else reject(new Error(m.message));
       };
       w.onerror = (e) => reject(new Error(e.message ? `mesh worker: ${e.message}` : "could not load the mesh worker; reload the page"));
       signal.addEventListener("abort", () => reject(cancelled()));
-      w.postMessage({ volume: vol, options: { triangles: options.triangles, up } } satisfies MeshRequest, [
+      w.postMessage({ volume: vol, options: { triangles: options.triangles, up, texture: textureSize } } satisfies MeshRequest, [
         vol.blocks.buffer,
         vol.tsdfw.buffer,
         vol.color.buffer,
       ]);
     });
-    const k = Math.round(stats.triangles / 1000);
-    return { name: `mesh_${k}k.glb`, bytes: glb, stats: { ...stats, splats, seconds: (performance.now() - t0) / 1000 } };
   } finally {
     signal.removeEventListener("abort", abort);
     w.terminate();
   }
+  const { mesh, stats } = built;
+
+  let jpeg: Uint8Array | undefined;
+  let bake: BakeStats | null = null;
+  if (textureSize) {
+    const BAKE0 = FUSED + workerShare;
+    const baker = new TextureBaker(device, { ...mesh, uvs: mesh.uvs! }, textureSize, 2 * voxel);
+    try {
+      for (const pass of [0, 1]) {
+        if (pass) baker.startSecondPass();
+        for (const [i, v] of views.entries()) {
+          progress(BAKE0 + ((1 - BAKE0) * 0.95 * (pass * views.length + i)) / (2 * views.length), {
+            key: "mesh.baking",
+            args: { i: pass * views.length + i + 1, n: 2 * views.length },
+          });
+          const scale = Math.min(1, BAKE_MAX_SIDE / Math.max(v.width, v.height));
+          const pw = Math.round(v.width * scale), ph = Math.round(v.height * scale);
+          const decode = async (path: string) =>
+            createImageBitmap(await readFile(path), { resizeWidth: pw, resizeHeight: ph, resizeQuality: "high", colorSpaceConversion: "none" });
+          const photo = await decode(`${l.images}/${v.name}`);
+          const mask = masked ? await decode(`${l.masks}/${v.name.replace(/\.[^.]+$/, "")}.png`) : null;
+          baker.photo(v, photo, mask, scale);
+          photo.close();
+          mask?.close();
+          // keep the GPU at most a few photos behind
+          if (i % 4 === 3) await device.queue.onSubmittedWorkDone();
+        }
+      }
+      progress(BAKE0 + (1 - BAKE0) * 0.95, { key: "mesh.writing" });
+      const { rgba, stats: s } = await baker.finish();
+      bake = s;
+      const canvas = new OffscreenCanvas(textureSize, textureSize);
+      canvas.getContext("2d")!.putImageData(new ImageData(rgba as Uint8ClampedArray<ArrayBuffer>, textureSize, textureSize), 0, 0);
+      jpeg = new Uint8Array(await (await canvas.convertToBlob({ type: "image/jpeg", quality: TEXTURE_QUALITY })).arrayBuffer());
+    } finally {
+      baker.destroy();
+    }
+  }
+  progress(1, { key: "mesh.writing" });
+  const bytes = writeMeshGlb(mesh, up, jpeg);
+  const k = Math.round(stats.triangles / 1000);
+  return { name: `mesh_${k}k.glb`, bytes, stats: { ...stats, splats, seconds: (performance.now() - t0) / 1000, texture: bake } };
 }

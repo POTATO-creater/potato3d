@@ -2,13 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { api, host, type ExportOptions, type ExportStats, type Msg, type SceneFrame, type SplatInfo } from "../lib/api";
 import { fmtBytes, fmtCount, fmtDuration } from "../lib/format";
 import { basename, revealLabel, type Os } from "../lib/platform";
-import { Field, NumField, Segmented, Select } from "./fields";
+import { Field, NumField, Segmented, Select, Toggle } from "./fields";
 import { SharePanel } from "./SharePanel";
 import { savedShare, shareKey } from "../lib/share";
 import { useI18n } from "../i18n";
 
 const STORE_KEY = "splatforge.export.v1";
-const DEFAULTS: ExportOptions = { format: "sog", decimate: 0, minOpacity: 0, shDegree: null, meshTriangles: 50_000 };
+const DEFAULTS: ExportOptions = { format: "sog", decimate: 0, minOpacity: 0, shDegree: null, meshTriangles: 50_000, meshTexture: true };
 const MESH_TRIANGLES = [20_000, 50_000, 100_000, 200_000];
 
 function loadOptions(): ExportOptions {
@@ -115,13 +115,21 @@ export function ExportPanel(p: Props) {
           />
         </Field>
         {mesh ? (
-          <Field label={te.meshTriangles} hint={te.meshTrianglesHint}>
-            <Select<number>
-              value={opts.meshTriangles ?? 50_000}
-              onChange={(meshTriangles) => set({ meshTriangles })}
-              options={MESH_TRIANGLES.map((n) => ({ value: n, label: fmtCount(n) }))}
+          <>
+            <Field label={te.meshTriangles} hint={te.meshTrianglesHint}>
+              <Select<number>
+                value={opts.meshTriangles ?? 50_000}
+                onChange={(meshTriangles) => set({ meshTriangles })}
+                options={MESH_TRIANGLES.map((n) => ({ value: n, label: fmtCount(n) }))}
+              />
+            </Field>
+            <Toggle
+              label={te.meshTexture}
+              hint={te.meshTextureHint}
+              checked={opts.meshTexture ?? true}
+              onChange={(meshTexture) => set({ meshTexture })}
             />
-          </Field>
+          </>
         ) : (
           <>
         <div className="grid2">
@@ -196,6 +204,7 @@ export function ExportPanel(p: Props) {
           {last.mesh ? (
             <div className="meta-row">
               <span>{te.meshResult(fmtCount(last.mesh.triangles), fmtCount(last.mesh.vertices))}</span>
+              {last.mesh.texture ? <span>{te.meshTextureSize(last.mesh.texture)}</span> : null}
               <span>{fmtBytes(last.outputBytes)}</span>
               <span>{fmtDuration(last.seconds)}</span>
             </div>
@@ -217,11 +226,9 @@ export function ExportPanel(p: Props) {
             </p>
           )}
           <div className="trim-actions">
-            {!last.mesh && (
-              <button className={`btn-sm ${p.previewing ? "on" : ""}`} onClick={() => p.onPreview(!p.previewing)}>
-                {p.previewing ? te.viewOriginal : te.view3d}
-              </button>
-            )}
+            <button className={`btn-sm ${p.previewing ? "on" : ""}`} onClick={() => p.onPreview(!p.previewing)}>
+              {p.previewing ? te.viewOriginal : te.view3d}
+            </button>
             <button className="btn-sm ghost" onClick={() => host.reveal(last.path)}>
               {revealLabel(t, p.os)}
             </button>

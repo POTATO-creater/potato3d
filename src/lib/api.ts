@@ -225,6 +225,8 @@ export interface ExportOptions {
   shDegree: number | null;
   /** Mesh (glb): target triangle count. */
   meshTriangles?: number;
+  /** Mesh: bake the photos into a texture (default) instead of vertex colours. */
+  meshTexture?: boolean;
 }
 
 export interface ExportStats {
@@ -238,7 +240,8 @@ export interface ExportStats {
   shDegree: number;
   seconds: number;
   /** Set for a mesh export (glb); the counts above are then splats in, triangles out. */
-  mesh?: { triangles: number; vertices: number };
+  /** Mesh exports; `texture`: side of the baked texture, if any. */
+  mesh?: { triangles: number; vertices: number; texture?: number };
 }
 
 /** Project package (.gorbit): a ZIP of what has been processed so far, to

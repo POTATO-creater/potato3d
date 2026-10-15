@@ -483,7 +483,7 @@ function AppView() {
 
   const viewerSplat = retouchSplat
     ? { path: retouchSplat.path, iter: retouchSplat.iter, version: retouchSplat.version, label: retouchSplat.label || undefined }
-    : previewExport && lastExport && !lastExport.mesh
+    : previewExport && lastExport
       ? { path: lastExport.path, iter: null, version: previewExport.version, label: t.app.exported(basename(lastExport.path)) }
       : job.splat;
 
@@ -596,9 +596,7 @@ function AppView() {
               lastExport={lastExport}
               onExported={(stats) => {
                 setLastExport(stats);
-                // Show the result right away to compare with the original
-                // (splats only: the viewer doesn't show meshes yet).
-                if (stats.mesh) return setPreviewExport(null);
+                // Show the result right away to compare with the original.
                 setPreviewExport({ version: Date.now() });
                 setTab("viewer");
               }}
