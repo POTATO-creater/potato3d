@@ -27,12 +27,14 @@
     "@tauri-apps/plugin-opener": "^2",
     "@techstark/opencv-js": "4.12.0-release.1",
     "mediabunny": "1.60.0",
+    "meshoptimizer": "1.3.0",
     "onnxruntime-web": "1.30.0",
     "playcanvas": "2.23.2",
     "qrcode-generator": "2.0.4",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "three": "^0.186.1"
+    "three": "^0.186.1",
+    "xatlas-wasm": "0.1.3"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20260930.2",

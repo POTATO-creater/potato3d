@@ -1,14 +1,15 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, host, type ExportOptions, type ExportStats, type Msg, type SceneFrame, type SplatInfo } from "../lib/api";
 import { fmtBytes, fmtCount, fmtDuration } from "../lib/format";
 import { basename, revealLabel, type Os } from "../lib/platform";
-import { Field, NumField, Segmented, Select } from "./fields";
+import { Field, NumField, Segmented, Select, Toggle } from "./fields";
 import { SharePanel } from "./SharePanel";
 import { savedShare, shareKey } from "../lib/share";
 import { useI18n } from "../i18n";
 
 const STORE_KEY = "splatforge.export.v1";
-const DEFAULTS: ExportOptions = { format: "sog", decimate: 0, minOpacity: 0, shDegree: null };
+const DEFAULTS: ExportOptions = { format: "sog", decimate: 0, minOpacity: 0, shDegree: null, meshTriangles: 50_000, meshTexture: true };
+const MESH_TRIANGLES = [20_000, 50_000, 100_000, 200_000];
 
 function loadOptions(): ExportOptions {
   try {
@@ -61,6 +62,10 @@ export function ExportPanel(p: Props) {
   }, [p.finalPly]);
 
   // A degree above the trained one becomes "keep".
+  // Mesh export runs on the web only for now.
+  const meshAvailable = p.os === "web";
+  const mesh = opts.format === "glb" && meshAvailable;
+  const abort = useRef<AbortController | null>(null);
   const trained = info?.shDegree ?? 3;
   const shDegree = opts.shDegree != null && opts.shDegree < trained ? opts.shDegree : null;
   const estimate = info ? Math.round(info.count * (1 - opts.decimate)) : null;
@@ -68,12 +73,15 @@ export function ExportPanel(p: Props) {
   async function run() {
     setError(null);
     setProgress({ fraction: 0, message: { key: "stage.starting" } });
+    abort.current = new AbortController();
     try {
-      const stats = await api.exportSplat(p.projectDir, { ...opts, shDegree }, setProgress);
+      const format = opts.format === "glb" && !meshAvailable ? "sog" : opts.format;
+      const stats = await api.exportSplat(p.projectDir, { ...opts, format, shDegree }, setProgress, abort.current.signal);
       p.onExported(stats);
     } catch (e) {
-      setError(String(e));
+      if (!(e instanceof DOMException && e.name === "AbortError")) setError(String(e));
     } finally {
+      abort.current = null;
       setProgress(null);
     }
   }
@@ -94,17 +102,36 @@ export function ExportPanel(p: Props) {
       <fieldset className="export-fields" disabled={busy}>
         <Field
           label={te.format}
-          hint={opts.format === "sog" ? te.formatHintSog : te.formatHintPly}
+          hint={mesh ? te.formatHintGlb : opts.format === "ply" ? te.formatHintPly : te.formatHintSog}
         >
           <Segmented
-            value={opts.format}
+            value={opts.format === "glb" && !meshAvailable ? "sog" : opts.format}
             onChange={(format) => set({ format })}
             options={[
               { value: "sog", label: te.sog },
               { value: "ply", label: te.ply },
+              ...(meshAvailable ? [{ value: "glb" as const, label: te.glb }] : []),
             ]}
           />
         </Field>
+        {mesh ? (
+          <>
+            <Field label={te.meshTriangles} hint={te.meshTrianglesHint}>
+              <Select<number>
+                value={opts.meshTriangles ?? 50_000}
+                onChange={(meshTriangles) => set({ meshTriangles })}
+                options={MESH_TRIANGLES.map((n) => ({ value: n, label: fmtCount(n) }))}
+              />
+            </Field>
+            <Toggle
+              label={te.meshTexture}
+              hint={te.meshTextureHint}
+              checked={opts.meshTexture ?? true}
+              onChange={(meshTexture) => set({ meshTexture })}
+            />
+          </>
+        ) : (
+          <>
         <div className="grid2">
           <NumField
             label={te.reduce}
@@ -141,6 +168,8 @@ export function ExportPanel(p: Props) {
             ]}
           />
         </Field>
+          </>
+        )}
       </fieldset>
 
       {busy ? (
@@ -149,10 +178,19 @@ export function ExportPanel(p: Props) {
             <div className="bar-fill" style={{ width: `${Math.round(progress.fraction * 100)}%` }} />
           </div>
           <span className="help">{tm(progress.message)}…</span>
+          {mesh && (
+            <button className="btn-sm ghost" onClick={() => abort.current?.abort()}>
+              {te.cancel}
+            </button>
+          )}
         </div>
       ) : (
         <button className="btn-sm export-run" onClick={run}>
-          {estimate != null && opts.decimate > 0 ? te.runApprox(fmtCount(estimate)) : te.run}
+          {mesh
+            ? te.runMesh(fmtCount(opts.meshTriangles ?? 50_000))
+            : estimate != null && opts.decimate > 0
+              ? te.runApprox(fmtCount(estimate))
+              : te.run}
         </button>
       )}
 
@@ -163,6 +201,14 @@ export function ExportPanel(p: Props) {
           <div className="file-name" title={last.path}>
             {basename(last.path)}
           </div>
+          {last.mesh ? (
+            <div className="meta-row">
+              <span>{te.meshResult(fmtCount(last.mesh.triangles), fmtCount(last.mesh.vertices))}</span>
+              {last.mesh.texture ? <span>{te.meshTextureSize(last.mesh.texture)}</span> : null}
+              <span>{fmtBytes(last.outputBytes)}</span>
+              <span>{fmtDuration(last.seconds)}</span>
+            </div>
+          ) : (
           <div className="meta-row">
             <span>
               {fmtCount(last.inputCount)} → {fmtCount(last.outputCount)} splats
@@ -173,7 +219,8 @@ export function ExportPanel(p: Props) {
             <span className="good">{te.smaller((last.inputBytes / last.outputBytes).toFixed(1))}</span>
             <span>{fmtDuration(last.seconds)}</span>
           </div>
-          {last.prunedCount < last.inputCount && (
+          )}
+          {!last.mesh && last.prunedCount < last.inputCount && (
             <p className="help">
               {te.pruned(fmtCount(last.inputCount - last.prunedCount), fmtCount(last.prunedCount - last.outputCount))}
             </p>
@@ -186,10 +233,12 @@ export function ExportPanel(p: Props) {
               {revealLabel(t, p.os)}
             </button>
           </div>
-          <button className={`btn-sm export-share ${sharing ? "on" : ""}`} onClick={() => setSharing((v) => !v)}>
-            {t.share.button}
-          </button>
-          {sharing && (
+          {!last.mesh && (
+            <button className={`btn-sm export-share ${sharing ? "on" : ""}`} onClick={() => setSharing((v) => !v)}>
+              {t.share.button}
+            </button>
+          )}
+          {sharing && !last.mesh && (
             <SharePanel path={last.path} bytes={last.outputBytes} frame={p.frame} onClose={() => setSharing(false)} />
           )}
         </div>

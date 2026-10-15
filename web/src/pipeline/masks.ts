@@ -20,15 +20,22 @@ async function write(dir: FileSystemDirectoryHandle, name: string, data: Blob) {
   await w.close();
 }
 
-async function rgbaOf(file: Blob): Promise<{ rgba: Uint8ClampedArray; w: number; h: number; bmp: ImageBitmap }> {
-  const bmp = await createImageBitmap(file);
+/** Decoded RGBA; `maxSide` downscales so the longer side fits. */
+async function rgbaOf(file: Blob, maxSide = Infinity): Promise<{ rgba: Uint8ClampedArray; w: number; h: number; bmp: ImageBitmap }> {
+  let bmp = await createImageBitmap(file);
+  const k = maxSide / Math.max(bmp.width, bmp.height);
+  if (k < 1) {
+    const [w, h] = [Math.round(bmp.width * k), Math.round(bmp.height * k)];
+    bmp.close();
+    bmp = await createImageBitmap(file, { resizeWidth: w, resizeHeight: h, resizeQuality: "high" });
+  }
   const c = new OffscreenCanvas(bmp.width, bmp.height).getContext("2d", { willReadFrequently: true })!;
   c.drawImage(bmp, 0, 0);
   return { rgba: c.getImageData(0, 0, bmp.width, bmp.height).data, w: bmp.width, h: bmp.height, bmp };
 }
 
 async function readMask(file: Blob, w: number, h: number): Promise<Uint8Array> {
-  const { rgba, bmp, w: mw, h: mh } = await rgbaOf(file);
+  const { rgba, bmp, w: mw, h: mh } = await rgbaOf(file, Math.max(w, h));
   bmp.close();
   if (mw !== w || mh !== h) throw new Error("mask size differs from the frame");
   const m = new Uint8Array(w * h);
@@ -149,7 +156,8 @@ async function sam2Masks(
 }
 
 /** RGBA PNG with A = eroded mask (straight alpha), edge colors unmixed from the
- *  background (decontam.ts) and despill on the subject. */
+ *  background (decontam.ts) and despill on the subject. `maxSide` downscales
+ *  the frames (the mesh fine-tune trains at ≤ 1920 px and needs no more). */
 export async function buildAlpha(
   images: FileSystemDirectoryHandle,
   masks: FileSystemDirectoryHandle,
@@ -157,10 +165,11 @@ export async function buildAlpha(
   s: MaskOptions,
   log: (s: string) => void,
   progress: Progress,
+  maxSide = Infinity,
 ) {
   const names = await listImages(images);
   const load = async (n: string) => {
-    const { rgba, w, h, bmp } = await rgbaOf(await (await images.getFileHandle(n)).getFile());
+    const { rgba, w, h, bmp } = await rgbaOf(await (await images.getFileHandle(n)).getFile(), maxSide);
     bmp.close();
     const mask = await readMask(await (await masks.getFileHandle(`${stem(n)}.png`)).getFile(), w, h);
     return { rgba, mask, w, h };

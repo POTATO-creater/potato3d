@@ -215,13 +215,18 @@ export interface ProjectState {
 }
 
 export interface ExportOptions {
-  format: "sog" | "ply";
+  /** "glb": textured triangle mesh (web only for now). */
+  format: "sog" | "ply" | "glb";
   /** Fraction removed by merging similar Gaussians (0–0.9). */
   decimate: number;
   /** Minimum opacity (0–1; 0 disables pruning). */
   minOpacity: number;
   /** Output SH degree; null keeps the training one. */
   shDegree: number | null;
+  /** Mesh (glb): target triangle count. */
+  meshTriangles?: number;
+  /** Mesh: bake the photos into a texture (default) instead of vertex colours. */
+  meshTexture?: boolean;
 }
 
 export interface ExportStats {
@@ -234,6 +239,9 @@ export interface ExportStats {
   outputBytes: number;
   shDegree: number;
   seconds: number;
+  /** Set for a mesh export (glb); the counts above are then splats in, triangles out. */
+  /** Mesh exports; `texture`: side of the baked texture, if any. */
+  mesh?: { triangles: number; vertices: number; texture?: number };
 }
 
 /** Project package (.gorbit): a ZIP of what has been processed so far, to
@@ -418,6 +426,8 @@ export interface Api {
     projectDir: string,
     options: ExportOptions,
     onProgress: (p: { fraction: number; message: Msg }) => void,
+    /** Mesh exports take minutes and can be cancelled. */
+    signal?: AbortSignal,
   ): Promise<ExportStats>;
   /** Can run during a job: `include` says what is already done. */
   packProject(request: PackRequest, onProgress: (fraction: number) => void): Promise<PackStats>;

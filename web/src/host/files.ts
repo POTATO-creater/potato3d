@@ -171,3 +171,19 @@ export function download(blob: Blob, name: string) {
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 60_000);
 }
+
+/** Asks the browser to keep this site's storage under disk pressure. Without
+ *  it ("best effort"), Chrome may clear the whole origin while a long job is
+ *  running on a nearly full disk. Usually granted to an installed app; a
+ *  refusal is silent. */
+export function requestPersistence() {
+  navigator.storage?.persist?.().catch(() => false);
+}
+
+/** A project file vanished mid-job: in practice the browser cleared the site's
+ *  storage (low disk space). */
+export function storageLost(e: unknown) {
+  if (!(e instanceof DOMException && e.name === "NotFoundError")) return e;
+  console.error("file missing during the job:", e);
+  return new Error("the browser cleared this site's storage during the job (low disk space?); free some space and open the project again");
+}

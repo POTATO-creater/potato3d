@@ -26,6 +26,9 @@ importers:
       mediabunny:
         specifier: 1.60.0
         version: 1.60.0
+      meshoptimizer:
+        specifier: 1.3.0
+        version: 1.3.0
       onnxruntime-web:
         specifier: 1.30.0
         version: 1.30.0
@@ -44,6 +47,9 @@ importers:
       three:
         specifier: ^0.186.1
         version: 0.186.1
+      xatlas-wasm:
+        specifier: 0.1.3
+        version: 0.1.3
     devDependencies:
       '@cloudflare/workers-types':
         specifier: 5.20260930.2
@@ -886,6 +892,9 @@ packages:
   meshoptimizer@1.1.1:
     resolution: {integrity: sha512-oRFNWJRDA/WTrVj7NWvqa5HqE1t9MYDj2VaWirQCzCCrAd2GHrqR/sQezCxiWATPNlKTcRaPRHPJwIRoPBAp5g==}
 
+  meshoptimizer@1.3.0:
+    resolution: {integrity: sha512-2oZqMAcEEiCtXWUjIGtZ71oPx1B0ZxYGTqIKsXB1wzWFhleNsCFxQuUJzgCV706bRcwPWtMGf1odmQvAcqKkIw==}
+
   miniflare@5.20261006.1-alpha:
     resolution: {integrity: sha512-6ylv8tamkrspDI2R/cAYfv+YWmfGNdXe76Pi9TauEUWsFVXn3LNF9Yk8oduzf1a+TYsSRYTqlOE7+nGGRsMHdw==}
     engines: {node: '>=22.0.0'}
@@ -1065,6 +1074,10 @@ packages:
         optional: true
       utf-8-validate:
         optional: true
+
+  xatlas-wasm@0.1.3:
+    resolution: {integrity: sha512-LGWvSyHryDda9+a3+le2bd+QWPTDMFjfu3CPlVauTm8Liqd+S9wIjQScBzlOChFTyL8OpzZ4AI0tE0zoF3kc6g==}
+    engines: {node: '>=16.0.0'}
 
   youch-core@0.3.3:
     resolution: {integrity: sha512-ho7XuGjLaJ2hWHoK8yFnsUGy2Y5uDpqSTq1FkHLK4/oqKtyUU1AFbOOxY4IpC9f0fTLjwYbslUz0Po5BpD1wrA==}
@@ -1606,6 +1619,8 @@ snapshots:
 
   meshoptimizer@1.1.1: {}
 
+  meshoptimizer@1.3.0: {}
+
   miniflare@5.20261006.1-alpha(@types/node@26.6.5):
     dependencies:
       '@cspotcode/source-map-support': 0.8.1
@@ -1797,6 +1812,8 @@ snapshots:
       - utf-8-validate
 
   ws@8.21.0: {}
+
+  xatlas-wasm@0.1.3: {}
 
   youch-core@0.3.3:
     dependencies:
