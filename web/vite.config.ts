@@ -14,7 +14,9 @@ export default defineConfig({
   // the offline-cache service worker, which would get in the way of HMR in dev.
   plugins: [react(), ortWasmGzip(), serviceWorker(`${import.meta.dirname}/src/sw.template.js`)],
   // ONNX Runtime locates its own .wasm via import.meta.url, so it can't be pre-bundled.
-  optimizeDeps: { exclude: ["onnxruntime-web"] },
+  // The mesh worker's dependencies are only met when an export starts; found
+  // then, their pre-bundling reloads the page and the worker fails to load.
+  optimizeDeps: { exclude: ["onnxruntime-web"], include: ["meshoptimizer", "xatlas-wasm", "three/examples/jsm/loaders/GLTFLoader.js"] },
   build: {
     outDir: "../dist-web",
     emptyOutDir: true,
