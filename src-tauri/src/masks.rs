@@ -396,7 +396,8 @@ pub fn background_color(images: &[PathBuf], masks: &Path) -> Result<Option<[u8; 
 }
 
 /// Builds the training dataset with a transparent background: RGBA PNGs
-/// (alpha = mask eroded by `ALPHA_ERODE` px) and a copy of the COLMAP model
+/// (alpha = mask eroded by `ALPHA_ERODE` px, edge colors unmixed from the
+/// background by `decontam`) and a copy of the COLMAP model
 /// with names switched to `.png`.
 /// Brush looks up each image by the name registered in `images.bin`.
 /// `despill`: strength 0–100; returns the background color when applied.
@@ -419,7 +420,10 @@ pub fn build_alpha_dataset(dataset: &Path, masks: &Path, out: &Path, despill: Op
     images.par_iter().try_for_each(|img_path| -> Result<()> {
         let stem = img_path.file_stem().context("invalid frame name")?;
         let mut rgba = image::open(img_path)?.into_rgba8();
-        let mask = erode(&load_mask(masks, img_path, rgba.dimensions())?, ALPHA_ERODE);
+        let raw = load_mask(masks, img_path, rgba.dimensions())?;
+        let mask = erode(&raw, ALPHA_ERODE);
+        // Before despill: unmixing needs the photo's own background color.
+        crate::decontam::decontaminate(&mut rgba, &raw, &mask);
         for (px, m) in rgba.pixels_mut().zip(mask.pixels()) {
             px[3] = m[0];
             if let Some(d) = despill.filter(|_| m[0] > 0) {

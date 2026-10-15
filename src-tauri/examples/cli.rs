@@ -35,6 +35,15 @@ async fn main() -> anyhow::Result<()> {
         println!("{}", serde_json::to_string(&stats)?);
         return Ok(());
     }
+    if args.first().map(String::as_str) == Some("alpha") {
+        // Training dataset with the mask as alpha (edges decontaminated), as the pipeline builds it.
+        let (Some(dir), Some(out)) = (args.get(1), args.get(2)) else { panic!("usage: cli alpha <project> <out_dir>") };
+        let layout = pipeline::Layout::new(dir);
+        let t = std::time::Instant::now();
+        splatforge_lib::masks::build_alpha_dataset(&layout.dataset(), &layout.masks(), std::path::Path::new(out), None)?;
+        eprintln!("alpha dataset in {:.1}s", t.elapsed().as_secs_f32());
+        return Ok(());
+    }
     if args.first().map(String::as_str) == Some("pack") {
         use splatforge_lib::package::{pack, Include, PackRequest, Source};
         let (Some(dir), Some(dest)) = (args.get(1), args.get(2)) else { panic!("usage: cli pack <project> <dest.gorbit> [video]") };

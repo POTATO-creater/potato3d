@@ -67,6 +67,16 @@ cyans are untouched). Unsaturated backgrounds or other colours are ignored. On
 a green screen with a similarly coloured subject, **RMBG + despill** gives the
 best result: the AI does the cutout and despill removes the green.
 
+**Edge decontamination** (any method, always on): a soft mask edge keeps the
+photo's colour, a mix of subject and background, and Brush premultiplies it by
+the alpha, so the background leaks into the training target and the splat
+learns a light fringe around hair and outlines. Before despill, the colour of
+each partial-alpha pixel is unmixed from the background estimated nearby
+(`src-tauri/src/decontam.rs`). On a white-wall video it removed the fringe
+entirely (soft-edge brightness relative to the interior next to it: 1.25 →
+1.00) for ~0.2 dB of interior PSNR against the original photos. The whole 154-frame 4K dataset still
+builds in 8 s on an M4.
+
 Masks can optionally be passed to COLMAP too (**Also use the cutout for poses**). It helps when the background changes between frames, but removes
 anchor points from low-texture subjects, so it is off by default.
 

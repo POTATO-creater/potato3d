@@ -133,6 +133,8 @@ desktop Chrome or Edge with WebGPU and the `subgroups` feature.
    - **Solid colour** and **despill:** exact ports of the Rust code (tests in
      `web/src/pipeline/*.test.ts`, `pnpm test:web`, with the cases from
      `masks.rs`).
+   - **Edge decontamination:** port of `decontam.rs` (`web/src/pipeline/decontam.ts`,
+     same tests), ~0.3 s per 4K frame.
    - `dataset_alpha`: RGBA PNGs with straight alpha (own encoder, since canvas
      premultiplies alpha) and `images.bin` with `.png` names. **Also use the cutout for poses** drops features where the mask is 0.
 3. **Poses:** SfM without COLMAP (`web/src/sfm/`):

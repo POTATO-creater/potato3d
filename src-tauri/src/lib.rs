@@ -1,5 +1,6 @@
 pub mod brush;
 pub mod colmap;
+pub mod decontam;
 pub mod export;
 pub mod frames;
 pub mod installer;
