@@ -68,6 +68,8 @@ video ──► Frames ──────────► Masking ─────
 - **Optimized export:** PlayCanvas SOG v2 (lossless WebP textures, k-means SH
   palette), decimation that merges similar Gaussians, an opacity floor and
   SH band trimming. Typical output is 5–15× smaller than the raw `.ply`.
+- **Mesh export (web):** a geometric fine-tune of the splat, depth maps fused
+  into a sparse TSDF on the GPU and a simplified, photo-coloured `.glb`.
 - **Share by link:** uploads the export to Cloudflare R2 and returns a private,
   expiring `/s/<id>` link with a QR code. It opens in a PlayCanvas viewer with
   touch controls and **VR/AR** (WebXR).
@@ -173,7 +175,7 @@ Training**, which reuses the existing frames and poses.
 ├── colmap/          database.db, pairs.txt, raw models
 ├── training/        intermediate snapshots (keeps the latest 2)
 ├── splat.ply        final result
-└── export/          optimized exports (.sog / .ply)
+└── export/          optimized exports (.sog / .ply / .glb)
 ```
 
 Images dropped instead of a video are taken in natural name order (`frame2`
@@ -202,6 +204,7 @@ cargo run --release --example cli -- export <project> [options.json]
 | [Pipeline design notes](docs/pipeline.md) | Why each stage works the way it does, masking methods, export format and measurements |
 | [Web version](docs/web.md) | Browser architecture, Brush WASM patches, SAM 2.1, in-browser SfM, benchmarks, Cloudflare deployment |
 | [Share links](docs/sharing.md) | R2 storage, the WebXR viewer, expiry and limits, self-hosting the Worker |
+| [Mesh export](docs/mesh.md) | Splat → GLB: geometric fine-tune, depth fusion, extraction, and why each choice |
 | [Retouch with ComfyUI](docs/retouch.md) | Camera paths, reference rendering, ComfyUI integration and fine-tuning |
 | [Development](docs/development.md) | Mock UI without the backend, benchmark scripts, tests |
 

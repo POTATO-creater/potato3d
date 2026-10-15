@@ -244,6 +244,14 @@ export const ptBR = {
     pruned: (byOpacity: string, byMerge: string) => `Poda por opacidade tirou ${byOpacity}; a fusão, ${byMerge}.`,
     viewOriginal: "Ver original",
     view3d: "Ver no 3D",
+    glb: "Malha (GLB)",
+    formatHintGlb:
+      "malha 3D com as cores das fotos (Blender, three.js, AR); refaz um ajuste do splat e leva ~10–20 min",
+    meshTriangles: "Triângulos",
+    meshTrianglesHint: "mais triângulos guardam mais detalhe de forma",
+    runMesh: (count: string) => `Gerar malha de ~${count} triângulos`,
+    meshResult: (tris: string, verts: string) => `${tris} triângulos · ${verts} vértices`,
+    cancel: "Cancelar",
   },
 
   share: {
@@ -659,6 +667,12 @@ export const ptBR = {
     "export.textures": () => "Montando as texturas",
     "export.compressing": () => "Comprimindo as texturas (WebP)",
     "export.writingSog": () => "Gravando o .sog",
+    "mesh.fineTune": (a: Args) => `Ajustando o splat para a malha ${a.iter}/${a.total}`,
+    "mesh.depth": (a: Args) => `Profundidade por vista ${a.i}/${a.n}`,
+    "mesh.fusing": (a: Args) => `Fundindo as vistas (TSDF) ${a.i}/${a.n}`,
+    "mesh.extracting": () => "Extraindo a superfície",
+    "mesh.simplifying": () => "Simplificando a malha",
+    "mesh.writing": () => "Gravando o .glb",
     "export.done": () => "Pronto",
   },
 };

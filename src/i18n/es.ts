@@ -236,6 +236,14 @@ export const es: Messages = {
     pruned: (byOpacity, byMerge) => `La poda por opacidad quitó ${byOpacity}; la fusión, ${byMerge}.`,
     viewOriginal: "Ver original",
     view3d: "Ver en 3D",
+    glb: "Malla (GLB)",
+    formatHintGlb:
+      "malla 3D con los colores de las fotos (Blender, three.js, AR); reajusta el splat y tarda ~10–20 min",
+    meshTriangles: "Triángulos",
+    meshTrianglesHint: "más triángulos conservan más detalle de forma",
+    runMesh: (count: string) => `Generar malla de ~${count} triángulos`,
+    meshResult: (tris: string, verts: string) => `${tris} triángulos · ${verts} vértices`,
+    cancel: "Cancelar",
   },
 
   share: {
@@ -641,6 +649,12 @@ export const es: Messages = {
     "export.textures": () => "Preparando las texturas",
     "export.compressing": () => "Comprimiendo las texturas (WebP)",
     "export.writingSog": () => "Escribiendo el .sog",
+    "mesh.fineTune": (a: Args) => `Ajustando el splat para la malla ${a.iter}/${a.total}`,
+    "mesh.depth": (a: Args) => `Profundidad por vista ${a.i}/${a.n}`,
+    "mesh.fusing": (a: Args) => `Fusionando las vistas (TSDF) ${a.i}/${a.n}`,
+    "mesh.extracting": () => "Extrayendo la superficie",
+    "mesh.simplifying": () => "Simplificando la malla",
+    "mesh.writing": () => "Escribiendo el .glb",
     "export.done": () => "Listo",
   },
 };

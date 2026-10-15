@@ -40,6 +40,8 @@ export const layout = (root: string) => ({
   retouchDataset: `${root}/dataset_retouch`,
   /** Pre-retouch splat: base for fine-tuning and for undo. */
   retouchBase: `${root}/splat_before_retouch.ply`,
+  /** Temporary masked dataset of the mesh export, when dataset_alpha is missing. */
+  meshDataset: `${root}/dataset_mesh`,
 });
 
 export const emptyState = (): ProjectState => ({

@@ -1,13 +1,13 @@
 // Frames → masks → poses → training in the browser, with the same events,
 // resume rules and project.json as src-tauri/src/pipeline.rs.
 
-import type { JobConfig, JobEvent, Msg, ProjectState, Stage } from "../../../src/lib/api";
+import type { JobConfig, JobEvent, MaskOptions, Msg, ProjectState, Stage } from "../../../src/lib/api";
 import { train } from "../brush";
 import { extractFrames, framesFromImages, probeVideo, type PickedFrame } from "../pipeline/frames";
 import { buildAlpha, makeMasks } from "../pipeline/masks";
 import { DEFAULT_SFM, runSfm } from "../sfm";
 import { renameImages, writeModel } from "../sfm/colmap";
-import { dirAt, exists, inputImage, publish, publishDir, readFile, remove, stem, unpublishUnder, video, writeFile } from "./files";
+import { dirAt, exists, inputImage, publish, publishDir, readFile, remove, requestPersistence, stem, unpublishUnder, video, writeFile } from "./files";
 import { IMAGE_EXT, layout, pruneProjects, readState, saveState } from "./project";
 
 const ORDER: Stage[] = ["frames", "masks", "poses", "train"];
@@ -55,6 +55,7 @@ async function run(cfg: JobConfig, emit: (e: JobEvent) => void, signal: AbortSig
   const to = before(cfg.toStage ?? "train", from) ? from : (cfg.toStage ?? "train");
   let state: ProjectState = await readState(l.root);
   const secs = (t: number) => (performance.now() - t) / 1000;
+  requestPersistence();
 
   // ---------- 1. Frames ----------
   if (before(from, "frames")) {
@@ -182,13 +183,7 @@ async function run(cfg: JobConfig, emit: (e: JobEvent) => void, signal: AbortSig
   if (m.enabled) {
     rep.progress(0, { key: "train.alphaDataset" });
     dataset = l.alpha;
-    await buildAlpha(await dirAt(l.images), await dirAt(l.masks), await dirAt(`${l.alpha}/images`, true), m, rep.log, (_, msg) =>
-      rep.progress(0, msg),
-    );
-    // Brush finds the images by the name stored in images.bin.
-    for (const f of ["cameras.bin", "points3D.bin"]) await writeFile(`${l.alpha}/sparse/0/${f}`, await readFile(`${l.model}/${f}`));
-    const images = await (await readFile(`${l.model}/images.bin`)).arrayBuffer();
-    await writeFile(`${l.alpha}/sparse/0/images.bin`, renameImages(images, (n) => `${stem(n)}.png`));
+    await buildAlphaDataset(l.root, m, rep.log, (msg) => rep.progress(0, msg));
   }
   rep.progress(0, { key: "train.loading" });
   await remove(l.training);
@@ -230,4 +225,23 @@ async function run(cfg: JobConfig, emit: (e: JobEvent) => void, signal: AbortSig
   await saveState(l.root, state);
   emit({ type: "stageDone", stage: "train", seconds: secs(t) });
   return l.finalPly;
+}
+
+/** A masked training dataset (by default dataset_alpha): RGBA images with the
+ *  mask as alpha and the model with `.png` names, which Brush looks the images
+ *  up by. `maxSide` downscales the images; the model keeps its intrinsics
+ *  (Brush derives the field of view from them, whatever the image size). */
+export async function buildAlphaDataset(
+  root: string,
+  m: MaskOptions,
+  log: (s: string) => void,
+  progress: (msg: Msg) => void,
+  { out = layout(root).alpha, maxSide = Infinity }: { out?: string; maxSide?: number } = {},
+) {
+  const l = layout(root);
+  await remove(out);
+  await buildAlpha(await dirAt(l.images), await dirAt(l.masks), await dirAt(`${out}/images`, true), m, log, (_, msg) => progress(msg), maxSide);
+  for (const f of ["cameras.bin", "points3D.bin"]) await writeFile(`${out}/sparse/0/${f}`, await readFile(`${l.model}/${f}`));
+  const images = await (await readFile(`${l.model}/images.bin`)).arrayBuffer();
+  await writeFile(`${out}/sparse/0/images.bin`, renameImages(images, (n) => `${stem(n)}.png`));
 }

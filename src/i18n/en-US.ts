@@ -236,6 +236,14 @@ export const enUS: Messages = {
     pruned: (byOpacity, byMerge) => `Opacity pruning removed ${byOpacity}; merging, ${byMerge}.`,
     viewOriginal: "View original",
     view3d: "View in 3D",
+    glb: "Mesh (GLB)",
+    formatHintGlb:
+      "3D mesh with the photos' colours (Blender, three.js, AR); re-fits the splat and takes ~10–20 min",
+    meshTriangles: "Triangles",
+    meshTrianglesHint: "more triangles keep more shape detail",
+    runMesh: (count: string) => `Build a ~${count}-triangle mesh`,
+    meshResult: (tris: string, verts: string) => `${tris} triangles · ${verts} vertices`,
+    cancel: "Cancel",
   },
 
   share: {
@@ -641,6 +649,12 @@ export const enUS: Messages = {
     "export.textures": () => "Building the textures",
     "export.compressing": () => "Compressing the textures (WebP)",
     "export.writingSog": () => "Writing the .sog",
+    "mesh.fineTune": (a: Args) => `Fitting the splat for the mesh ${a.iter}/${a.total}`,
+    "mesh.depth": (a: Args) => `Depth per view ${a.i}/${a.n}`,
+    "mesh.fusing": (a: Args) => `Fusing the views (TSDF) ${a.i}/${a.n}`,
+    "mesh.extracting": () => "Extracting the surface",
+    "mesh.simplifying": () => "Simplifying the mesh",
+    "mesh.writing": () => "Writing the .glb",
     "export.done": () => "Done",
   },
 };

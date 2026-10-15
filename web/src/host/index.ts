@@ -123,9 +123,28 @@ const api: Api = {
 
   splatInfo: async (path) => splatInfo(await readPublished(path)),
 
-  async exportSplat(dir, options, onProgress) {
+  async exportSplat(dir, options, onProgress, signal) {
     const t0 = performance.now();
     const l = layout(dir);
+    if (options.format === "glb") {
+      const { exportMesh } = await import("../mesh/job");
+      const { name, bytes, stats } = await exportMesh(dir, { triangles: options.meshTriangles ?? 50_000 }, onProgress, signal);
+      const path = `${l.exports}/${name}`;
+      publish(path, await writeFile(path, bytes as BufferSource));
+      const result = {
+        path,
+        inputCount: stats.splats,
+        prunedCount: stats.splats,
+        outputCount: stats.triangles,
+        inputBytes: (await readFile(l.finalPly)).size,
+        outputBytes: bytes.byteLength,
+        shDegree: 0,
+        seconds: (performance.now() - t0) / 1000,
+        mesh: { triangles: stats.triangles, vertices: stats.vertices },
+      };
+      await saveState(dir, { ...(await readState(dir)), lastExport: result });
+      return result;
+    }
     const { name, bytes, stats } = await exportSplat(await readFile(l.finalPly), options, onProgress);
     const path = `${l.exports}/${name}`;
     publish(path, await writeFile(path, bytes as BufferSource));
