@@ -32,9 +32,27 @@ of the same steps later.
    tetrahedra per cube around its main diagonal: no case tables and a closed
    surface wherever the volume was seen twice), components under 1% of the
    largest are dropped.
-5. **Simplification** with meshoptimizer to the chosen triangle count; the
-   mesh is rotated so Brush's vertical axis is +Y, centred and stood on y = 0;
-   GLB with normals and linear vertex colours (`glb.ts`).
+5. **Holes** (`holes.ts`): what no photo saw (top of the head, soles,
+   armpits) is a boundary loop. Each loop narrower than half the subject is
+   closed by ear clipping, the patch is remeshed to an even edge length (half
+   the final one: split, collapse, valence flips, relaxation) and its new
+   vertices are placed by biharmonic fairing (`L²x = 0` with the two
+   surrounding rings fixed), so the patch continues the surrounding
+   curvature: a dome on a head, nearly flat soles. The observed surface does
+   not move.
+6. **Simplification** with meshoptimizer to the chosen triangle count, with
+   `Regularize`: slightly less detail than plain QEM, but even triangles,
+   which smooth with far fewer folds.
+7. **Smoothing** (`smooth.ts`): bilateral filtering of the face normals
+   (σᵣ 0.15, 6 iterations; neighbours across a crease barely count, so the
+   neckline and the dress hem survive while bumps flatten), vertices moved to
+   agree with them (10 iterations), then the folded faces (normal against
+   their neighbourhood, seen as pin-prick pits) are relaxed. Thin parts, where
+   a ray into the surface meets the other side within 2.5 mean edges
+   (stilettos, fingers), stay frozen: smoothing would thin them until they
+   break.
+8. The mesh is rotated so Brush's vertical axis is +Y, centred and stood on
+   y = 0; GLB with normals and linear vertex colours (`glb.ts`).
 
 ## Why these choices
 
@@ -45,9 +63,13 @@ Measured on a 154-frame orbit of a person (see the study notes in the PR):
 | Fine-tune of the trained splat (8 min native) | Separate mesh training (36 min) | Same mesh quality in novel views; splat PSNR 28.2 vs 27.5 dB |
 | Normal consistency only, 1 extra render | + depth distortion, 2 extra renders | Same quality, 10% faster per step |
 | Expected depth | Median depth | Cleaner surface: the median jumps between Gaussian layers |
-| meshoptimizer simplification | Isotropic remeshing | More shape detail (neckline, stilettos), less regular triangles |
+| meshoptimizer simplification (`Regularize`) | Isotropic remeshing | Runs in the browser, keeps the neckline and stilettos; a little less smooth after filtering |
 | Fine-tune with the geometric losses | Plain splat | Lumpy surface, faces nearly featureless |
+| Hole fill + biharmonic fairing | Screened Poisson | Poisson adds a slab under the feet and erases stilettos |
+| Bilateral normal filter on the simplified mesh | Taubin on the dense mesh | Taubin thins stilettos until they break |
+| Fill before simplifying, patch at ½ the final edge | Fill at the voxel size | Same shape, 7× faster (1.4 vs 10 s) |
 
-Things that stay hard: anything never seen by the orbit (top of the head,
-soles) is a hole, thin structures thinner than ~2 voxels (stiletto heels) can
-break, and hair is a smooth shell; its detail belongs in a texture.
+Things that stay hard: what the orbit never saw is a guess (a smooth dome on
+the head, flat soles), structures thinner than ~2 voxels (stiletto heels) can
+break in the TSDF, and hair is a smooth shell; its detail belongs in a
+texture.
