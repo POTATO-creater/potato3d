@@ -454,6 +454,19 @@ body.resizing canvas {
 .export-progress {
   margin-top: 6px;
 }
+/* Status on the left, Cancel pinned to the right (wraps under on narrow sidebars). */
+.export-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin-top: 6px;
+}
+.export-status .help {
+  flex: 1 1 140px;
+  min-width: 0;
+}
 .export-error {
   color: var(--bad);
   user-select: text;

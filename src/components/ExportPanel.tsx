@@ -177,12 +177,14 @@ export function ExportPanel(p: Props) {
           <div className="bar">
             <div className="bar-fill" style={{ width: `${Math.round(progress.fraction * 100)}%` }} />
           </div>
-          <span className="help">{tm(progress.message)}…</span>
-          {mesh && (
-            <button className="btn-sm ghost" onClick={() => abort.current?.abort()}>
-              {te.cancel}
-            </button>
-          )}
+          <div className="export-status">
+            <span className="help">{tm(progress.message)}…</span>
+            {mesh && (
+              <button className="btn-sm ghost" onClick={() => abort.current?.abort()}>
+                {te.cancel}
+              </button>
+            )}
+          </div>
         </div>
       ) : (
         <button className="btn-sm export-run" onClick={run}>
