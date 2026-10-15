@@ -56,7 +56,8 @@ video ──► Frames ──────────► Masking ─────
 - **Subject masking:** Apple Vision (macOS), MODNet / BiRefNet (Windows),
   RMBG-1.4, SAM 2.1 video tracking with box/point prompts (web) and a chroma
   key with despill for green and blue screens. Masked training uses a random
-  background, so no ghost silhouettes form around the subject.
+  background, so no ghost silhouettes form around the subject, and edge colours
+  are unmixed from the background, so no light fringe forms around hair.
 - **Robust poses:** COLMAP 4 with boosted SIFT, circular matching with long
   jumps and the global mapper, with automatic fallbacks. The web version ships
   its own incremental SfM (AKAZE, WebGPU matching and bundle adjustment).
