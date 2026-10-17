@@ -44,8 +44,9 @@ export const tauriHost: Host = {
     return p ?? [];
   },
   async pickFramesFolder() {
-    const p = await open({ directory: true, multiple: false });
-    return typeof p === "string" ? [p] : [];
+    // Several folders: one batch item each.
+    const p = await open({ directory: true, multiple: true });
+    return typeof p === "string" ? [p] : (p ?? []);
   },
   async pickFolder(defaultPath) {
     const p = await open({ directory: true, multiple: false, defaultPath });

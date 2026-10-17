@@ -78,7 +78,26 @@ export const es: Messages = {
     imageCount: (n) => `${n} imágenes`,
     imagesHelp:
       "Se usan en el orden de los nombres, que debe seguir la órbita. Con más imágenes que el número de frames, queda la más nítida de cada tramo.",
-    changeVideo: "Cambiar…",
+    add: "Añadir…",
+    addTitle: "Añade videos, imágenes, carpetas de frames o paquetes al lote (cada uno se vuelve un proyecto)",
+    batch: {
+      title: "Elementos del lote",
+      prev: "Elemento anterior",
+      next: "Elemento siguiente",
+      remove: (name: string) => `Quitar ${name} del lote`,
+      removeTitle: "Lo quita del lote (el proyecto sigue guardado y se reabre desde la caché)",
+      status: { queued: "En cola", done: "Listo", failed: "Falló", pending: "Pendiente" },
+      summary: (done: number, total: number) => `${done} de ${total} listos`,
+      sharedQuality: "vale para todos",
+      runAll: (n: number) => (n ? `Procesar todos (${n})` : "Procesar todos"),
+      runAllTitle: "Procesa, uno tras otro, cada elemento aún sin splat, desde la etapa elegida en cada uno. Un fallo pasa al siguiente.",
+      runThis: "Solo este",
+      runThisTitle: "Procesa solo el elemento mostrado",
+      cancelAll: "Cancelar lote",
+      cancelAllTitle: "Detiene el elemento actual y el resto de la cola",
+      skip: "Saltar",
+      skipTitle: "Cancela el elemento actual y pasa al siguiente",
+    },
     chooseVideo: "Elegir…",
     trim: "Tramo",
     startHere: "Inicio aquí",
@@ -154,6 +173,8 @@ export const es: Messages = {
 
   masks: {
     title: "Recorte del sujeto",
+    applyAll: "Aplicar a todos",
+    applyAllTitle: "Copia este recorte a los otros elementos del lote (cada uno conserva su marcado de SAM 2.1)",
     enable: "Aislar al sujeto (quitar el fondo)",
     enableHint: "el splat sale solo con la persona u objeto, sin paredes ni rayas alrededor",
     methods: {
@@ -247,6 +268,15 @@ export const es: Messages = {
     meshTextureSize: (side: number) => `textura ${side}²`,
     meshResult: (tris: string, verts: string) => `${tris} triángulos · ${verts} vértices`,
     cancel: "Cancelar",
+    exportAll: (n: number) => `Exportar todos (${n})`,
+    exportAllTitle: "Exporta el splat de cada elemento listo del lote con estas opciones (el SH nunca supera el grado entrenado en cada uno)",
+    exportingItem: (i: number, n: number, name: string) => `Exportando ${i} de ${n}: ${name}`,
+    exportedAll: (ok: number, n: number) => `${ok} de ${n} exportados`,
+    cancelAllTitle: "Se detiene tras el elemento actual (la malla se detiene al instante)",
+    cancelled: "cancelado",
+    failedItem: "falló",
+    downloadAll: (n: number) => `Descargar los ${n} archivos`,
+    close: "Cerrar",
   },
 
   share: {

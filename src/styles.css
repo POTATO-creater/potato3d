@@ -222,6 +222,167 @@ body.resizing canvas {
   color: var(--accent);
 }
 
+/* ---------- batch selector ---------- */
+
+.batch {
+  position: relative;
+  margin-bottom: 10px;
+}
+.batch-bar {
+  display: flex;
+  gap: 4px;
+}
+.batch-nav {
+  flex: none;
+  width: 28px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--panel-3);
+  font-size: 16px;
+  line-height: 1;
+  color: var(--text-2);
+}
+.batch-nav:hover:not(:disabled),
+.batch-current:hover {
+  border-color: #4a505a;
+}
+.batch-current {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--panel-3);
+  text-align: left;
+}
+.batch-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.batch-pos {
+  flex: none;
+  font-size: 11px;
+  color: var(--muted);
+}
+.batch-caret {
+  flex: none;
+  font-size: 10px;
+  color: var(--muted);
+}
+.batch-progress {
+  margin-top: 4px;
+  height: 2px;
+}
+.batch-status {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px var(--border-strong);
+}
+.batch-status.queued {
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+.batch-status.running {
+  background: var(--accent);
+  box-shadow: none;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+.batch-status.done {
+  background: var(--good);
+  box-shadow: none;
+}
+.batch-status.failed {
+  background: var(--bad);
+  box-shadow: none;
+}
+.batch-menu {
+  position: absolute;
+  z-index: 20;
+  top: 34px;
+  left: 0;
+  right: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+.batch-menu ul {
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.batch-row {
+  display: flex;
+  align-items: center;
+  border-radius: 6px;
+}
+.batch-row.active,
+.batch-row:hover {
+  background: var(--panel-3);
+}
+.batch-pick {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 8px;
+  border: 0;
+  background: none;
+  text-align: left;
+}
+.batch-state {
+  flex: none;
+  font-size: 11px;
+  color: var(--muted);
+}
+.batch-state.running,
+.batch-state.queued {
+  color: var(--accent);
+}
+.batch-state.done {
+  color: var(--good);
+}
+.batch-state.failed {
+  color: var(--bad);
+}
+.batch-remove {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  margin-right: 2px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--muted);
+  font-size: 15px;
+}
+.batch-remove:hover:not(:disabled) {
+  background: var(--panel);
+  color: var(--bad);
+}
+.batch-remove:disabled {
+  visibility: hidden;
+}
+.batch-foot {
+  padding: 6px 12px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+}
+
 /* ---------- video ---------- */
 
 .dropzone {
@@ -479,6 +640,35 @@ body.resizing canvas {
 }
 .export-result .file-name {
   margin-top: 0;
+}
+/* Batch "Export all": one row per item. */
+.export-bulk {
+  margin-top: 8px;
+}
+.export-bulk-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.export-bulk-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+}
+.export-bulk-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.export-bulk-list li.failed .export-bulk-name {
+  color: var(--muted);
 }
 .btn-sm.on {
   color: var(--accent);
@@ -906,6 +1096,28 @@ body.resizing canvas {
   background: transparent;
   color: var(--bad);
   box-shadow: inset 0 0 0 1px var(--bad);
+}
+.btn-secondary {
+  height: 38px;
+  padding: 0 14px;
+  border-radius: 9px;
+  border: 1px solid var(--border-strong);
+  background: var(--panel-3);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.btn-secondary:hover:not(:disabled) {
+  border-color: #4a505a;
+}
+/* Batch: "Process all" next to "This one". */
+.run-row {
+  display: flex;
+  gap: 8px;
+}
+.run-row .btn-primary {
+  flex: 1;
+  min-width: 0;
 }
 
 /* ---------- main area ---------- */

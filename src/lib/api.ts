@@ -441,6 +441,9 @@ export interface Api {
   startJob(config: JobConfig, onEvent: (e: JobEvent) => void): Promise<void>;
   /** Retouch with ComfyUI; missing where not yet supported (desktop). */
   retouch?: RetouchApi;
+  /** Projects open in the batch, which storage cleanup must keep (web: only
+   *  the latest few projects stay in browser storage). */
+  keepProjects?(projectDirs: string[]): void;
 }
 
 /** Mask preview on one frame, using the same models as the pipeline. */
@@ -465,10 +468,11 @@ export interface Host {
   api: Api;
   /** Servable URL for a file (with optional cache-buster). */
   fileUrl(path: string, bust?: string | number): string;
-  /** One video or several images; empty list if cancelled. */
+  /** Videos, images or packages (each video and package becomes a batch
+   *  item); empty list if cancelled. */
   pickFiles(extensions: string[]): Promise<string[]>;
-  /** Frames folder, for `probeImages`; empty list if cancelled. May throw
-   *  when the folder has no images. */
+  /** Frames folders, for `probeImages` (each folder becomes a batch item);
+   *  empty list if cancelled. May throw when a folder has no images. */
   pickFramesFolder(): Promise<string[]>;
   pickFolder(defaultPath?: string): Promise<string | null>;
   /** Where to save the project package; null if cancelled. */

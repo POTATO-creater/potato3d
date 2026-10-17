@@ -9,19 +9,28 @@ import { MasksPanel } from "./MasksPanel";
 import type { PreviewSource } from "./MaskPreview";
 import { basename, fileManager, type Os } from "../lib/platform";
 import { fmtBytes } from "../lib/format";
+import type { PackageStatus } from "../lib/batch";
 import { useI18n } from "../i18n";
+
+export type { PackageStatus };
 
 interface Props {
   os: Os | undefined;
+  /** Item selector, above the preview (with more than one input open). */
+  batch?: ReactNode;
+  /** Something is open: picking files adds to the batch. */
+  hasItems: boolean;
+  /** Identifies the shown item (resets the player when it changes). */
+  sourceKey: string | null;
   videoPath: string | null;
   video: VideoInfo | null;
   /** Already-extracted frames, instead of a video. */
   imageSet: ImageSet | null;
   trim: { start: number; end: number | null };
   onTrim: (t: { start: number; end: number | null }) => void;
-  /** One video or several images. */
+  /** Videos, images or packages. */
   onPickFiles: () => void;
-  /** A folder of frames. */
+  /** Folders of frames. */
   onPickFolder: () => void;
   projectDir: string | null;
   onPickProject: () => void;
@@ -37,21 +46,23 @@ interface Props {
   onSettings: (s: Settings) => void;
   masks: MaskOptions;
   onMasks: (m: MaskOptions) => void;
+  /** Copies this masking to the other items; missing without a batch. */
+  onMasksToAll?: () => void;
   fromStage: Stage;
   onFromStage: (s: Stage) => void;
   available: Record<Stage, boolean>;
+  /** The shown item is being processed. */
   running: boolean;
+  /** Some item is being processed (quality is shared, so it locks). */
+  anyRunning: boolean;
   canRun: boolean;
   onRun: () => void;
   onCancel: () => void;
+  /** "Process all", with more than one item open. */
+  queue?: { pending: number; running: boolean; canRunAll: boolean; onRunAll: () => void; onSkip: () => void };
   /** Export panel (only shown with a trained splat). */
   exportPanel?: ReactNode;
 }
-
-export type PackageStatus =
-  | { kind: "saving" | "opening"; fraction: number }
-  | { kind: "saved"; name: string; bytes: number }
-  | { kind: "error"; message: string };
 
 const fmtTime = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, "0")}`;
 
@@ -66,6 +77,7 @@ export function Sidebar(p: Props) {
   const set = <K extends keyof Settings>(k: K, patch: Partial<Settings[K]>) =>
     p.onSettings({ ...s, [k]: { ...s[k], ...patch } });
   const locked = p.running;
+  const settingsLocked = p.anyRunning;
   // SAM 2.1 marking (on the video or images); invalid outside the trim range.
   const sam2 = p.os === "web" && p.masks.enabled && p.masks.method === "sam2";
   const prompt = sam2 ? (p.masks.prompt ?? null) : null;
@@ -97,18 +109,21 @@ export function Sidebar(p: Props) {
           <header className="panel-head">
             <h2>{p.imageSet ? ts.images : p.videoPath ? ts.video : ts.source}</h2>
             <span className="panel-actions">
-              <button className="link" onClick={p.onPickFiles} disabled={locked}>
-                {p.videoPath || p.imageSet ? ts.changeVideo : ts.chooseVideo}
+              <button className="link" onClick={p.onPickFiles} title={p.hasItems ? ts.addTitle : undefined}>
+                {p.hasItems ? ts.add : ts.chooseVideo}
               </button>
-              <button className="link" onClick={p.onPickFolder} disabled={locked} title={ts.chooseFolderTitle}>
+              <button className="link" onClick={p.onPickFolder} title={ts.chooseFolderTitle}>
                 {ts.chooseFolder}
               </button>
             </span>
           </header>
 
+          {p.batch}
+
           {p.videoPath ? (
             <>
               <VideoPlayer
+                key={p.sourceKey}
                 videoRef={videoEl}
                 src={fileUrl(p.videoPath)}
                 duration={p.video?.duration ?? 0}
@@ -173,7 +188,7 @@ export function Sidebar(p: Props) {
             </>
           ) : p.imageSet ? (
             <>
-              <ImageSequence paths={p.imageSet.paths} {...marking} />
+              <ImageSequence key={p.sourceKey} paths={p.imageSet.paths} {...marking} />
               <div className="file-name" title={p.imageSet.dir}>
                 {basename(p.imageSet.dir)}
               </div>
@@ -185,7 +200,7 @@ export function Sidebar(p: Props) {
               </div>
               <p className="help">{ts.imagesHelp}</p>
             </>
-          ) : (
+          ) : p.hasItems ? null : (
             <button className="dropzone" onClick={p.onPickFiles}>
               <strong>{ts.dropTitle}</strong>
               <span>{ts.dropHint}</span>
@@ -219,7 +234,7 @@ export function Sidebar(p: Props) {
             <button className="btn-sm" onClick={p.onSavePackage} disabled={!p.onSavePackage || packBusy} title={ts.savePackageTitle}>
               {ts.savePackage}
             </button>
-            <button className="btn-sm ghost" onClick={p.onOpenPackage} disabled={locked || packBusy} title={ts.openPackageTitle}>
+            <button className="btn-sm ghost" onClick={p.onOpenPackage} title={ts.openPackageTitle}>
               {ts.openPackage}
             </button>
           </div>
@@ -235,11 +250,21 @@ export function Sidebar(p: Props) {
           {pack?.kind === "error" && <p className="help export-error">{ts.packError(pack.message)}</p>}
         </section>
 
-        <MasksPanel os={p.os} masks={p.masks} onMasks={p.onMasks} locked={locked} preview={previewSource} promptOutside={promptOutside} />
+        <MasksPanel
+          os={p.os}
+          masks={p.masks}
+          onMasks={p.onMasks}
+          onApplyAll={p.onMasksToAll}
+          locked={locked}
+          previewPaused={p.anyRunning}
+          preview={previewSource}
+          promptOutside={promptOutside}
+        />
 
         <section className="panel">
           <header className="panel-head">
             <h2>{ts.quality}</h2>
+            {p.queue && <span className="muted small">{ts.batch.sharedQuality}</span>}
             {p.preset === "custom" && <span className="badge">{ts.custom}</span>}
           </header>
           <div className="presets">
@@ -247,7 +272,7 @@ export function Sidebar(p: Props) {
               <button
                 key={pr.id}
                 className={`preset ${p.preset === pr.id ? "active" : ""}`}
-                disabled={locked}
+                disabled={settingsLocked}
                 onClick={() => p.onPreset(pr.id)}
               >
                 <span className="preset-label">{t.presets[pr.id].label}</span>
@@ -258,7 +283,7 @@ export function Sidebar(p: Props) {
 
           <details className="advanced">
             <summary>{ts.advanced}</summary>
-            <fieldset disabled={locked}>
+            <fieldset disabled={settingsLocked}>
               <h3>{ts.frames}</h3>
               <div className="grid2">
                 <NumField label={ts.frames} value={s.frames.targetFrames} min={20} max={600} step={10}
@@ -368,10 +393,28 @@ export function Sidebar(p: Props) {
             ]}
           />
         </Field>
-        {p.running ? (
+        {p.queue?.running ? (
+          <div className="run-row">
+            <button className="btn-primary danger" onClick={p.onCancel} title={ts.batch.cancelAllTitle}>
+              {ts.batch.cancelAll}
+            </button>
+            <button className="btn-secondary" onClick={p.queue.onSkip} title={ts.batch.skipTitle}>
+              {ts.batch.skip}
+            </button>
+          </div>
+        ) : p.anyRunning ? (
           <button className="btn-primary danger" onClick={p.onCancel}>
             {t.common.cancel}
           </button>
+        ) : p.queue ? (
+          <div className="run-row">
+            <button className="btn-primary" onClick={p.queue.onRunAll} disabled={!p.queue.canRunAll} title={ts.batch.runAllTitle}>
+              {ts.batch.runAll(p.queue.pending)}
+            </button>
+            <button className="btn-secondary" onClick={p.onRun} disabled={!p.canRun} title={ts.batch.runThisTitle}>
+              {ts.batch.runThis}
+            </button>
+          </div>
         ) : (
           <button className="btn-primary" onClick={p.onRun} disabled={!p.canRun}>
             {ts.run}

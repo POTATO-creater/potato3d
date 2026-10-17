@@ -20,10 +20,18 @@ export const basename = (p: string) => p.split("/").pop() ?? p;
 export const stem = (name: string) => basename(name).replace(/\.[^.]+$/, "");
 const parts = (path: string) => path.split("/").filter(Boolean);
 
+const sameFile = (a: File, b: File) => a.name === b.name && a.size === b.size && a.lastModified === b.lastModified;
+
+/** The same file again keeps its path; another one with the same name (from
+ *  another folder) gets its own, and so its own project. */
 export function addVideo(file: File): string {
-  const path = `/videos/${file.name}`;
-  videos.set(path, { file });
-  publish(path, file);
+  const ext = file.name.includes(".") ? file.name.slice(file.name.lastIndexOf(".")) : "";
+  let path = `/videos/${file.name}`;
+  for (let n = 2; videos.has(path) && !sameFile(videos.get(path)!.file, file); n++) path = `/videos/${stem(file.name)} (${n})${ext}`;
+  if (!videos.has(path)) {
+    videos.set(path, { file });
+    publish(path, file);
+  }
   return path;
 }
 
@@ -46,9 +54,17 @@ export function packageFile(path: string): File {
 }
 
 /** Images from a folder (or loose ones, grouped under `name`) to use as
- *  frames. Opening the same name again replaces the set. */
+ *  frames. The same images again replace the set; a different set with the
+ *  same name (another folder) gets its own. */
 export function addImages(files: File[], name: string): string[] {
-  const dir = `/inputs/${name.replace(/[\\/]/g, "_") || "images"}`;
+  const base = `/inputs/${name.replace(/[\\/]/g, "_") || "images"}`;
+  const key = (fs: File[]) => fs.map((f) => `${f.name}:${f.size}:${f.lastModified}`).sort().join("|");
+  let dir = base;
+  for (let n = 2; ; n++) {
+    const open = [...images].filter(([p]) => p.startsWith(`${dir}/`)).map(([, f]) => f);
+    if (!open.length || key(open) === key(files)) break;
+    dir = `${base} (${n})`;
+  }
   for (const p of images.keys()) if (p.startsWith(`${dir}/`)) images.delete(p);
   unpublishUnder(dir);
   return files.map((file) => {

@@ -80,6 +80,7 @@ export function StageStrip({
   masks: maskOpts,
   images,
   blocked,
+  busy,
   onRunStage,
   onCancel,
 }: {
@@ -91,6 +92,8 @@ export function StageStrip({
   images?: boolean;
   /** Why each stage can't run on its own right now; null = it can. */
   blocked: Record<Stage, string | null>;
+  /** Something else holds the pipeline (another batch item, a retouch). */
+  busy?: boolean;
   onRunStage: (stage: Stage) => void;
   onCancel: () => void;
 }) {
@@ -127,7 +130,7 @@ export function StageStrip({
               <StageButton
                 running={s.status === "running"}
                 blocked={blocked[st]}
-                busy={job.running}
+                busy={job.running || !!busy}
                 onRun={() => onRunStage(st)}
                 onCancel={onCancel}
               />

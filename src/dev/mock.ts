@@ -29,7 +29,8 @@ const fsUrl = (p: string) => `/@fs${p}`;
 async function readJson<T>(path: string | undefined): Promise<T | null> {
   if (!path) return null;
   const r = await fetch(fsUrl(path));
-  return r.ok ? r.json() : null;
+  // A missing file may come back as the SPA's index.html.
+  return r.ok ? r.json().catch(() => null) : null;
 }
 
 async function readEvents(): Promise<JobEvent[]> {
@@ -58,8 +59,21 @@ async function fakeExport(channel: Channel<any>, projectDir: string) {
     channel.onmessage({ fraction: i / 20, message: { key: steps[Math.min(steps.length - 1, Math.floor(i / 6))] } });
     await new Promise((r) => setTimeout(r, 70));
   }
-  if (!project?.lastExport) throw new Error("project has no lastExport (run `cli export` first)");
-  return project.lastExport;
+  // `?exportFail=<text>`: projects whose folder contains it fail (batch export).
+  const fail = params.get("exportFail");
+  if (fail && projectDir.includes(fail)) throw new Error("simulated export failure");
+  if (project?.lastExport) return project.lastExport;
+  // No recorded export (e.g. a batch of mock videos): plausible stats.
+  return {
+    path: `${projectDir}/export/splat.sog`,
+    inputCount: 1_000_000,
+    prunedCount: 1_000_000,
+    outputCount: 1_000_000,
+    inputBytes: 248_000_000,
+    outputBytes: 17_400_000,
+    shDegree: 3,
+    seconds: 1.5,
+  };
 }
 
 let cancelled = false;
@@ -216,6 +230,8 @@ export function installMock() {
           return null;
         case "plugin:dialog|open":
           if (args.options?.directory) return env.VITE_MOCK_IMAGES ? "/tmp/frames" : "/tmp/project";
+          // `?videos=a.mp4,b.mp4`: several picked at once (a batch).
+          if (args.options?.multiple && params.get("videos")) return params.get("videos")!.split(",");
           return args.options?.multiple ? [env.VITE_MOCK_IMAGES ? env.VITE_MOCK_IMAGES.split(",")[0] : env.VITE_MOCK_VIDEO] : env.VITE_MOCK_VIDEO;
         case "plugin:opener|reveal_item_in_dir":
           console.info("[mock] reveal", args);
