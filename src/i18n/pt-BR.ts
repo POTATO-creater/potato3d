@@ -454,6 +454,15 @@ export const ptBR = {
     guideLabel: (w: number, h: number) => `Quadro do vídeo · ${w}×${h}`,
     spin: "Girar",
     recenter: "Recentrar",
+    meshStats: (tris: string, verts: string) => `${tris} triângulos · ${verts} vértices`,
+    meshViewLabel: "Visualização da malha",
+    meshViews: {
+      original: { label: "Original", title: "A malha como foi exportada, com textura ou cores" },
+      clay: { label: "Argila", title: "Só a forma, sem cor: mostra ondulações, buracos e ruído da superfície. Faces vistas por trás ficam vermelhas" },
+      clayWire: { label: "Argila + arestas", title: "Argila com os triângulos por cima: mostra a densidade e a regularidade da malha" },
+      wire: { label: "Arame", title: "Só as arestas dos triângulos, sem as que ficam escondidas atrás da superfície" },
+      normals: { label: "Normais", title: "Cor pela direção da superfície: realça dobras, degraus e faces invertidas" },
+    },
   },
 
   /** ComfyUI integration (settings and errors). */

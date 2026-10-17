@@ -443,6 +443,15 @@ export const es: Messages = {
     guideLabel: (w: number, h: number) => `Cuadro del video · ${w}×${h}`,
     spin: "Girar",
     recenter: "Recentrar",
+    meshStats: (tris: string, verts: string) => `${tris} triángulos · ${verts} vértices`,
+    meshViewLabel: "Vista de la malla",
+    meshViews: {
+      original: { label: "Original", title: "La malla tal como se exportó, con textura o colores" },
+      clay: { label: "Arcilla", title: "Solo la forma, sin color: muestra ondulaciones, agujeros y ruido en la superficie. Las caras vistas por detrás se ven rojas" },
+      clayWire: { label: "Arcilla + aristas", title: "Arcilla con los triángulos encima: muestra la densidad y la regularidad de la malla" },
+      wire: { label: "Alambre", title: "Solo las aristas de los triángulos, sin las que quedan ocultas tras la superficie" },
+      normals: { label: "Normales", title: "Color según la dirección de la superficie: resalta pliegues, escalones y caras invertidas" },
+    },
   },
 
   comfy: {

@@ -7,6 +7,8 @@ import { SparkRenderer, SplatFileType, SplatMesh } from "@sparkjsdev/spark";
 import { fileUrl, type SceneFrame } from "../lib/api";
 import { polarRange } from "../lib/share";
 import { useI18n } from "../i18n";
+import { fmtCount } from "../lib/format";
+import { MESH_VIEWS, meshStats, paintMesh, type MeshView } from "./meshView";
 
 interface Props {
   /** `label` overrides the default label (e.g. exported file); `url`, the
@@ -127,6 +129,7 @@ const ZOOM_EASE = 0.2;
 const ANCHOR_EASE = 0.15;
 /** Default viewer vertical field of view, in degrees. */
 const BASE_FOV = 50;
+const MESH_VIEW_KEY = "gausify.meshView";
 /** Maximum fraction of the screen the framing box takes. */
 const GUIDE_FILL = 0.86;
 
@@ -135,7 +138,8 @@ function disposeTree(o: THREE.Object3D) {
   o.traverse((x) => {
     const m = x as THREE.Mesh;
     m.geometry?.dispose();
-    for (const mat of ([] as THREE.Material[]).concat(m.material ?? [])) {
+    for (const mat of ([] as THREE.Material[]).concat(m.material ?? [], m.userData.material ?? [])) {
+      if (mat.userData.shared) continue;
       for (const v of Object.values(mat)) if (v instanceof THREE.Texture) v.dispose();
       mat.dispose();
     }
@@ -158,6 +162,17 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
   const [hasMesh, setHasMesh] = useState(false);
   /** An exported .glb is on screen (the training cameras don't line up with it). */
   const [glbShown, setGlbShown] = useState(false);
+  const [glbStats, setGlbStats] = useState<{ triangles: number; vertices: number } | null>(null);
+  const [meshView, setMeshView] = useState<MeshView>(() => {
+    try {
+      const v = localStorage.getItem(MESH_VIEW_KEY) as MeshView | null;
+      return v && MESH_VIEWS.includes(v) ? v : "original";
+    } catch {
+      return "original";
+    }
+  });
+  const meshViewRef = useRef(meshView);
+  meshViewRef.current = meshView;
   const [guide, setGuide] = useState<FrameGuide | null>(null);
   const [guideOn, setGuideOn] = useState(false);
   /** On-screen size in px of the frame box, with the mask on. */
@@ -430,6 +445,18 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
   }, [showCams, glbShown]);
 
   useEffect(() => {
+    try {
+      localStorage.setItem(MESH_VIEW_KEY, meshView);
+    } catch {
+      // per-browser convenience only
+    }
+    const c = ctx.current;
+    if (!c?.glb) return;
+    paintMesh(c.glb, meshView);
+    c.invalidate();
+  }, [meshView]);
+
+  useEffect(() => {
     if (ctx.current) ctx.current.controls.autoRotate = spin;
   }, [spin]);
 
@@ -496,6 +523,7 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
       c.glb = null;
       c.invalidate();
       setGlbShown(false);
+      setGlbStats(null);
       if (!c.mesh) setHasMesh(false);
     }
     if (splat?.path.toLowerCase().endsWith(".glb")) {
@@ -512,10 +540,12 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
           const sun = new THREE.DirectionalLight(0xffffff, 1.6);
           sun.position.set(2, 4, 3);
           g.add(gltf.scene, new THREE.HemisphereLight(0xffffff, 0x404040, 1.4), sun);
+          paintMesh(gltf.scene, meshViewRef.current);
           c.scene.add(g);
           c.glb = g;
           resetView();
           setGlbShown(true);
+          setGlbStats(meshStats(gltf.scene));
           setHasMesh(true);
         })
         .catch((e) => !stale && setLoadError(String(e)))
@@ -839,6 +869,7 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
             {splat.label ?? (splat.iter != null ? tv.preview(splat.iter.toLocaleString(locale)) : tv.final)}
           </span>
         )}
+        {glbStats && <span className="chip">{tv.meshStats(fmtCount(glbStats.triangles), fmtCount(glbStats.vertices))}</span>}
         {loading && <span className="chip chip-pulse">{tv.loading}</span>}
         {loadError && <span className="chip chip-error">{tv.loadError(loadError)}</span>}
       </div>
@@ -874,6 +905,22 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
           {tv.recenter}
         </button>
       </div>
+      {glbShown && (
+        <div className="viewer-tools viewer-modes" role="radiogroup" aria-label={tv.meshViewLabel}>
+          {MESH_VIEWS.map((v) => (
+            <button
+              key={v}
+              className={`tool ${meshView === v ? "on" : ""}`}
+              role="radio"
+              aria-checked={meshView === v}
+              onClick={() => setMeshView(v)}
+              title={tv.meshViews[v].title}
+            >
+              {tv.meshViews[v].label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

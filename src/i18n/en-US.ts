@@ -443,6 +443,15 @@ export const enUS: Messages = {
     guideLabel: (w: number, h: number) => `Video frame · ${w}×${h}`,
     spin: "Spin",
     recenter: "Recenter",
+    meshStats: (tris: string, verts: string) => `${tris} triangles · ${verts} vertices`,
+    meshViewLabel: "Mesh view",
+    meshViews: {
+      original: { label: "Original", title: "The mesh as exported, with its texture or colours" },
+      clay: { label: "Clay", title: "Shape only, no colour: shows bumps, holes and surface noise. Faces seen from behind turn red" },
+      clayWire: { label: "Clay + edges", title: "Clay with the triangles on top: shows how dense and regular the mesh is" },
+      wire: { label: "Wireframe", title: "Only the triangle edges, without those hidden behind the surface" },
+      normals: { label: "Normals", title: "Coloured by surface direction: brings out folds, steps and flipped faces" },
+    },
   },
 
   comfy: {
