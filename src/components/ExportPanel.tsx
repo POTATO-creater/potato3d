@@ -5,6 +5,7 @@ import { basename, revealLabel, type Os } from "../lib/platform";
 import { Field, NumField, Segmented, Select, Toggle } from "./fields";
 import { SharePanel } from "./SharePanel";
 import { savedShare, shareKey } from "../lib/share";
+import type { BulkExport } from "../lib/batch";
 import { useI18n } from "../i18n";
 
 const STORE_KEY = "splatforge.export.v1";
@@ -32,6 +33,15 @@ interface Props {
   onPreview: (on: boolean) => void;
   /** Video framing, passed along with the share link. */
   frame: SceneFrame | null;
+  /** Batch: "Export all" with these options; missing with a single item. */
+  bulk?: {
+    /** Trained items it would export. */
+    count: number;
+    state: BulkExport | null;
+    onRun: (options: ExportOptions) => void;
+    onCancel: () => void;
+    onClose: () => void;
+  };
 }
 
 export function ExportPanel(p: Props) {
@@ -86,7 +96,18 @@ export function ExportPanel(p: Props) {
     }
   }
 
-  const busy = progress != null;
+  const bulk = p.bulk?.state ?? null;
+  const busy = progress != null || !!bulk?.running;
+  const web = p.os === "web";
+  const bulkDone = bulk && !bulk.running ? bulk.results.filter((r) => r.stats) : [];
+
+  async function downloadAll() {
+    for (const r of bulkDone) {
+      await host.reveal(r.stats!.path);
+      // Browsers drop downloads fired in the same instant.
+      await new Promise((res) => setTimeout(res, 400));
+    }
+  }
 
   return (
     <section className="panel">
@@ -172,7 +193,7 @@ export function ExportPanel(p: Props) {
         )}
       </fieldset>
 
-      {busy ? (
+      {progress ? (
         <div className="export-progress">
           <div className="bar">
             <div className="bar-fill" style={{ width: `${Math.round(progress.fraction * 100)}%` }} />
@@ -187,13 +208,83 @@ export function ExportPanel(p: Props) {
           </div>
         </div>
       ) : (
-        <button className="btn-sm export-run" onClick={run}>
+        <button className="btn-sm export-run" onClick={run} disabled={busy}>
           {mesh
             ? te.runMesh(fmtCount(opts.meshTriangles ?? 50_000))
             : estimate != null && opts.decimate > 0
               ? te.runApprox(fmtCount(estimate))
               : te.run}
         </button>
+      )}
+
+      {p.bulk && !bulk?.running && (
+        <button
+          className="btn-sm export-run"
+          onClick={() => p.bulk!.onRun({ ...opts, format: opts.format === "glb" && !meshAvailable ? "sog" : opts.format })}
+          disabled={busy || p.bulk.count === 0}
+          title={te.exportAllTitle}
+        >
+          {te.exportAll(p.bulk.count)}
+        </button>
+      )}
+      {bulk?.running && (
+        <div className="export-progress">
+          <div className="bar">
+            <div
+              className="bar-fill"
+              style={{ width: `${Math.round(((bulk.index + (bulk.progress?.fraction ?? 0)) / bulk.total) * 100)}%` }}
+            />
+          </div>
+          <div className="export-status">
+            <span className="help">
+              {te.exportingItem(bulk.index + 1, bulk.total, bulk.name)}
+              {bulk.progress && ` · ${tm(bulk.progress.message)}…`}
+            </span>
+            <button className="btn-sm ghost" onClick={p.bulk?.onCancel} title={te.cancelAllTitle}>
+              {te.cancel}
+            </button>
+          </div>
+        </div>
+      )}
+      {bulk && !bulk.running && (
+        <div className="export-bulk">
+          <div className="export-status">
+            <span className="help">
+              {te.exportedAll(bulkDone.length, bulk.total)}
+              {bulk.cancelled && ` · ${te.cancelled}`}
+            </span>
+            <button className="link" onClick={p.bulk?.onClose}>
+              {te.close}
+            </button>
+          </div>
+          <ul className="export-bulk-list">
+            {bulk.results.map((r) => (
+              <li key={r.id} className={r.error ? "failed" : ""}>
+                {/* Every project names its export alike: the item tells them apart. */}
+                <span className="export-bulk-name" title={r.stats?.path ?? r.error}>
+                  {r.name}
+                </span>
+                {r.stats ? (
+                  <>
+                    <span className="muted mono small">{fmtBytes(r.stats.outputBytes)}</span>
+                    <button className="btn-sm ghost" onClick={() => host.reveal(r.stats!.path)} title={r.name}>
+                      {revealLabel(t, p.os)}
+                    </button>
+                  </>
+                ) : (
+                  <span className="export-error small" title={r.error}>
+                    {te.failedItem}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+          {web && bulkDone.length > 1 && (
+            <button className="btn-sm export-run" onClick={downloadAll}>
+              {te.downloadAll(bulkDone.length)}
+            </button>
+          )}
+        </div>
       )}
 
       {error && <p className="help export-error">{error}</p>}

@@ -28,14 +28,20 @@ export function MasksPanel({
   os,
   masks,
   onMasks,
+  onApplyAll,
   locked,
+  previewPaused,
   preview,
   promptOutside,
 }: {
   os: Os | undefined;
   masks: MaskOptions;
   onMasks: (m: MaskOptions) => void;
+  /** Batch: copies this masking to the other items. */
+  onApplyAll?: () => void;
   locked: boolean;
+  /** The preview waits while any job holds the GPU. */
+  previewPaused?: boolean;
   /** Frame for the mask preview (where the host provides a preview). */
   preview: PreviewSource | null;
   /** The marking fell outside the trim range (it will be ignored). */
@@ -53,6 +59,13 @@ export function MasksPanel({
     <section className="panel">
       <header className="panel-head">
         <h2>{tm.title}</h2>
+        {onApplyAll && (
+          <span className="panel-actions">
+            <button className="link" onClick={onApplyAll} title={tm.applyAllTitle}>
+              {tm.applyAll}
+            </button>
+          </span>
+        )}
       </header>
       <Toggle
         label={tm.enable}
@@ -94,7 +107,7 @@ export function MasksPanel({
           )}
 
           {/* As in the job: a marking outside the trim range doesn't apply. */}
-          <MaskPreview source={preview} masks={{ ...masks, method, prompt: promptOutside ? null : masks.prompt }} locked={locked} />
+          <MaskPreview source={preview} masks={{ ...masks, method, prompt: promptOutside ? null : masks.prompt }} locked={locked || !!previewPaused} />
 
           {method === "chroma" && (
             <fieldset className="chroma" disabled={locked}>

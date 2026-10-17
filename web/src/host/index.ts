@@ -27,7 +27,7 @@ import { runJob } from "./job";
 import { maskPreview, previewIdle } from "./preview";
 import { packProject, pickPackageDest, unpackProject } from "./package";
 import { retouchApi } from "./retouch";
-import { importFolder, importUrl, layout, openProject, projectFor, readState, saveState, setFramesRejected } from "./project";
+import { importFolder, importUrl, keepProjects, layout, openProject, projectFor, readState, saveState, setFramesRejected } from "./project";
 
 const params = new URLSearchParams(location.search);
 let job: AbortController | null = null;
@@ -194,6 +194,7 @@ const api: Api = {
   },
 
   retouch: retouchApi,
+  keepProjects,
 };
 
 const dropHandlers = new Set<(paths: string[]) => void>();
@@ -215,8 +216,7 @@ function register(loose: File[], folders: { name: string; files: File[] }[] = []
   return paths;
 }
 
-/** Top-level files of a folder dropped onto the window. */
-async function readFolder(dir: FileSystemDirectoryEntry): Promise<File[]> {
+async function readEntries(dir: FileSystemDirectoryEntry): Promise<FileSystemEntry[]> {
   const reader = dir.createReader();
   const entries: FileSystemEntry[] = [];
   // readEntries returns batches (~100) until it comes back empty.
@@ -225,11 +225,31 @@ async function readFolder(dir: FileSystemDirectoryEntry): Promise<File[]> {
     if (!batch.length) break;
     entries.push(...batch);
   }
-  return Promise.all(
+  return entries;
+}
+
+const imageFiles = (entries: FileSystemEntry[]) =>
+  Promise.all(
     entries
       .filter((e): e is FileSystemFileEntry => e.isFile && isImage(e.name))
       .map((e) => new Promise<File>((res, rej) => e.file(res, rej))),
   );
+
+const byName = <T extends { name: string }>(a: T, b: T) => a.name.localeCompare(b.name, undefined, { numeric: true });
+
+/** Images at the top of a folder dropped onto the window; a folder of frame
+ *  folders gives one set per subfolder (each becomes a batch item). */
+async function readFolder(dir: FileSystemDirectoryEntry): Promise<{ name: string; files: File[] }[]> {
+  const entries = await readEntries(dir);
+  const top = await imageFiles(entries);
+  if (top.length) return [{ name: dir.name, files: top }];
+  const out: { name: string; files: File[] }[] = [];
+  const subs = entries.filter((e): e is FileSystemDirectoryEntry => e.isDirectory).sort(byName);
+  for (const sub of subs) {
+    const files = await imageFiles(await readEntries(sub));
+    if (files.length) out.push({ name: sub.name, files });
+  }
+  return out;
 }
 
 addEventListener("dragover", (e) => {
@@ -243,8 +263,8 @@ addEventListener("drop", (e) => {
   const taken = items.map((i) => ({ entry: i.webkitGetAsEntry?.() ?? null, file: i.getAsFile() }));
   const loose = taken.filter((t) => !t.entry?.isDirectory && t.file).map((t) => t.file!);
   const dirs = taken.map((t) => t.entry).filter((d): d is FileSystemDirectoryEntry => !!d?.isDirectory);
-  Promise.all(dirs.map(async (d) => ({ name: d.name, files: await readFolder(d) }))).then(
-    (folders) => dropped(register(loose, folders)),
+  Promise.all(dirs.map(readFolder)).then(
+    (folders) => dropped(register(loose, folders.flat())),
     (err) => console.error("could not read the dropped folder:", err),
   );
 });
@@ -279,18 +299,24 @@ export const webHost: Host = {
   // URLs change on every publish, so no cache-buster is needed.
   fileUrl: (path) => urlOf(path),
   async pickFiles(extensions) {
-    const files = await pickFiles(["video/*", "image/*", ...extensions.map((e) => `.${e}`)].join(","));
-    // One video (or package) at a time: among several files, it takes priority.
-    const single = files.find((f) => !isImage(f.name));
-    return single ? register([single]) : register(files);
+    // Each video and package becomes a batch item; loose images, one item.
+    return register(await pickFiles(["video/*", "image/*", ...extensions.map((e) => `.${e}`)].join(",")));
   },
   async pickFramesFolder() {
     const files = await pickFiles("", true);
-    // Top level of the folder only: "folder/file".
     if (!files.length) return [];
-    const top = files.filter((f) => f.webkitRelativePath.split("/").length === 2 && isImage(f.name));
-    if (!top.length) throw new Error(`no images (${IMAGE_EXT.join(", ")}) at the top level of the folder`);
-    return register([], [{ name: top[0].webkitRelativePath.split("/")[0], files: top }]);
+    const at = (depth: number) => files.filter((f) => f.webkitRelativePath.split("/").length === depth && isImage(f.name));
+    // Top level of the folder only: "folder/file".
+    const top = at(2);
+    if (top.length) return register([], [{ name: top[0].webkitRelativePath.split("/")[0], files: top }]);
+    // A folder of frame folders ("folder/take/file"): one set per subfolder.
+    const subs = new Map<string, File[]>();
+    for (const f of at(3)) {
+      const name = f.webkitRelativePath.split("/")[1];
+      subs.set(name, [...(subs.get(name) ?? []), f]);
+    }
+    if (!subs.size) throw new Error(`no images (${IMAGE_EXT.join(", ")}) at the top level of the folder or its subfolders`);
+    return register([], [...subs].map(([name, files]) => ({ name, files })).sort(byName));
   },
   /** "Import…": copies a Gausify Orbit project folder or a COLMAP dataset into
    *  a project in the browser. */

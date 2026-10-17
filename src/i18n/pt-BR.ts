@@ -84,7 +84,26 @@ export const ptBR = {
     imageCount: (n: number) => `${n} imagens`,
     imagesHelp:
       "Entram na ordem dos nomes, que deve ser a da órbita. Com mais imagens que o número de frames, fica a mais nítida de cada trecho.",
-    changeVideo: "Trocar…",
+    add: "Adicionar…",
+    addTitle: "Adiciona vídeos, imagens, pastas de frames ou pacotes ao lote (cada um vira um projeto)",
+    batch: {
+      title: "Itens do lote",
+      prev: "Item anterior",
+      next: "Próximo item",
+      remove: (name: string) => `Remover ${name} do lote`,
+      removeTitle: "Tira do lote (o projeto continua salvo e reabre do cache)",
+      status: { queued: "Na fila", done: "Pronto", failed: "Falhou", pending: "Pendente" },
+      summary: (done: number, total: number) => `${done} de ${total} prontos`,
+      sharedQuality: "vale para todos",
+      runAll: (n: number) => (n ? `Processar todos (${n})` : "Processar todos"),
+      runAllTitle: "Processa, um após o outro, cada item ainda sem splat, a partir da etapa escolhida em cada um. Uma falha passa para o próximo.",
+      runThis: "Só este",
+      runThisTitle: "Processa só o item mostrado",
+      cancelAll: "Cancelar lote",
+      cancelAllTitle: "Para o item atual e o resto da fila",
+      skip: "Pular",
+      skipTitle: "Cancela o item atual e segue para o próximo",
+    },
     chooseVideo: "Escolher…",
     trim: "Trecho",
     startHere: "Início aqui",
@@ -160,6 +179,8 @@ export const ptBR = {
 
   masks: {
     title: "Recorte do sujeito",
+    applyAll: "Aplicar a todos",
+    applyAllTitle: "Copia este recorte para os outros itens do lote (cada um mantém a sua marcação do SAM 2.1)",
     enable: "Isolar o sujeito (remover o fundo)",
     enableHint: "o splat sai só com a pessoa ou objeto, sem paredes e riscos em volta",
     methods: {
@@ -255,6 +276,15 @@ export const ptBR = {
     meshTextureSize: (side: number) => `textura ${side}²`,
     meshResult: (tris: string, verts: string) => `${tris} triângulos · ${verts} vértices`,
     cancel: "Cancelar",
+    exportAll: (n: number) => `Exportar todos (${n})`,
+    exportAllTitle: "Exporta o splat de cada item pronto do lote com estas opções (o SH nunca passa do grau treinado em cada um)",
+    exportingItem: (i: number, n: number, name: string) => `Exportando ${i} de ${n}: ${name}`,
+    exportedAll: (ok: number, n: number) => `${ok} de ${n} exportados`,
+    cancelAllTitle: "Para depois do item atual (a malha para na hora)",
+    cancelled: "cancelado",
+    failedItem: "falhou",
+    downloadAll: (n: number) => `Baixar os ${n} arquivos`,
+    close: "Fechar",
   },
 
   share: {

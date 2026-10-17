@@ -132,14 +132,21 @@ export async function setFramesRejected(root: string, names: string[], rejected:
   return save();
 }
 
-/** Keeps only the most recent projects: each takes hundreds of MB of the
- *  browser's quota. */
+/** Projects open in the batch (`Api.keepProjects`): never pruned. */
+const kept = new Set<string>();
+export function keepProjects(dirs: string[]) {
+  kept.clear();
+  for (const d of dirs) kept.add(d);
+}
+
+/** Keeps only the most recent projects (besides the batch's): each takes
+ *  hundreds of MB of the browser's quota. */
 export async function pruneProjects(keep: string, max = 3) {
   const dir = await dirAt(PROJECTS, true);
   const all: { path: string; at: number }[] = [];
   for await (const [name, h] of dir.entries()) {
     const path = `${PROJECTS}/${name}`;
-    if (h.kind === "directory" && path !== keep) all.push({ path, at: (await readState(path)).updatedAt ?? 0 });
+    if (h.kind === "directory" && path !== keep && !kept.has(path)) all.push({ path, at: (await readState(path)).updatedAt ?? 0 });
   }
   all.sort((a, b) => b.at - a.at);
   for (const p of all.slice(max - 1)) await remove(p.path);

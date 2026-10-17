@@ -78,7 +78,26 @@ export const enUS: Messages = {
     imageCount: (n) => `${n} images`,
     imagesHelp:
       "Used in file name order, which should follow the orbit. With more images than the frame count, the sharpest of each stretch is kept.",
-    changeVideo: "Change…",
+    add: "Add…",
+    addTitle: "Adds videos, images, frame folders or packages to the batch (each becomes a project)",
+    batch: {
+      title: "Batch items",
+      prev: "Previous item",
+      next: "Next item",
+      remove: (name: string) => `Remove ${name} from the batch`,
+      removeTitle: "Removes it from the batch (the project stays saved and reopens from the cache)",
+      status: { queued: "Queued", done: "Done", failed: "Failed", pending: "Pending" },
+      summary: (done: number, total: number) => `${done} of ${total} done`,
+      sharedQuality: "applies to all",
+      runAll: (n: number) => (n ? `Process all (${n})` : "Process all"),
+      runAllTitle: "Processes, one after another, every item without a splat yet, from the stage chosen in each. A failure moves on to the next.",
+      runThis: "This one",
+      runThisTitle: "Processes only the shown item",
+      cancelAll: "Cancel batch",
+      cancelAllTitle: "Stops the current item and the rest of the queue",
+      skip: "Skip",
+      skipTitle: "Cancels the current item and moves on to the next",
+    },
     chooseVideo: "Choose…",
     trim: "Range",
     startHere: "Start here",
@@ -154,6 +173,8 @@ export const enUS: Messages = {
 
   masks: {
     title: "Subject cutout",
+    applyAll: "Apply to all",
+    applyAllTitle: "Copies this cutout to the other batch items (each keeps its own SAM 2.1 marking)",
     enable: "Isolate the subject (remove the background)",
     enableHint: "the splat keeps only the person or object, without walls and streaks around it",
     methods: {
@@ -247,6 +268,15 @@ export const enUS: Messages = {
     meshTextureSize: (side: number) => `texture ${side}²`,
     meshResult: (tris: string, verts: string) => `${tris} triangles · ${verts} vertices`,
     cancel: "Cancel",
+    exportAll: (n: number) => `Export all (${n})`,
+    exportAllTitle: "Exports each finished batch item's splat with these options (SH never exceeds the degree each one was trained with)",
+    exportingItem: (i: number, n: number, name: string) => `Exporting ${i} of ${n}: ${name}`,
+    exportedAll: (ok: number, n: number) => `${ok} of ${n} exported`,
+    cancelAllTitle: "Stops after the current item (a mesh stops right away)",
+    cancelled: "cancelled",
+    failedItem: "failed",
+    downloadAll: (n: number) => `Download all ${n} files`,
+    close: "Close",
   },
 
   share: {

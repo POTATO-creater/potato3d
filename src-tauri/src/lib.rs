@@ -24,9 +24,12 @@ use tools::Tools;
 
 #[derive(Default)]
 struct AppState {
-    job: Mutex<Option<CancellationToken>>,
+    /// The running job and its project folder.
+    job: Mutex<Option<(CancellationToken, String)>>,
     install: Mutex<Option<CancellationToken>>,
-    exporting: std::sync::atomic::AtomicBool,
+    /// Project being exported. Export and processing exclude each other only
+    /// within a project: in a batch, finished items export while the queue runs.
+    exporting: Mutex<Option<String>>,
 }
 
 type CmdResult<T> = Result<T, String>;
@@ -97,11 +100,15 @@ async fn export_splat(
     on_progress: Channel<ExportProgress>,
     state: State<'_, AppState>,
 ) -> CmdResult<export::ExportStats> {
-    if state.job.lock().unwrap().as_ref().is_some_and(|t| !t.is_cancelled()) {
+    if state.job.lock().unwrap().as_ref().is_some_and(|(t, dir)| !t.is_cancelled() && *dir == project_dir) {
         return Err("wait for processing to finish before exporting".into());
     }
-    if state.exporting.swap(true, std::sync::atomic::Ordering::SeqCst) {
-        return Err("an export is already in progress".into());
+    {
+        let mut exporting = state.exporting.lock().unwrap();
+        if exporting.is_some() {
+            return Err("an export is already in progress".into());
+        }
+        *exporting = Some(project_dir.clone());
     }
     let result = tauri::async_runtime::spawn_blocking(move || {
         let mut last = std::time::Instant::now() - std::time::Duration::from_secs(1);
@@ -114,7 +121,7 @@ async fn export_splat(
         })
     })
     .await;
-    state.exporting.store(false, std::sync::atomic::Ordering::SeqCst);
+    *state.exporting.lock().unwrap() = None;
     result.map_err(err)?.map_err(|e| format!("{e:#}"))
 }
 
@@ -150,14 +157,14 @@ fn throttled(channel: Channel<f32>) -> impl FnMut(f32) {
 #[tauri::command]
 fn start_job(config: JobConfig, on_event: Channel<JobEvent>, state: State<'_, AppState>) -> CmdResult<()> {
     let mut job = state.job.lock().unwrap();
-    if job.as_ref().is_some_and(|t| !t.is_cancelled()) {
+    if job.as_ref().is_some_and(|(t, _)| !t.is_cancelled()) {
         return Err("processing is already in progress".into());
     }
-    if state.exporting.load(std::sync::atomic::Ordering::SeqCst) {
+    if state.exporting.lock().unwrap().as_deref() == Some(config.project_dir.as_str()) {
         return Err("wait for the export to finish".into());
     }
     let token = CancellationToken::new();
-    *job = Some(token.clone());
+    *job = Some((token.clone(), config.project_dir.clone()));
     let tools = Tools::detect();
     let emit: pipeline::Emit = Arc::new(move |e| {
         let _ = on_event.send(e);
@@ -172,7 +179,7 @@ fn start_job(config: JobConfig, on_event: Channel<JobEvent>, state: State<'_, Ap
 
 #[tauri::command]
 fn cancel_job(state: State<'_, AppState>) {
-    if let Some(t) = state.job.lock().unwrap().as_ref() {
+    if let Some((t, _)) = state.job.lock().unwrap().as_ref() {
         t.cancel();
     }
 }
