@@ -23,8 +23,8 @@ import { ToolsSetup } from "./components/ToolsSetup";
 import { PRESETS, presetById, type PresetId } from "./lib/presets";
 import { Sidebar } from "./components/Sidebar";
 import { BatchSelector } from "./components/BatchSelector";
-import { Viewer, type ViewerHandle } from "./components/Viewer";
-import { RetouchPanel } from "./components/RetouchPanel";
+import { Viewer, type ViewerHandle, type ViewState } from "./components/Viewer";
+import { readRetouchSession, RetouchPanel, type RetouchSession } from "./components/RetouchPanel";
 import { StageStrip } from "./components/StageStrip";
 import { FrameLightbox, FramesGrid, LogView } from "./components/FramesGrid";
 import { ExportPanel } from "./components/ExportPanel";
@@ -89,6 +89,19 @@ interface Session {
   settings: Settings;
   masks: MaskOptions;
   trim: { start: number; end: number | null };
+  /** Where the user was: tab, 3D view and retouch panel. */
+  tab?: Tab;
+  view?: ViewState | null;
+  retouch?: RetouchSession | null;
+}
+
+const TABS: Tab[] = ["viewer", "frames", "log"];
+
+function readView(v: unknown): ViewState | null {
+  const r = v as Partial<Record<keyof ViewState, unknown>> | null;
+  const vec = (x: unknown) => (Array.isArray(x) && x.length === 3 && x.every((n) => typeof n === "number" && Number.isFinite(n)) ? (x as [number, number, number]) : null);
+  const position = vec(r?.position), target = vec(r?.target);
+  return position && target ? { position, target, anchored: r?.anchored === true, locked: r?.locked === true } : null;
 }
 
 /** A package's session merged with current defaults: it may come from another
@@ -118,6 +131,9 @@ function readSession(raw: unknown, current: Session, os: Tools["os"] | undefined
         }
       : current.masks,
     trim: { start: num(r.trim?.start) ?? 0, end: num(r.trim?.end) },
+    tab: TABS.includes(r.tab as Tab) ? r.tab : undefined,
+    view: readView(r.view),
+    retouch: readRetouchSession(r.retouch),
   };
 }
 
@@ -174,6 +190,8 @@ function AppView() {
   /** Shows the export in 3D instead of the trained splat. */
   const [previewExport, setPreviewExport] = useState<{ version: number } | null>(null);
   const viewerRef = useRef<ViewerHandle>(null);
+  /** The retouch panel's state, to save in packages. */
+  const retouchSession = useRef<(() => RetouchSession) | null>(null);
   /** Retouch in progress (uses the GPU: the pipeline waits). */
   const [retouchBusy, setRetouchBusy] = useState(false);
   /** Splat the retouch asks to show: fine-tuning previews or the previous one. */
@@ -382,7 +400,8 @@ function AppView() {
           setSettings(s.settings);
           setPreset(matchPreset(s.settings));
         }
-        patch(id, { masks: s.masks, trim: s.trim });
+        patch(id, { masks: s.masks, trim: s.trim, restore: s.view || s.retouch ? { view: s.view ?? null, retouch: s.retouch ?? null } : null });
+        if (select && s.tab) setTab(s.tab);
       }
       patch(id, { pack: null });
     } catch (e) {
@@ -448,7 +467,15 @@ function AppView() {
           dest,
           include: { masks: !!job.masks, poses: !!job.poses, splat: !!job.finalPly },
           source: videoPath ? { kind: "video", path: videoPath } : imageSet ? { kind: "images", paths: imageSet.paths } : null,
-          session: { settings, masks: maskOpts, trim } satisfies Session,
+          session: {
+            settings,
+            masks: maskOpts,
+            trim,
+            tab,
+            // What the item was restored with stays until its view or panel takes over.
+            view: viewerRef.current?.viewState() ?? item.restore?.view ?? null,
+            retouch: retouchSession.current?.() ?? item.restore?.retouch ?? null,
+          } satisfies Session,
         },
         (fraction) => patch(id, { pack: { kind: "saving", fraction } }),
       );
@@ -686,6 +713,16 @@ function AppView() {
         }));
   }
 
+  // A package's 3D view, once its cameras are on screen (this runs after the
+  // viewer's own framing for the same frame).
+  const restoreView = item?.restore?.view ?? null;
+  useEffect(() => {
+    if (!item || !restoreView || !frame) return;
+    viewerRef.current?.setViewState(restoreView);
+    patch(item.id, (it) => ({ restore: it.restore && { ...it.restore, view: null } }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [item?.id, frame, restoreView]);
+
   // After frames, switch to the 3D view when training starts.
   useEffect(() => {
     if (job.stages.train.status === "running" && tab === "frames") setTab("viewer");
@@ -837,7 +874,8 @@ function AppView() {
             />
             {api.retouch && job.poses && frame && (
               <RetouchPanel
-                key={item.id}
+                // Its own key: it sits next to the ExportPanel keyed by the item.
+                key={`retouch-${item.id}`}
                 projectDir={projectDir}
                 viewer={viewerRef}
                 train={settings.train}
@@ -852,6 +890,14 @@ function AppView() {
                   }
                 }}
                 onLog={(line) => pushLog(item.id, line)}
+                initial={item.restore?.retouch}
+                onRestored={() => patch(item.id, (it) => ({ restore: it.restore && { ...it.restore, retouch: null } }))}
+                sessionRef={retouchSession}
+                onLeave={(r) => {
+                  // Only while its clips still match the poses (not on a redo).
+                  const id = item.id;
+                  patch(id, (it) => (it.job.poses ? { restore: { view: it.restore?.view ?? null, retouch: r } } : {}));
+                }}
                 onSplatChanged={async () => {
                   const project = await api.loadProject(projectDir);
                   wsDispatch({ type: "job", id: item.id, action: { type: "load", project } });

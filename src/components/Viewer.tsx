@@ -31,6 +31,17 @@ export interface FrameGuide {
   fovY: number;
 }
 
+/** Where the user was looking, in COLMAP coordinates (saved in packages). */
+export interface ViewState {
+  position: [number, number, number];
+  /** Orbit pivot. */
+  target: [number, number, number];
+  /** The pivot was placed with the Anchor gizmo. */
+  anchored: boolean;
+  /** Elevation locked to the filmed range. */
+  locked: boolean;
+}
+
 /** Retouch access to the viewer: the current camera, the drawn trajectory
  *  and offscreen rendering, in COLMAP coordinates. */
 export interface ViewerHandle {
@@ -50,6 +61,10 @@ export interface ViewerHandle {
   /** Orbit pivot placed with the Anchor gizmo, in COLMAP coordinates; null
    *  until it is moved (and after Recenter). */
   anchorPoint(): [number, number, number] | null;
+  /** Camera, pivot and angle lock; null before framing. */
+  viewState(): ViewState | null;
+  /** Restores a `viewState()` (from a package). */
+  setViewState(state: ViewState): void;
   /** Video frame for the framing mask (null removes the option). */
   setFrameGuide(guide: FrameGuide | null): void;
   /** Renders each pose offscreen with the displayed splat. `onFrame` gets
@@ -137,6 +152,8 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
   const [showCams, setShowCams] = useState(true);
   const [spin, setSpin] = useState(false);
   const [clampView, setClampView] = useState(false);
+  const clampRef = useRef(clampView);
+  clampRef.current = clampView;
   const [anchorOn, setAnchorOn] = useState(false);
   const [hasMesh, setHasMesh] = useState(false);
   /** An exported .glb is on screen (the training cameras don't line up with it). */
@@ -644,6 +661,34 @@ export function Viewer({ splat, frame, placeholder, onPickCamera, ref }: Props) 
         c.root.updateMatrixWorld(true);
         const p = (c.anchorGoal ?? c.controls.target).clone().applyMatrix4(c.root.matrixWorld.clone().invert());
         return [p.x, p.y, p.z];
+      },
+      viewState() {
+        const c = ctx.current;
+        if (!c || !frameRef.current) return null;
+        c.root.updateMatrixWorld(true);
+        const inv = c.root.matrixWorld.clone().invert();
+        const p = c.camera.position.clone().applyMatrix4(inv);
+        const t = (c.anchorGoal ?? c.controls.target).clone().applyMatrix4(inv);
+        return { position: [p.x, p.y, p.z], target: [t.x, t.y, t.z], anchored: c.anchored, locked: clampRef.current };
+      },
+      setViewState(s) {
+        const c = ctx.current;
+        if (!c || !frameRef.current) return;
+        c.root.updateMatrixWorld(true);
+        const m = c.root.matrixWorld;
+        setClampView(s.locked);
+        if (!s.locked) {
+          // Release before moving, like goTo: update() would clamp otherwise.
+          c.controls.minPolarAngle = 0;
+          c.controls.maxPolarAngle = Math.PI;
+        }
+        c.anchorGoal = null;
+        c.anchored = s.anchored;
+        c.controls.target.copy(new THREE.Vector3(...s.target).applyMatrix4(m));
+        c.anchor.position.copy(c.controls.target);
+        c.camera.position.copy(new THREE.Vector3(...s.position).applyMatrix4(m));
+        c.controls.update();
+        c.invalidate();
       },
       setFrameGuide(g) {
         setGuide(g);

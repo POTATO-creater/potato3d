@@ -5,6 +5,8 @@
 import type { ExportStats, ImageSet, MaskOptions, Msg, SceneFrame, Stage, VideoInfo } from "./api";
 import { basename } from "./platform";
 import { initialJob, jobReducer, type JobAction, type JobState } from "./job";
+import type { RetouchSession } from "../components/RetouchPanel";
+import type { ViewState } from "../components/Viewer";
 
 /** Progress or result of the last package save/open. */
 export type PackageStatus =
@@ -33,6 +35,9 @@ export interface BatchItem {
   /** Thumbnail cache-buster. */
   framesVersion: number;
   pack: PackageStatus | null;
+  /** UI state from an opened package, applied once the 3D view (and the
+   *  retouch panel) can take it; kept until then so a re-save keeps it. */
+  restore: { view: ViewState | null; retouch: RetouchSession | null } | null;
 }
 
 export interface Workspace {
@@ -60,6 +65,7 @@ export function newItem(masks: MaskOptions, patch: Partial<BatchItem> = {}): Bat
     lastExport: null,
     framesVersion: 0,
     pack: null,
+    restore: null,
     ...patch,
   };
 }

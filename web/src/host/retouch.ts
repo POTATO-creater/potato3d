@@ -22,7 +22,16 @@ const safeId = (id: string) => {
 
 async function readClip(root: string, id: string): Promise<RetouchClip | null> {
   try {
-    const clip = JSON.parse(await (await readFile(`${clipDir(root, id)}/clip.json`)).text()) as RetouchClip;
+    const dir = clipDir(root, id);
+    const saved = JSON.parse(await (await readFile(`${dir}/clip.json`)).text()) as RetouchClip;
+    // Videos live in the clip's folder, wherever the project was (a package
+    // opened into another folder keeps relative paths).
+    const clip: RetouchClip = {
+      ...saved,
+      id,
+      reference: saved.reference ? `${dir}/reference.mp4` : null,
+      restored: saved.restored ? `${dir}/restored.mp4` : null,
+    };
     // Videos get URLs for the review <video> elements.
     for (const p of [clip.reference, clip.restored]) if (p) publish(p, await readFile(p));
     return clip;

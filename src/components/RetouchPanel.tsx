@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject, type RefObject } from "react";
 import { useI18n } from "../i18n";
 import { api, fileUrl, host, type MaskOptions, type RetouchCameras, type RetouchClip, type RetouchApi, type TrainOptions } from "../lib/api";
 import { ComfyClient } from "../lib/comfy/client";
@@ -88,23 +88,105 @@ const LONG_SIDES = [512, 640, 768, 960, 1088, 1280, 1536, 1920];
 
 function loadMotion(): Motion {
   try {
-    const raw = JSON.parse(localStorage.getItem(MOTION_KEY) ?? "null") as { kind?: unknown; seconds?: unknown; tilt?: unknown; distance?: unknown; longSide?: unknown; aspect?: unknown; fps?: unknown; uniform?: unknown; stabilize?: unknown; pressOnly?: unknown; fixed?: unknown } | null;
-    return {
-      uniform: typeof raw?.uniform === "number" ? Math.min(1, Math.max(0, raw.uniform)) : 0,
-      stabilize: typeof raw?.stabilize === "number" ? Math.min(1, Math.max(0, raw.stabilize)) : 0,
-      pressOnly: raw?.pressOnly === true,
-      fixed: raw?.fixed === true,
-      distance: raw?.distance === "view" ? "view" : "photos",
-      longSide: LONG_SIDES.includes(raw?.longSide as number) ? (raw!.longSide as number) : DEFAULT_CLIP.longSide,
-      fps: typeof raw?.fps === "number" && raw.fps > 0 ? raw.fps : null,
-      aspect: ASPECTS.includes(raw?.aspect as string) ? (raw!.aspect as string) : "lens",
-      kind: KINDS.includes(raw?.kind as Kind) ? (raw!.kind as Kind) : "view",
-      seconds: typeof raw?.seconds === "number" && raw.seconds > 0 ? raw.seconds : null,
-      tilt: typeof raw?.tilt === "number" && raw.tilt > 0 ? raw.tilt : DEFAULT_TILT,
-    };
+    return parseMotion(JSON.parse(localStorage.getItem(MOTION_KEY) ?? "null"));
   } catch {
-    return { kind: "view", seconds: null, tilt: DEFAULT_TILT, distance: "photos", longSide: DEFAULT_CLIP.longSide, aspect: "lens", fps: null, uniform: 0, stabilize: 0, pressOnly: false, fixed: false };
+    return parseMotion(null);
   }
+}
+
+/** Motion settings from storage or a package, with defaults for what is missing. */
+function parseMotion(value: unknown): Motion {
+  const raw = (value && typeof value === "object" ? value : null) as { kind?: unknown; seconds?: unknown; tilt?: unknown; distance?: unknown; longSide?: unknown; aspect?: unknown; fps?: unknown; uniform?: unknown; stabilize?: unknown; pressOnly?: unknown; fixed?: unknown } | null;
+  return {
+    uniform: typeof raw?.uniform === "number" ? Math.min(1, Math.max(0, raw.uniform)) : 0,
+    stabilize: typeof raw?.stabilize === "number" ? Math.min(1, Math.max(0, raw.stabilize)) : 0,
+    pressOnly: raw?.pressOnly === true,
+    fixed: raw?.fixed === true,
+    distance: raw?.distance === "view" ? "view" : "photos",
+    longSide: LONG_SIDES.includes(raw?.longSide as number) ? (raw!.longSide as number) : DEFAULT_CLIP.longSide,
+    fps: typeof raw?.fps === "number" && raw.fps > 0 ? raw.fps : null,
+    aspect: ASPECTS.includes(raw?.aspect as string) ? (raw!.aspect as string) : "lens",
+    kind: KINDS.includes(raw?.kind as Kind) ? (raw!.kind as Kind) : "view",
+    seconds: typeof raw?.seconds === "number" && raw.seconds > 0 ? raw.seconds : null,
+    tilt: typeof raw?.tilt === "number" && raw.tilt > 0 ? raw.tilt : DEFAULT_TILT,
+  };
+}
+
+/** Panel state saved in a project package: the motion settings, the
+ *  trajectory being planned (a recording included), the workflow with its
+ *  field values and the fine-tuning settings. Clips are project files. */
+export interface RetouchSession {
+  motion: Motion;
+  draft: Draft | null;
+  steps: number;
+  ratio: number;
+  /** Restore workflow: found by id, else by name (another install). */
+  workflow: { id: string; name: string; params: Record<string, ParamValue> } | null;
+  /** Showing the splat before the retouch. */
+  comparing: boolean;
+}
+
+const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+const numbers = <N extends number>(v: unknown, n: N) => (Array.isArray(v) && v.length === n && v.every(finite) ? v : null);
+function parsePose(v: unknown): ColmapPose | null {
+  const p = v as { qvec?: unknown; tvec?: unknown } | null;
+  const qvec = numbers(p?.qvec, 4), tvec = numbers(p?.tvec, 3);
+  return qvec && tvec ? { qvec: qvec as ColmapPose["qvec"], tvec: tvec as ColmapPose["tvec"] } : null;
+}
+
+function parseDraft(v: unknown): Draft | null {
+  if (!v || typeof v !== "object") return null;
+  const r = v as { kind?: unknown; pose?: unknown; nearest?: unknown; recorded?: { samples?: unknown; seconds?: unknown }; pivot?: unknown };
+  if (!KINDS.includes(r.kind as Kind)) return null;
+  const kind = r.kind as Kind;
+  const pose = parsePose(r.pose);
+  let recorded: Draft["recorded"];
+  if (Array.isArray(r.recorded?.samples) && finite(r.recorded.seconds)) {
+    const samples: RecordedSample[] = [];
+    for (const x of r.recorded.samples) {
+      const p = parsePose(x);
+      const t = (x as { t?: unknown }).t;
+      if (!p || !finite(t)) return null;
+      samples.push({ t, ...p });
+    }
+    recorded = { samples, seconds: r.recorded.seconds };
+  }
+  if ((kind === "record" && !recorded) || (FROM_VIEW.includes(kind) && !pose)) return null;
+  const pivot = numbers(r.pivot, 3) as Vec3 | null;
+  return { kind, pose, nearest: finite(r.nearest) ? Math.max(0, Math.round(r.nearest)) : 0, recorded, pivot: pivot ?? undefined };
+}
+
+/** A package's retouch session (any app version); null if unusable. */
+export function readRetouchSession(v: unknown): RetouchSession | null {
+  if (!v || typeof v !== "object") return null;
+  const r = v as Partial<Record<keyof RetouchSession, unknown>>;
+  const w = r.workflow as { id?: unknown; name?: unknown; params?: unknown } | null | undefined;
+  return {
+    motion: parseMotion(r.motion),
+    draft: parseDraft(r.draft),
+    steps: finite(r.steps) && r.steps > 0 ? Math.round(r.steps) : DEFAULT_STEPS,
+    ratio: finite(r.ratio) && r.ratio > 0 ? r.ratio : DEFAULT_RESTORED_RATIO,
+    workflow:
+      w && typeof w.id === "string" && typeof w.name === "string"
+        ? { id: w.id, name: w.name, params: w.params && typeof w.params === "object" ? (w.params as Record<string, ParamValue>) : {} }
+        : null,
+    comparing: r.comparing === true,
+  };
+}
+
+/** What the panel reads from storage on mount (motion, ratio, workflow and
+ *  its fields) is set from the session, as if the user had just chosen it. */
+function storeSession(s: RetouchSession) {
+  const workflows = workflowsOf(loadComfy(), "restore");
+  const wf = s.workflow && (workflows.find((w) => w.id === s.workflow!.id) ?? workflows.find((w) => w.name === s.workflow!.name));
+  try {
+    localStorage.setItem(MOTION_KEY, JSON.stringify(s.motion));
+    localStorage.setItem(RATIO_KEY, String(s.ratio));
+    if (wf) localStorage.setItem(WF_KEY, wf.id);
+  } catch {
+    /* storage unavailable */
+  }
+  if (wf) saveParamValues(wf.id, s.workflow!.params);
 }
 interface Task {
   /** Clip in progress (or "draft" while generating, "apply" while training). */
@@ -140,10 +222,25 @@ export function RetouchPanel(props: {
   onSplatChanged: () => void;
   /** Lines for the Log tab (Brush, dataset assembly). */
   onLog: (line: string) => void;
+  /** State to resume (from a package), read once on mount. */
+  initial?: RetouchSession | null;
+  /** `initial` has been applied. */
+  onRestored?: () => void;
+  /** Filled with a function returning the panel's state, to save it. */
+  sessionRef?: MutableRefObject<(() => RetouchSession) | null>;
+  /** The panel's state when it closes (another item shown), to resume it. */
+  onLeave?: (session: RetouchSession) => void;
 }) {
   const { t, tm, locale } = useI18n();
   const tr = t.retouch;
   const rt = api.retouch as RetouchApi;
+  // Draft and comparison wait for the cameras; the rest is read from storage below.
+  const pending = useRef(props.initial ?? null);
+  const stored = useRef(false);
+  if (!stored.current) {
+    stored.current = true;
+    if (pending.current) storeSession(pending.current);
+  }
   const [cams, setCams] = useState<RetouchCameras | null>(null);
   const [clips, setClips] = useState<RetouchClip[]>([]);
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -154,7 +251,7 @@ export function RetouchPanel(props: {
   const [error, setError] = useState<string | null>(null);
   const [applied, setApplied] = useState<{ clips: string[]; appliedAt: number; base: string } | null>(null);
   const [comparing, setComparing] = useState(false);
-  const [steps, setSteps] = useState(DEFAULT_STEPS);
+  const [steps, setSteps] = useState(() => props.initial?.steps ?? DEFAULT_STEPS);
   const [ratio, setRatio] = useState(() => {
     try {
       const v = Number(localStorage.getItem(RATIO_KEY));
@@ -185,7 +282,7 @@ export function RetouchPanel(props: {
   const samples = useRef<RecordedSample[]>([]);
   const importFor = useRef<string | null>(null);
   const importInput = useRef<HTMLInputElement>(null);
-  const { projectDir, viewer, onBusy } = props;
+  const { projectDir, viewer, onBusy, onViewerSplat, onRestored } = props;
 
   const reload = useCallback(async () => {
     const [list, state] = await Promise.all([rt.listClips(projectDir), api.loadProject(projectDir)]);
@@ -200,7 +297,21 @@ export function RetouchPanel(props: {
     setError(null);
     setComparing(false);
     void reload().catch((e) => setError(String(e)));
-    rt.cameras(projectDir).then(setCams, (e) => setError(String(e)));
+    rt.cameras(projectDir).then((c) => {
+      setCams(c);
+      const p = pending.current;
+      if (!p) return;
+      pending.current = null;
+      if (p.draft) setDraft({ ...p.draft, nearest: Math.min(p.draft.nearest, Math.max(0, c.cameras.length - 1)) });
+      if (p.comparing)
+        void api.loadProject(projectDir).then((s) => {
+          if (!s.retouch) return;
+          setComparing(true);
+          onViewerSplat({ path: s.retouch.base, label: tr.beforeLabel, iter: null });
+        });
+      onRestored?.();
+    }, (e) => setError(String(e)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectDir, reload, rt]);
 
   useEffect(() => onBusy(!!task), [task, onBusy]);
@@ -241,6 +352,32 @@ export function RetouchPanel(props: {
   const seconds = motion.seconds ?? Math.round((DEFAULT_CLIP.frames / fps) * 10) / 10;
   const frames = clipFrames(seconds, fps);
   const busy = !!task || props.disabled || recording;
+
+  const { sessionRef } = props;
+  const session = (): RetouchSession => {
+    if (pending.current) return pending.current;
+    // Mid-recording, what has been recorded so far is the trajectory.
+    const recordedSoFar = recording && recordedSeconds(samples.current);
+    return {
+      // Like Stop: the clip lasts what was recorded, unless the duration is fixed.
+      motion: { ...motion, seconds: recordedSoFar && !motion.fixed ? Math.min(MAX_RECORD, Math.max(0.5, Math.round(recordedSoFar * 10) / 10)) : seconds },
+      draft: recordedSoFar ? { kind: "record", pose: null, nearest: 0, recorded: { samples: [...samples.current], seconds: recordedSoFar } } : draft,
+      steps,
+      ratio,
+      workflow: workflow ? { id: workflow.id, name: workflow.name, params: paramValues } : null,
+      comparing,
+    };
+  };
+  const sessionNow = useRef(session);
+  sessionNow.current = session;
+  useEffect(() => {
+    if (!sessionRef) return;
+    sessionRef.current = () => sessionNow.current();
+    return () => void (sessionRef.current = null);
+  }, [sessionRef]);
+  const leave = useRef(props.onLeave);
+  leave.current = props.onLeave;
+  useEffect(() => () => leave.current?.(sessionNow.current()), []);
 
   const updateMotion = (patch: Partial<Motion>) => {
     const next = { ...motion, seconds, ...patch };
