@@ -3,11 +3,12 @@
 // paths in project.json and a manifest.json), read and written with ./zip.ts.
 // The source is restored only into the tab's memory, like a video dropped on the window.
 
-import { PACKAGE_EXT, type PackRequest, type PackStats, type ProjectState, type UnpackedProject } from "../../../src/lib/api";
+import { PACKAGE_EXT, type PackRequest, type PackStats, type ProjectState, type RetouchClip, type UnpackedProject } from "../../../src/lib/api";
 import {
   addImages,
   addVideo,
   basename,
+  dirAt,
   download,
   exists,
   groupName,
@@ -28,7 +29,7 @@ const FORMAT = "gausify-orbit-project";
 const VERSION = 1;
 const MODEL_FILES = ["cameras.bin", "images.bin", "points3D.bin"];
 /** What a package may contain; anything else is ignored (future versions). */
-const ALLOWED = ["dataset/images/", "dataset/sparse/0/", "rejected/", "masks/", "export/", "splat.ply"];
+const ALLOWED = ["dataset/images/", "dataset/sparse/0/", "rejected/", "masks/", "export/", "splat.ply", "retouch/", "splat_before_retouch.ply"];
 
 type PackedSource = { kind: "video"; file: string } | { kind: "images"; files: string[] };
 
@@ -102,10 +103,24 @@ export async function packProject(req: PackRequest, onProgress: (f: number) => v
       if (await exists(`${l.model}/${f}`)) entries.push({ name: `dataset/sparse/0/${f}`, blob: await readFile(`${l.model}/${f}`) });
   } else state.poses = null;
 
+  // Retouch clips (reference render, ComfyUI result, alpha frames) hold
+  // trajectories in the model's frame: they go with the poses.
+  if (poses) entries.push(...(await retouchEntries(l.retouch)));
+
   // The splat depends on the poses it was trained with.
   if (poses && req.include.splat && state.finalPly && (await exists(l.finalPly))) {
     entries.push({ name: "splat.ply", blob: await readFile(l.finalPly) });
     state.finalPly = "splat.ply";
+    // Applied retouch: the splat before it, for undo and to reapply.
+    const retouch = state.retouch;
+    state.retouch = null;
+    if (retouch) {
+      const base = await readFile(l.retouchBase).catch(() => null);
+      if (base) {
+        entries.push({ name: "splat_before_retouch.ply", blob: base });
+        state.retouch = { ...retouch, base: "splat_before_retouch.ply" };
+      }
+    }
     const last = state.lastExport;
     state.lastExport = null;
     if (last) {
@@ -120,6 +135,7 @@ export async function packProject(req: PackRequest, onProgress: (f: number) => v
     state.finalPly = null;
     state.lastPsnr = null;
     state.lastExport = null;
+    state.retouch = null;
   }
 
   let source: PackedSource | null = null;
@@ -205,6 +221,35 @@ export async function packProject(req: PackRequest, onProgress: (f: number) => v
   return { path: name, bytes, files: entries.length + 2 };
 }
 
+/** Every file of every retouch clip, with clip.json rewritten to paths
+ *  relative to the package (the web reads them relative to the clip folder). */
+async function retouchEntries(dir: string): Promise<{ name: string; blob: Blob }[]> {
+  const root = await dirAt(dir).catch(() => null);
+  if (!root) return [];
+  const out: { name: string; blob: Blob }[] = [];
+  const walk = async (d: FileSystemDirectoryHandle, rel: string) => {
+    for await (const [name, h] of d.entries()) {
+      if (h.kind === "directory") await walk(h as FileSystemDirectoryHandle, `${rel}/${name}`);
+      else if (name !== "clip.json") out.push({ name: `${rel}/${name}`, blob: await (h as FileSystemFileHandle).getFile() });
+    }
+  };
+  for await (const [id, h] of root.entries()) {
+    if (h.kind !== "directory") continue;
+    const rel = `retouch/${id}`;
+    let clip: RetouchClip;
+    try {
+      clip = JSON.parse(await (await (await (h as FileSystemDirectoryHandle).getFileHandle("clip.json")).getFile()).text());
+    } catch {
+      continue; // a clip still being written, or a leftover folder
+    }
+    await walk(h as FileSystemDirectoryHandle, rel);
+    const file = (p: string | null, name: string) => (p ? `${rel}/${name}` : null);
+    const json = { ...clip, id, reference: file(clip.reference, "reference.mp4"), restored: file(clip.restored, "restored.mp4") };
+    out.push({ name: `${rel}/clip.json`, blob: new Blob([JSON.stringify(json)]) });
+  }
+  return out;
+}
+
 /** A free project folder: `<name>`, `<name> (2)`… */
 async function freeRoot(name: string): Promise<string> {
   const base = `${PROJECTS}/${name.replace(/[\\/]/g, "_") || "project"}`;
@@ -260,11 +305,15 @@ export async function unpackProject(path: string, onProgress: (f: number) => voi
       state.finalPly = l.finalPly;
       const last = state.lastExport;
       state.lastExport = last && (await exists(abs(last.path))) ? { ...last, path: abs(last.path) } : null;
+      state.retouch = state.retouch && (await exists(l.retouchBase)) ? { ...state.retouch, base: l.retouchBase } : null;
     } else {
       state.finalPly = null;
       state.lastPsnr = null;
       state.lastExport = null;
+      state.retouch = null;
     }
+    // Clips without the poses they were planned on are meaningless.
+    if (!state.poses) await remove(l.retouch);
 
     // The source stays in the tab's memory, as if it had been dropped on the window.
     const asFile = async (rel: string, type = "") => {
