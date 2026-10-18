@@ -2,7 +2,7 @@ import { useI18n } from "../i18n";
 
 const REPO_URL = "https://github.com/obraia/gausify-orbit";
 
-/** Link to the source code. On desktop, the opener plugin opens `_blank` links in the system browser. */
+/** Link to the source code. */
 export function GitHubLink() {
   const { t } = useI18n();
   return (

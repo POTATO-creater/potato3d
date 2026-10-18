@@ -1,5 +1,4 @@
-// Web paths. The UI treats paths as opaque strings, as on the desktop; here
-// they point to:
+// Web paths. The UI treats paths as opaque strings; here they point to:
 //   /projects/<name>/…  folders and files in OPFS (origin storage)
 //   /videos/<name>      videos opened in this tab (in memory only)
 //   /inputs/<folder>/…  images used as frames, likewise

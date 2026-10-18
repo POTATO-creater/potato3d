@@ -1,6 +1,6 @@
 // Project package ZIP (.gorbit): round trip, and compatibility with external
-// readers and writers (Python zipfile, standing in for the desktop's `zip`
-// crate).  pnpm test:web
+// readers and writers (Python zipfile, standing in for the `zip` crate the
+// former desktop app wrote packages with).  pnpm test:web
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";

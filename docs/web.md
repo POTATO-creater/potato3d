@@ -1,19 +1,9 @@
-# Web version
+# How it runs in the browser
 
-`web/` runs the entire pipeline in the browser with the **same UI** as the
-desktop app: `web/src/main.tsx` mounts `src/App.tsx` and the components in
-`src/components/`. Everything that differs between the two lives behind the
-`Host` interface (`src/lib/api.ts`):
-
-- **Desktop** (`src/lib/tauri.ts`): Rust backend commands through Tauri,
-  native dialogs and "Show in Finder".
-- **Web** (`web/src/host/`): the same commands (`startJob`, `loadProject`,
-  `exportSplat`…) and the same events (`JobEvent`), implemented with WebGPU,
-  WASM and OPFS. `job.ts` follows the rules of `pipeline.rs` (stages, resuming,
-  `project.json`).
-
-A new UI feature shows up in both versions; anything platform-specific checks
-`tools.os` (`"web"` in the browser), just like macOS and Windows.
+The whole pipeline runs in the browser: `web/src/main.tsx` mounts `src/App.tsx`
+with the host in `web/src/host/`, which implements the `Host` interface
+(`src/lib/api.ts`): the commands (`startJob`, `loadProject`, `exportSplat`…) and
+their events (`JobEvent`), with WebGPU, WASM and OPFS.
 
 ```bash
 pnpm web:wasm      # clones Brush at the pinned commit, applies web/brush/*.patch and builds (~5 min)
@@ -24,17 +14,17 @@ pnpm web:dev       # http://localhost:1440
 toolchain (Brush's Burn needs ≥ 1.95) without touching `stable`. Browser:
 desktop Chrome or Edge with WebGPU and the `subgroups` feature.
 
-## Differences from the desktop app
+## Platform notes
 
-- **Projects** live in browser storage (OPFS) under `/projects/<video name>`,
-  with the same layout and the same `project.json`; the 3 most recent are kept.
-  Dropping the same video again brings the project back with its finished
-  stages. **Import…** copies a desktop project folder or a COLMAP dataset
-  (`images/` + `sparse/0`).
-- **Files:** "Show in Finder" becomes **Download**.
-- **Masking:** RMBG-1.4, SAM 2.1 (web only, for now) and solid colour. RMBG
-  (176 MB, non-commercial license) is downloaded through the same first-use
-  prompt as on desktop, with its SHA-256 verified. SAM 2.1 (Apache-2.0) is
+- **Projects** live in browser storage (OPFS) under `/projects/<video name>`;
+  the 3 most recent are kept. Dropping the same video again brings the project
+  back with its finished stages. **Import…** copies a project folder (including
+  ones made by the former desktop app) or a COLMAP dataset (`images/` +
+  `sparse/0`).
+- **Files:** exports and packages are **downloaded**.
+- **Masking:** RMBG-1.4, SAM 2.1 and solid colour. RMBG (176 MB,
+  non-commercial license) is downloaded through a first-use prompt, with its
+  SHA-256 verified. SAM 2.1 (Apache-2.0) is
   downloaded on first use: 84 MB in fp16 where the GPU has `shader-f16` (Chrome
   on Mac does), 165 MB in fp32 elsewhere. With it, the player gets a ⌖ button to
   mark the subject (on the video or on dropped images): drag for a box, click
@@ -48,16 +38,14 @@ desktop Chrome or Edge with WebGPU and the `subgroups` feature.
   SAM 2.1 and solid colour and follows the marks: the encoder runs once per
   frame and each new point only runs the decoder. The preview can be hidden,
   which frees the GPU before a job.
-- **Poses:** own SfM (below); the COLMAP options (features, camera model, flat
-  orbit) are hidden.
-- **Export:** the same as desktop (PLY or SOG, pruning, SH band trimming and
-  decimation), ported to TypeScript in `web/src/export/` and running in a
-  worker. Lossless WebP comes from splat-transform's libwebp WASM build (MIT,
+- **Poses:** own SfM (below).
+- **Export:** PLY or SOG, pruning, SH band trimming and decimation, in
+  TypeScript in `web/src/export/` and running in a worker. Lossless WebP comes from splat-transform's libwebp WASM build (MIT,
   `web/src/export/webp/`), because canvas premultiplies alpha.
 - **Video fps:** read from the MP4/MOV container, like ffprobe; for other
   formats it is measured during playback.
-- **Reduce haze** (advanced training settings, off by default): exists only
-  here, see [below](#reduce-haze).
+- **Reduce haze** (advanced training settings, off by default): see
+  [below](#reduce-haze).
 
 ## What it took to train in the browser (and fast)
 
@@ -103,14 +91,13 @@ desktop Chrome or Edge with WebGPU and the `subgroups` feature.
 1. **Frames:** the browser decodes the video (one seek per candidate). Uniform
    candidates across the range (`frames × candidates`, at most the video's
    fps), a scale that fits the max side without upscaling, and the sharpest of
-   each window (variance of the Laplacian on a 640 px thumbnail, Rec.709 luma),
-   as in `frames.rs`. Each seek goes half a frame ahead to land on the frame
+   each window (variance of the Laplacian on a 640 px thumbnail, Rec.709 luma).
+   Each seek goes half a frame ahead to land on the frame
    closest to the timestamp, like ffmpeg's `fps` filter.
 2. **Masking:**
-   - **RMBG-1.4:** ONNX Runtime Web on WebGPU, with the same pre/post-processing
-     as `masks.rs` and the model from the same pinned URL as the installer.
-     Vision is macOS-only, BiRefNet is slow even on a dedicated GPU and MODNet
-     (people) was left out by design.
+   - **RMBG-1.4:** ONNX Runtime Web on WebGPU, with the model from a pinned URL
+     (SHA-256 checked). BiRefNet is slow even on a dedicated GPU and MODNet
+     only handles people, so both were left out.
    - **SAM 2.1 tiny** (`sam2.ts`): segments the marked frame and propagates the
      mask forwards and then backwards using the model's memory, so the cutout
      doesn't change from frame to frame the way RMBG's does, which decides each
@@ -132,19 +119,18 @@ desktop Chrome or Edge with WebGPU and the `subgroups` feature.
      memory (5 → 4); the fp16 build already has no such `If`.
      `scripts/web-bench/sam2.mjs` runs the tracker over a folder of frames and
      saves the logits (`--variant fp16|fp32`).
-   - **Solid colour** and **despill:** exact ports of the Rust code (tests in
-     `web/src/pipeline/*.test.ts`, `pnpm test:web`, with the cases from
-     `masks.rs`).
-   - **Edge decontamination:** port of `decontam.rs` (`web/src/pipeline/decontam.ts`,
-     same tests), ~0.3 s per 4K frame.
+   - **Solid colour** and **despill:** tests in `web/src/pipeline/*.test.ts`
+     (`pnpm test:web`).
+   - **Edge decontamination:** `web/src/pipeline/decontam.ts` (tested), ~0.3 s
+     per 4K frame.
    - `dataset_alpha`: RGBA PNGs with straight alpha (own encoder, since canvas
      premultiplies alpha) and `images.bin` with `.png` names. **Also use the cutout for poses** drops features where the mask is 0.
 3. **Poses:** SfM without COLMAP (`web/src/sfm/`):
    1. **Features:** AKAZE from OpenCV.js (`@techstark/opencv-js` 4.12, which
       ships neither SIFT nor the epipolar geometry functions) in Web Workers.
    2. **Matching:** brute-force Hamming distance in a WebGPU compute shader,
-      with ratio test and mutual check; same pairs as the desktop app (preset
-      window + 16/32/64 jumps, closed orbit).
+      with ratio test and mutual check; pairs from the preset window plus
+      16/32/64 jumps, closing the orbit.
    3. **Verification:** fundamental matrix by RANSAC (normalized 8-point).
    4. **Incremental reconstruction** in a worker: union-find tracks, initial
       pair chosen by parallax (≥ 2°) and number of points, with up to 3 attempts
@@ -172,10 +158,7 @@ texture bake is plain WebGPU (`web/src/mesh/bake.ts`).
 ray's weight onto a single surface. It only runs in masked training, every 2
 steps from 25% of the run, rendered inside the mask's box
 (`web/src/pipeline/train-config.ts`). Without masks it is never applied: fog
-sheets next to the cameras dominate the term and training collapses. The
-desktop app doesn't have it, because its Brush sidecar is built without that
-option: the toggle only shows on hosts with `depthDistortion`, and the desktop
-drops the field from web packages.
+sheets next to the cameras dominate the term and training collapses.
 
 It is meant for AI-generated videos. Their frames don't quite agree with each
 other, and that leaves semi-transparent layers around the subject that show up
@@ -229,8 +212,8 @@ multi-mask mode, a multi-part subject can lose one of its parts when its
 appearance changes (PyTorch does the same).
 
 The chroma key doesn't reach IoU 1 because the cube has blue-green patches that
-touch its edge and get removed together with the screen (the desktop app does
-the same); RMBG + despill keeps them. In a hidden panel or tab the browser
+touch its edge and get removed together with the screen; RMBG + despill keeps
+them. In a hidden panel or tab the browser
 throttles seeks and frame extraction gets ~10× slower.
 
 Poses measured on a synthetic 120-frame 960×720 orbit with known ground-truth
@@ -270,9 +253,9 @@ or recompute poses from the right stage. Modes: `video` (video to splat, with
 `--mask chroma|rmbg`), `poses`, `train` and `profile` (CPU profile of training;
 with `pnpm web:wasm --profiling` it includes the WASM function names).
 
-The browser SfM hasn't been tested on real AI videos yet (blur, low texture,
-moving elements), where boosted SIFT and COLMAP's global mapper make a
-difference.
+Real AI videos (blur, low texture, moving elements) are harder than this
+synthetic orbit; repetitive floors were the main cause of lost cameras until
+tracks stopped merging features of the same image.
 
 ## Deploying to Cloudflare
 

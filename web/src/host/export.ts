@@ -1,5 +1,4 @@
-// Web export: the same pipeline as the desktop (web/src/export/, a port of
-// src-tauri/src/export) in a worker.
+// Export: the pipeline in web/src/export/, run in a worker.
 
 import type { ExportOptions, ExportStats, Msg, SplatInfo } from "../../../src/lib/api";
 import type { ExportReply, ExportRequest } from "../export/export.worker";

@@ -1,5 +1,5 @@
-// Frames → masks → poses → training in the browser, with the same events,
-// resume rules and project.json as src-tauri/src/pipeline.rs.
+// Frames → masks → poses → training in the browser: stage events, resume
+// rules and project.json.
 
 import type { JobConfig, JobEvent, MaskOptions, Msg, ProjectState, Stage } from "../../../src/lib/api";
 import { train } from "../brush";

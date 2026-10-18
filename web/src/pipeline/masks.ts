@@ -1,5 +1,5 @@
-// Cutout (masks, 255 = subject) and transparent-background dataset, like
-// src-tauri/src/masks.rs. On the web: RMBG-1.4, SAM 2.1 (web only) and solid color.
+// Cutout (masks, 255 = subject) and transparent-background dataset: RMBG-1.4,
+// SAM 2.1 and solid color.
 
 import type { MaskOptions, MaskStats, Msg, SubjectPrompt } from "../../../src/lib/api";
 import { applyDespill, backgroundColor, borderKey, chromaMask, despillFor, type RGB } from "./chroma";

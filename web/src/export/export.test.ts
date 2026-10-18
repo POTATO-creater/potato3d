@@ -1,4 +1,4 @@
-// Same cases as the tests in src-tauri/src/export (ply.rs, sog.rs, decimate.rs).
+// Export cases: ply, sog and decimation.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";

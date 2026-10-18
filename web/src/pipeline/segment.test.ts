@@ -1,4 +1,4 @@
-// Same pre/post-processing cases as the tests in src-tauri/src/masks.rs.
+// RMBG pre/post-processing cases.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { inputSize, MODELS, postprocess, preprocess } from "./segment.ts";

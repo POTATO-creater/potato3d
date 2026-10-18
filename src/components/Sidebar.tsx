@@ -1,13 +1,13 @@
 import { useRef, type ReactNode } from "react";
-import { fileUrl, host, type ImageSet, type MaskOptions, type Settings, type Stage, type SubjectPrompt, type VideoInfo } from "../lib/api";
+import { fileUrl, type ImageSet, type MaskOptions, type Settings, type Stage, type SubjectPrompt, type VideoInfo } from "../lib/api";
 import { promptInTrim } from "../lib/prompt";
 import { PRESETS, REDUCE_HAZE_WEIGHT, type PresetId } from "../lib/presets";
-import { Field, NumField, Segmented, Select, Toggle } from "./fields";
+import { Field, NumField, Segmented, Toggle } from "./fields";
 import { VideoPlayer } from "./VideoPlayer";
 import { ImageSequence } from "./ImageSequence";
 import { MasksPanel } from "./MasksPanel";
 import type { PreviewSource } from "./MaskPreview";
-import { basename, fileManager, type Os } from "../lib/platform";
+import { basename } from "../lib/platform";
 import { fmtBytes } from "../lib/format";
 import type { PackageStatus } from "../lib/batch";
 import { useI18n } from "../i18n";
@@ -15,7 +15,6 @@ import { useI18n } from "../i18n";
 export type { PackageStatus };
 
 interface Props {
-  os: Os | undefined;
   /** Item selector, above the preview (with more than one input open). */
   batch?: ReactNode;
   /** Something is open: picking files adds to the batch. */
@@ -34,7 +33,6 @@ interface Props {
   onPickFolder: () => void;
   projectDir: string | null;
   onPickProject: () => void;
-  onRevealProject: () => void;
   /** Save the project as .gorbit; missing when there is nothing to save yet. */
   onSavePackage?: () => void;
   onOpenPackage: () => void;
@@ -70,16 +68,13 @@ export function Sidebar(p: Props) {
   const { t } = useI18n();
   const ts = t.sidebar;
   const videoEl = useRef<HTMLVideoElement>(null);
-  // On the web projects live in browser storage and poses come from our own
-  // SfM (no COLMAP options).
-  const web = p.os === "web";
   const s = p.settings;
   const set = <K extends keyof Settings>(k: K, patch: Partial<Settings[K]>) =>
     p.onSettings({ ...s, [k]: { ...s[k], ...patch } });
   const locked = p.running;
   const settingsLocked = p.anyRunning;
   // SAM 2.1 marking (on the video or images); invalid outside the trim range.
-  const sam2 = p.os === "web" && p.masks.enabled && p.masks.method === "sam2";
+  const sam2 = p.masks.enabled && p.masks.method === "sam2";
   const prompt = sam2 ? (p.masks.prompt ?? null) : null;
   const promptOutside = !!prompt && !promptInTrim(prompt, p.trim);
   const marking = sam2
@@ -99,7 +94,7 @@ export function Sidebar(p: Props) {
 
   return (
     <aside className="sidebar">
-      <div className="brand" data-tauri-drag-region>
+      <div className="brand">
         <span className="brand-mark" aria-hidden />
         Gausify Orbit
       </div>
@@ -212,18 +207,13 @@ export function Sidebar(p: Props) {
           <header className="panel-head">
             <h2>{ts.project}</h2>
             <span className="panel-actions">
-              {!web && (
-                <button className="link" onClick={p.onRevealProject} disabled={!p.projectDir}>
-                  {fileManager(t, p.os)}
-                </button>
-              )}
               <button
                 className="link"
                 onClick={p.onPickProject}
                 disabled={locked || !(p.videoPath || p.imageSet)}
-                title={web ? ts.importTitle : undefined}
+                title={ts.importTitle}
               >
-                {web ? ts.importProject : ts.changeProject}
+                {ts.importProject}
               </button>
             </span>
           </header>
@@ -251,7 +241,6 @@ export function Sidebar(p: Props) {
         </section>
 
         <MasksPanel
-          os={p.os}
           masks={p.masks}
           onMasks={p.onMasks}
           onApplyAll={p.onMasksToAll}
@@ -294,38 +283,10 @@ export function Sidebar(p: Props) {
                   onChange={(v) => set("frames", { oversample: v })} />
               </div>
 
-              <h3>{web ? ts.poses : ts.posesColmap}</h3>
-              {!web && (
-              <Field
-                label={ts.features}
-                hint={ts.featuresHint[s.poses.features]}
-              >
-                <Select
-                  value={s.poses.features}
-                  onChange={(features) => set("poses", { features })}
-                  options={[
-                    { value: "sift", ...ts.featureOptions.sift },
-                    { value: "siftPlus", ...ts.featureOptions.siftPlus },
-                    { value: "aliked", ...ts.featureOptions.aliked },
-                  ]}
-                />
-              </Field>
-              )}
+              <h3>{ts.poses}</h3>
               <div className="grid2">
                 <NumField label={ts.matchWindow} value={s.poses.matchWindow} min={3} max={40}
                   onChange={(v) => set("poses", { matchWindow: v })} />
-                {!web && (
-                <Field label={ts.camera}>
-                  <Select
-                    value={s.poses.cameraModel}
-                    onChange={(cameraModel) => set("poses", { cameraModel })}
-                    options={[
-                      { value: "SIMPLE_PINHOLE", label: ts.simplePinhole },
-                      { value: "PINHOLE", label: ts.pinhole },
-                    ]}
-                  />
-                </Field>
-                )}
               </div>
               <Toggle label={ts.closedLoop} hint={ts.closedLoopHint} checked={s.poses.closedLoop}
                 onChange={(v) => set("poses", { closedLoop: v })} />
@@ -356,19 +317,11 @@ export function Sidebar(p: Props) {
                 onChange={(v) => set("train", { ssimWeight: v ? 0.2 : 0 })}
               />
               <Toggle
-                label={ts.smooth}
-                hint={ts.smoothHint}
-                checked={s.train.scaleLossWeight != null}
-                onChange={(v) => set("train", { scaleLossWeight: v ? 1e-6 : undefined })}
+                label={ts.reduceHaze}
+                hint={ts.reduceHazeHint}
+                checked={(s.train.depthDistortionWeight ?? 0) > 0}
+                onChange={(v) => set("train", { depthDistortionWeight: v ? REDUCE_HAZE_WEIGHT : undefined })}
               />
-              {host.depthDistortion && (
-                <Toggle
-                  label={ts.reduceHaze}
-                  hint={ts.reduceHazeHint}
-                  checked={(s.train.depthDistortionWeight ?? 0) > 0}
-                  onChange={(v) => set("train", { depthDistortionWeight: v ? REDUCE_HAZE_WEIGHT : undefined })}
-                />
-              )}
               <Toggle
                 label={ts.psnr}
                 hint={ts.psnrHint}

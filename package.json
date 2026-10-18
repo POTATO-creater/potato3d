@@ -6,15 +6,7 @@
   "repository": "github:obraia/gausify-orbit",
   "type": "module",
   "scripts": {
-    "setup:tools": "node scripts/setup-tools.mjs",
-    "dev": "vite",
-    "build": "tsc && vite build",
-    "preview": "vite preview",
-    "tauri": "tauri",
-    "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
-    "dev:mock": "VITE_MOCK=1 vite --port 1430 --strictPort",
     "web:wasm": "node scripts/build-brush-web.mjs",
-    "brush:native": "node scripts/build-brush-web.mjs --native",
     "web:dev": "vite --config web/vite.config.ts",
     "web:build": "vite build --config web/vite.config.ts",
     "web:deploy": "pnpm web:build && wrangler deploy",
@@ -22,9 +14,6 @@
   },
   "dependencies": {
     "@sparkjsdev/spark": "^2.3.1",
-    "@tauri-apps/api": "^2",
-    "@tauri-apps/plugin-dialog": "^2.8.1",
-    "@tauri-apps/plugin-opener": "^2",
     "@techstark/opencv-js": "4.12.0-release.1",
     "mediabunny": "1.60.0",
     "meshoptimizer": "1.3.0",
@@ -38,7 +27,6 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20260930.2",
-    "@tauri-apps/cli": "^2",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@types/three": "^0.186.0",

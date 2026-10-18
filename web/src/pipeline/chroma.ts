@@ -1,4 +1,4 @@
-// Chroma key and despill: port of src-tauri/src/masks.rs (mod chroma and
+// Chroma key and despill (mod chroma and
 // Despill), same formulas and constants. Masks: 255 = subject.
 
 export type RGB = [number, number, number];

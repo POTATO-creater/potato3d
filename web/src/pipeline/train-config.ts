@@ -1,14 +1,12 @@
 // Brush training config (`TrainStreamConfig` fields, flattened JSON,
-// kebab-case) for the app's TrainOptions. The desktop builds its brush-cli flags
-// in src-tauri/src/brush.rs (`train_args`), without depth distortion.
+// kebab-case) for the app's TrainOptions.
 
 import type { TrainOptions } from "../../../src/lib/api";
 
 /** Background for masked training: a uniform color drawn every step (0.5 ± 0.5).
  *  On Brush's black ± 0.1, dark semi-transparent layers outside the silhouette
  *  cost almost nothing and become a ghost silhouette around the subject; with a
- *  varying background, any spurious transparency shows up in the loss. Same
- *  values in src-tauri/src/brush.rs. */
+ *  varying background, any spurious transparency shows up in the loss. */
 export const MASKED_BACKGROUND = { color: [0.5, 0.5, 0.5], noise: 0.5 };
 
 /** When depth distortion ("Reduce haze", web/brush/geom.patch) runs during
@@ -29,10 +27,9 @@ export function trainConfig(o: TrainOptions, masked: boolean): Record<string, un
     "ssim-weight": Math.max(o.ssimWeight, 0),
     "eval-split-every": o.evalSplitEvery || null,
   };
-  // Only with evaluation on, as on desktop: Brush computes iter % eval-every
+  // Only with evaluation on: Brush computes iter % eval-every
   // even without eval views, and 0 there crashes training (panic in WASM).
   if (o.evalSplitEvery) set["eval-every"] = o.exportEvery;
-  if (o.scaleLossWeight != null) set["scale-loss-weight"] = o.scaleLossWeight;
   if (o.contribPruneMinViews) set["contrib-prune-min-views"] = o.contribPruneMinViews;
   if (o.contribPruneRatio != null) set["contrib-prune-ratio"] = o.contribPruneRatio;
   if (o.contribPruneStart != null) set["contrib-prune-start"] = o.contribPruneStart;

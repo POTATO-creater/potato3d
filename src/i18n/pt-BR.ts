@@ -36,7 +36,6 @@ export const ptBR = {
     optional: "opcional",
     dropToStart: "Arraste um vídeo, imagens ou uma pasta de frames para a janela para começar.",
     maskModel: "Modelo de recorte",
-    masker: "Recortador",
   },
 
   platform: {
@@ -44,35 +43,21 @@ export const ptBR = {
     yourImages: "suas imagens · nitidez",
     solidColor: "cor sólida",
     webPoses: "AKAZE · WebGPU · SfM incremental",
-    hwDecode: "decodificação por hardware",
-    globalMapper: "mapeador global",
     webgpuChrome: "Chrome ou Edge com WebGPU",
     webgpuBrowser: "navegador com WebGPU",
-    installTools: "Instalar ferramentas",
-    packageManager: (tool: string) => `instale ${tool} pelo gerenciador de pacotes`,
-    fileManager: "gerenciador de arquivos",
     download: (what?: string) => `Baixar${what ? ` ${what}` : ""}`,
-    reveal: (fileManager: string, what?: string) => `Mostrar${what ? ` ${what}` : ""} no ${fileManager}`,
     blurbs: {
-      web: {
-        frames: "o navegador decodifica o vídeo (ou lê as suas imagens) e escolhe os frames mais nítidos.",
-        masks: "isola o sujeito para o splat sair sem o fundo.",
-        poses: "features AKAZE, matching circular na GPU (fecha a órbita) e SfM incremental.",
-        train: "Brush em WebAssembly + WebGPU, com prévias ao vivo aqui.",
-      },
-      desktop: {
-        frames: "ffmpeg decodifica o vídeo por hardware (ou lê as suas imagens) e escolhe os frames mais nítidos.",
-        masks: "isola o sujeito para o splat sair sem o fundo.",
-        poses: "COLMAP com matching circular (fecha a órbita) e mapeador global.",
-        train: "Brush na GPU, com prévias ao vivo aqui.",
-      },
+      frames: "o navegador decodifica o vídeo (ou lê as suas imagens) e escolhe os frames mais nítidos.",
+      masks: "isola o sujeito para o splat sair sem o fundo.",
+      poses: "features AKAZE, matching circular na GPU (fecha a órbita) e SfM incremental.",
+      train: "Brush em WebAssembly + WebGPU, com prévias ao vivo aqui.",
     },
   },
 
   presets: {
     preview: { label: "Prévia", hint: "Confere rápido se o vídeo reconstrói" },
     balanced: { label: "Equilibrado", hint: "Bom ponto de partida para a maioria dos vídeos" },
-    quality: { label: "Qualidade", hint: "Mais frames, 30k passos e perda SSIM; bem mais lento no Mac" },
+    quality: { label: "Qualidade", hint: "Mais frames, 30k passos e perda SSIM; bem mais lento" },
   },
 
   sidebar: {
@@ -116,7 +101,6 @@ export const ptBR = {
     project: "Projeto",
     importProject: "Importar…",
     importTitle: "Importa uma pasta de projeto do Gausify Orbit ou um dataset COLMAP (images/ + sparse/0)",
-    changeProject: "Alterar…",
     savePackage: "Salvar pacote…",
     savePackageTitle:
       "Salva o projeto num arquivo .gorbit (frames, recorte, poses, splat, vídeo e ajustes) para abrir depois ou em outra máquina. Funciona no meio do processamento: leva as etapas já prontas.",
@@ -135,22 +119,7 @@ export const ptBR = {
     candidates: "Candidatos/frame",
     candidatesHint: "escolhe o mais nítido",
     poses: "Poses",
-    posesColmap: "Poses (COLMAP)",
-    features: "Features",
-    featuresHint: {
-      sift: "se registrar < 95% das câmeras, repete com o reforçado",
-      siftPlus: "acha pontos em cabelo, pele e fundo desfocado (~2× o tempo)",
-      aliked: "registra bem, mas ~10× mais lento na CPU",
-    },
-    featureOptions: {
-      sift: { label: "SIFT (rápido)" },
-      siftPlus: { label: "SIFT reforçado", hint: "~2× o tempo" },
-      aliked: { label: "ALIKED + LightGlue", hint: "~10× mais lento na CPU" },
-    },
     matchWindow: "Vizinhos casados",
-    camera: "Câmera",
-    simplePinhole: "Pinhole simples",
-    pinhole: "Pinhole (fx ≠ fy)",
     closedLoop: "Órbita fechada (360°)",
     closedLoopHint: "casa o fim com o começo",
     flatOrbit: "Forçar órbita plana",
@@ -165,9 +134,7 @@ export const ptBR = {
     previewEvery: "Prévia a cada",
     stepsSuffix: "passos",
     ssim: "Perda SSIM",
-    ssimHint: "detalhes um pouco mais finos, mas ~3× mais lento no Mac",
-    smooth: "Suavizar áreas não filmadas",
-    smoothHint: "menos riscos e cores estranhas no topo; −1,3 dB de detalhe",
+    ssimHint: "detalhes mais finos; treino ~10% mais lento",
     reduceHaze: "Reduzir névoa",
     reduceHazeHint: "menos névoa em volta do sujeito em ângulos novos; só com recorte; ~25% mais lento",
     psnr: "Medir qualidade (PSNR)",
@@ -204,9 +171,6 @@ export const ptBR = {
           "SAM 2.1 da Meta na GPU: segue o mesmo objeto por todos os frames, sem variar entre um e outro. " +
           "Marque o sujeito no vídeo; sem marcação, usa o que está no centro. Baixa 84 MB na primeira vez (165 MB em GPUs sem fp16). Licença Apache-2.0.",
       },
-      people: { label: "Pessoas", hint: "MODNet na GPU: rápido, mas só reconhece pessoas." },
-      general: { label: "Objetos", hint: "BiRefNet: qualquer sujeito, bem mais lento." },
-      auto: { label: "Vision", hint: "Recorte nativo do macOS, na GPU: qualquer sujeito." },
     },
     bgColor: "Cor do fundo",
     autoColor: "Detectar a cor pelas bordas",
@@ -402,25 +366,16 @@ export const ptBR = {
   setup: {
     title: "Primeiro uso: faltam ferramentas",
     recheck: "Verificar de novo",
-    nvidia: "GPU NVIDIA detectada: o COLMAP com CUDA usa a placa para extrair e casar features. ",
-    noNvidia: "Nenhuma GPU NVIDIA detectada: o COLMAP roda na CPU. ",
     rmbgLicense: "O RMBG-1.4 é da BRIA AI, com licença só para uso não comercial. ",
     storedInBrowser: "Os arquivos são conferidos por SHA-256 e ficam guardados no navegador.",
-    storedLocally: "Os arquivos são conferidos por SHA-256 e ficam na pasta de dados do usuário.",
     install: (size: string) => `Instalar ferramentas (${size})`,
     checking: "Verificando o que precisa ser baixado…",
     planError: (e: string) => `Não foi possível preparar a instalação: ${e}`,
     queued: "na fila",
-    extracting: "extraindo…",
     ready: "pronto",
-    /** Followed by `pnpm setup:tools` as code. */
-    brushDev: "O Brush deveria vir junto com o app. Em desenvolvimento, rode",
-    visionNote: "O recortador (Vision) vem com o app e exige macOS 14 ou superior.",
     /** Labels of downloadable models (other packages use the tool name). */
     packages: {
       rmbg: "Recorte RMBG-1.4",
-      modnet: "Recorte de pessoas (MODNet)",
-      birefnet: "Recorte de objetos (BiRefNet)",
     } as Record<string, string>,
   },
 

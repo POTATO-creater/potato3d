@@ -1,5 +1,4 @@
-// Project package (.gorbit) on the web: the same format as
-// src-tauri/src/package.rs (a ZIP with the project folder layout, relative
+// Project package (.gorbit): a ZIP with the project folder layout, relative
 // paths in project.json and a manifest.json), read and written with ./zip.ts.
 // The source is restored only into the tab's memory, like a video dropped on the window.
 

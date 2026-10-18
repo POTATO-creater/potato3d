@@ -30,7 +30,8 @@
 // --contrib N (negative-contribution pruning, judging splats that contributed in
 // ≥ N views; tuned by --contrib-ratio R and --contrib-start F), --opac-solid W,
 // --opac-binary W and --volume W (opacity and volume regularization),
-// --reduce-haze ("Reduce haze": depth distortion, masked runs only). Chrome
+// --reduce-haze ("Reduce haze": depth distortion, masked runs only), --ssim W
+// (SSIM loss weight; Preview has 0). Chrome
 // comes from CHROME (default: the macOS one in /Applications).
 //
 // The UI selectors below match pt-BR text, so the script forces the pt-BR locale.
@@ -174,6 +175,7 @@ if (opt("opac-solid")) settings.train.opacSolidWeight = Number(opt("opac-solid")
 if (opt("opac-binary")) settings.train.opacBinaryWeight = Number(opt("opac-binary"));
 if (opt("volume")) settings.train.volumeRegWeight = Number(opt("volume"));
 if (flag("reduce-haze")) settings.train.depthDistortionWeight = REDUCE_HAZE_WEIGHT;
+if (opt("ssim")) settings.train.ssimWeight = Number(opt("ssim"));
 const mask = opt("mask");
 const masks = {
   enabled: !!mask,

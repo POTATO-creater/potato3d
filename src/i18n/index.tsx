@@ -8,8 +8,7 @@ import { CATALOGS, initialLocale, LOCALE_KEY as STORE_KEY, type Args, type Local
 
 export { CATALOGS, LOCALES, type Locale, type Messages } from "./catalogs";
 
-/** Catalog text for a `Msg`; plain text passes through (events recorded
- *  before translatable messages existed, used by `dev:mock`). */
+/** Catalog text for a `Msg`; plain text passes through. */
 export function formatMsg(t: Messages, m: Msg | string | null | undefined): string {
   if (!m) return "";
   if (typeof m === "string") return m;

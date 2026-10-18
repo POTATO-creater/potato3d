@@ -1,4 +1,4 @@
-// Post-SfM orbit corrections, the same as src-tauri/src/scene.rs: flat orbit
+// Post-SfM orbit corrections: flat orbit
 // (flatten_orbit) and inferred poses for frames the reconstruction did not
 // register (fill_missing).
 

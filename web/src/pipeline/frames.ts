@@ -1,4 +1,4 @@
-// Video → frames in the browser, with the same logic as src-tauri/src/frames.rs:
+// Video → frames in the browser:
 // uniform candidates over the range (targetFrames × oversample, capped at the
 // video fps), scaled to fit maxSide × maxSide without upscaling, and the
 // sharpest candidate (variance of the Laplacian) of each window becomes

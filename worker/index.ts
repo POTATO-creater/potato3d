@@ -29,8 +29,7 @@ export interface Env {
   /** Max file size, in MiB (default 95; Cloudflare rejects bodies over
    *  100 MB on the Free and Pro plans). */
   SHARE_MAX_MB?: string;
-  /** Extra CORS-allowed origins, comma-separated (the desktop app is
-   *  already included). */
+  /** Extra CORS-allowed origins, comma-separated (e.g. local dev servers). */
   SHARE_ORIGINS?: string;
   /** Per-IP upload limit (`ratelimits` binding); when absent, no limit. */
   SHARE_LIMITER?: { limit(o: { key: string }): Promise<{ success: boolean }> };
@@ -52,8 +51,6 @@ const ID_LEN = 12;
 const ID_RE = /^[0-9A-Za-z]{12}$/;
 const FORMATS = { sog: "PK\x03\x04", ply: "ply\n" } as const;
 type Format = keyof typeof FORMATS;
-// Desktop app webview on macOS/Linux and on Windows.
-const DESKTOP_ORIGINS = ["tauri://localhost", "http://tauri.localhost", "https://tauri.localhost"];
 
 /** `s/`: default lifetime, covered by the bucket lifecycle rule.
  *  `p/`: lifetime chosen with the access key. */
@@ -273,7 +270,7 @@ function safeName(name: string) {
 function cors(req: Request, env: Env, res: Response): Response {
   const origin = req.headers.get("Origin");
   if (!origin) return res;
-  const allowed = [...DESKTOP_ORIGINS, ...(env.SHARE_ORIGINS ?? "").split(",").map((s) => s.trim())];
+  const allowed = (env.SHARE_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   if (!allowed.includes(origin)) return res;
   const out = new Response(res.body, res);
   out.headers.set("Access-Control-Allow-Origin", origin);

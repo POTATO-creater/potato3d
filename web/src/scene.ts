@@ -1,4 +1,4 @@
-// Port of src-tauri/src/scene.rs: reads the binary COLMAP model from OPFS to
+// Reads the binary COLMAP model from OPFS to
 // frame the viewer and summarize the poses.
 
 import type { ModelStats, SceneFrame } from "../../src/lib/api";

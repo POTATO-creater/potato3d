@@ -30,7 +30,7 @@ export function groupSources(paths: string[], imageExt: string[], packageExt: st
       }
       group.push(p);
     }
-    // Anything else: a folder (desktop; its name may have a dot), expanded by
+    // Anything else: a folder (its name may have a dot), expanded by
     // `probeImages`, which fails if it holds no images.
     else out.push({ kind: "images", paths: [p] });
   }
