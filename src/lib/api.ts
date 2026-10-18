@@ -134,8 +134,6 @@ export interface TrainOptions {
   evalSplitEvery: number;
   /** 0 disables the SSIM loss (~3× faster on Mac). */
   ssimWeight: number;
-  /** Scale regularization; omitted = Brush default. */
-  scaleLossWeight?: number;
   /** Prunes Gaussians whose contribution to the loss, summed over the views
    *  in the refine window, is negative (they hurt more than they help:
    *  ghosts and doubled edges). Minimum views to judge; omitted or 0 = off. */

@@ -166,8 +166,6 @@ export const ptBR = {
     stepsSuffix: "passos",
     ssim: "Perda SSIM",
     ssimHint: "detalhes um pouco mais finos, mas ~3× mais lento no Mac",
-    smooth: "Suavizar áreas não filmadas",
-    smoothHint: "menos riscos e cores estranhas no topo; −1,3 dB de detalhe",
     reduceHaze: "Reduzir névoa",
     reduceHazeHint: "menos névoa em volta do sujeito em ângulos novos; só com recorte; ~25% mais lento",
     psnr: "Medir qualidade (PSNR)",

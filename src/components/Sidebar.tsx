@@ -355,12 +355,6 @@ export function Sidebar(p: Props) {
                 checked={s.train.ssimWeight > 0}
                 onChange={(v) => set("train", { ssimWeight: v ? 0.2 : 0 })}
               />
-              <Toggle
-                label={ts.smooth}
-                hint={ts.smoothHint}
-                checked={s.train.scaleLossWeight != null}
-                onChange={(v) => set("train", { scaleLossWeight: v ? 1e-6 : undefined })}
-              />
               {host.depthDistortion && (
                 <Toggle
                   label={ts.reduceHaze}

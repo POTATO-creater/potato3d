@@ -30,11 +30,6 @@ pub struct TrainOptions {
     /// (32.6 dB at 15k steps vs 31.8 dB at 7k, both ~9 min).
     #[serde(default = "default_ssim")]
     pub ssim_weight: f32,
-    /// Penalized large/elongated splats in Brush 0.3. The pinned Brush
-    /// (scripts/build-brush-web.mjs) no longer has this loss: it is ignored,
-    /// as on the web.
-    #[serde(default)]
-    pub scale_loss_weight: Option<f32>,
     /// Negative-contribution pruning and DeG regularization (web/brush/deg.patch);
     /// see `TrainOptions` in src/lib/api.ts. Omitted or 0 = off.
     #[serde(default)]
@@ -164,9 +159,6 @@ pub async fn run(
         .arg("--export-path")
         .arg(out_dir)
         .args(["--export-name", "splat_{iter}.ply"]);
-    if opts.scale_loss_weight.is_some() {
-        on_log("Option \"smooth\" (scale-loss-weight) does not exist in this Brush version; ignored.");
-    }
 
     // Brush zero-pads `{iter}` to the digit count of the total
     // (splat_02500.ply with 20000 steps), so we scan the folder instead of
@@ -238,6 +230,8 @@ mod tests {
 
     #[test]
     fn masked_training_uses_random_background() {
+        // `scaleLossWeight` (the removed "smooth" option) still comes in older
+        // settings and packages: it must deserialize and do nothing.
         let opts: TrainOptions = serde_json::from_value(serde_json::json!({
             "totalSteps": 15000, "shDegree": 1, "maxSplats": 2000000, "maxResolution": 1920,
             "exportEvery": 2500, "evalSplitEvery": 0, "scaleLossWeight": 1e-6, "opacBinaryWeight": 0.01

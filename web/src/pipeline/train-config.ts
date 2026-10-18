@@ -32,7 +32,6 @@ export function trainConfig(o: TrainOptions, masked: boolean): Record<string, un
   // Only with evaluation on, as on desktop: Brush computes iter % eval-every
   // even without eval views, and 0 there crashes training (panic in WASM).
   if (o.evalSplitEvery) set["eval-every"] = o.exportEvery;
-  if (o.scaleLossWeight != null) set["scale-loss-weight"] = o.scaleLossWeight;
   if (o.contribPruneMinViews) set["contrib-prune-min-views"] = o.contribPruneMinViews;
   if (o.contribPruneRatio != null) set["contrib-prune-ratio"] = o.contribPruneRatio;
   if (o.contribPruneStart != null) set["contrib-prune-start"] = o.contribPruneStart;

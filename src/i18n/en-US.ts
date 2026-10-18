@@ -160,8 +160,6 @@ export const enUS: Messages = {
     stepsSuffix: "steps",
     ssim: "SSIM loss",
     ssimHint: "slightly finer detail, but ~3× slower on a Mac",
-    smooth: "Smooth unfilmed areas",
-    smoothHint: "fewer streaks and odd colors on top; −1.3 dB of detail",
     reduceHaze: "Reduce haze",
     reduceHazeHint: "less haze around the subject in new views; with the cutout only; ~25% slower",
     psnr: "Measure quality (PSNR)",

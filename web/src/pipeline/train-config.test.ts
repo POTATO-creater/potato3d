@@ -43,3 +43,8 @@ test("train config: no distortion keys when the weight is 0 or missing", () => {
 test("presets: reduce haze is off in every preset", () => {
   for (const p of PRESETS) assert.equal(p.settings.train.depthDistortionWeight, undefined, p.id);
 });
+
+test("train config: the removed scaleLossWeight of older settings is ignored", () => {
+  const cfg = trainConfig({ ...opts, scaleLossWeight: 1e-6 } as TrainOptions, true);
+  for (const k of Object.keys(cfg)) assert.ok(!/scale-loss/.test(k), k);
+});
