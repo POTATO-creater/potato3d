@@ -132,7 +132,7 @@ export interface TrainOptions {
   maxResolution: number;
   exportEvery: number;
   evalSplitEvery: number;
-  /** 0 disables the SSIM loss (~3× faster on Mac). */
+  /** SSIM loss weight; 0 disables it (~10% faster training). */
   ssimWeight: number;
   /** Prunes Gaussians whose contribution to the loss, summed over the views
    *  in the refine window, is negative (they hurt more than they help:

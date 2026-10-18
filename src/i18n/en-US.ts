@@ -159,7 +159,7 @@ export const enUS: Messages = {
     previewEvery: "Preview every",
     stepsSuffix: "steps",
     ssim: "SSIM loss",
-    ssimHint: "slightly finer detail, but ~3× slower on a Mac",
+    ssimHint: "finer detail; training ~10% slower",
     reduceHaze: "Reduce haze",
     reduceHazeHint: "less haze around the subject in new views; with the cutout only; ~25% slower",
     psnr: "Measure quality (PSNR)",

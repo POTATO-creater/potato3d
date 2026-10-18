@@ -25,9 +25,8 @@ pub struct TrainOptions {
     pub export_every: u32,
     /// Holds out 1 of every N images to measure PSNR (0 = off).
     pub eval_split_every: u32,
-    /// SSIM loss weight (0 = off). On Metal it triples the per-step cost; in
-    /// the same wall time, no SSIM with more steps gave a higher PSNR
-    /// (32.6 dB at 15k steps vs 31.8 dB at 7k, both ~9 min).
+    /// SSIM loss weight (0 = off). With the pinned Brush it costs ~6–11% more
+    /// training time on Metal (3× with Brush 0.3); see src/lib/presets.ts.
     #[serde(default = "default_ssim")]
     pub ssim_weight: f32,
     /// Negative-contribution pruning and DeG regularization (web/brush/deg.patch);

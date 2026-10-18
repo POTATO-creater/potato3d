@@ -165,7 +165,7 @@ export const ptBR = {
     previewEvery: "Prévia a cada",
     stepsSuffix: "passos",
     ssim: "Perda SSIM",
-    ssimHint: "detalhes um pouco mais finos, mas ~3× mais lento no Mac",
+    ssimHint: "detalhes mais finos; treino ~10% mais lento",
     reduceHaze: "Reduzir névoa",
     reduceHazeHint: "menos névoa em volta do sujeito em ângulos novos; só com recorte; ~25% mais lento",
     psnr: "Medir qualidade (PSNR)",
