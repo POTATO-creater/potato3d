@@ -1,7 +1,7 @@
 import { useRef, type ReactNode } from "react";
-import { fileUrl, type ImageSet, type MaskOptions, type Settings, type Stage, type SubjectPrompt, type VideoInfo } from "../lib/api";
+import { fileUrl, host, type ImageSet, type MaskOptions, type Settings, type Stage, type SubjectPrompt, type VideoInfo } from "../lib/api";
 import { promptInTrim } from "../lib/prompt";
-import { PRESETS, type PresetId } from "../lib/presets";
+import { PRESETS, REDUCE_HAZE_WEIGHT, type PresetId } from "../lib/presets";
 import { Field, NumField, Segmented, Select, Toggle } from "./fields";
 import { VideoPlayer } from "./VideoPlayer";
 import { ImageSequence } from "./ImageSequence";
@@ -361,6 +361,14 @@ export function Sidebar(p: Props) {
                 checked={s.train.scaleLossWeight != null}
                 onChange={(v) => set("train", { scaleLossWeight: v ? 1e-6 : undefined })}
               />
+              {host.depthDistortion && (
+                <Toggle
+                  label={ts.reduceHaze}
+                  hint={ts.reduceHazeHint}
+                  checked={(s.train.depthDistortionWeight ?? 0) > 0}
+                  onChange={(v) => set("train", { depthDistortionWeight: v ? REDUCE_HAZE_WEIGHT : undefined })}
+                />
+              )}
               <Toggle
                 label={ts.psnr}
                 hint={ts.psnrHint}

@@ -113,12 +113,15 @@ function readSession(raw: unknown, current: Session, os: Tools["os"] | undefined
   const s = r.settings;
   const m = r.masks;
   const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  const train = { ...current.settings.train, ...s?.train };
+  // "Reduce haze" from a web package: this host's Brush doesn't have it.
+  if (!host.depthDistortion) delete train.depthDistortionWeight;
   return {
     settings: s
       ? {
           frames: { ...current.settings.frames, ...s.frames },
           poses: { ...current.settings.poses, ...s.poses },
-          train: { ...current.settings.train, ...s.train },
+          train,
         }
       : current.settings,
     masks: m

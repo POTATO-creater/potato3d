@@ -56,6 +56,8 @@ desktop Chrome or Edge with WebGPU and the `subgroups` feature.
   `web/src/export/webp/`), because canvas premultiplies alpha.
 - **Video fps:** read from the MP4/MOV container, like ffprobe; for other
   formats it is measured during playback.
+- **Reduce haze** (advanced training settings, off by default): exists only
+  here, see [below](#reduce-haze).
 
 ## What it took to train in the browser (and fast)
 
@@ -162,6 +164,40 @@ parameters and the measurements behind them are in [mesh.md](mesh.md); the
 Brush side is `web/brush/geom.patch` (geometric losses and
 `Training.renderDepth`). UVs come from xatlas (npm `xatlas-wasm`, MIT), the
 texture bake is plain WebGPU (`web/src/mesh/bake.ts`).
+
+## Reduce haze
+
+**Reduce haze** adds the depth distortion loss of 2DGS
+(`depth-distortion-weight` 10, from `web/brush/geom.patch`), which pulls each
+ray's weight onto a single surface. It only runs in masked training, every 2
+steps from 25% of the run, rendered inside the mask's box
+(`web/src/pipeline/train-config.ts`). Without masks it is never applied: fog
+sheets next to the cameras dominate the term and training collapses. The
+desktop app doesn't have it, because its Brush sidecar is built without that
+option: the toggle only shows on hosts with `depthDistortion`, and the desktop
+drops the field from web packages.
+
+It is meant for AI-generated videos. Their frames don't quite agree with each
+other, and that leaves semi-transparent layers around the subject that show up
+from new angles. It costs about 25% more training time.
+
+On a clean synthetic orbit, off is the default for a reason. The test used
+`synth-orbit.py --green` (90 frames at 960×720), chroma masks, the Preview
+preset and native Brush with 2 seeds:
+- The off-surface weight in novel views dropped from 3.79% to 1.55%. That is
+  the share of each subject pixel's weight more than 3% of the depth away from
+  the pixel's median surface.
+- There those layers were real detail, so PSNR dropped from 30.27 to 29.51 dB.
+
+Other measurements:
+- Every 2 steps instead of every step costs about half the extra time and
+  removes slightly less haze. Half-resolution renders kept the haze reduction
+  but saved less time.
+- Weight 100 hardened the silhouettes.
+- In the browser (headless Chrome on an M4, the same synthetic orbit,
+  Preview), training went from 2 min 44 s to 3 min 29 s (+27%). PSNR went from
+  30.25 to 29.69 dB, in line with native Brush on the same dataset
+  (30.26 → 29.60).
 
 ## Benchmarks
 

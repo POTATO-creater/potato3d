@@ -162,6 +162,8 @@ export const es: Messages = {
     ssimHint: "detalles un poco más finos, pero ~3× más lento en Mac",
     smooth: "Suavizar áreas no filmadas",
     smoothHint: "menos rayas y colores raros arriba; −1,3 dB de detalle",
+    reduceHaze: "Reducir neblina",
+    reduceHazeHint: "menos neblina alrededor del sujeto en ángulos nuevos; solo con recorte; ~25% más lento",
     psnr: "Medir calidad (PSNR)",
     psnrHint: "aparta 1 de cada 16 frames para evaluación",
     runFrom: "Ejecutar desde",

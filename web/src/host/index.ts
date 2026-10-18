@@ -350,4 +350,5 @@ export const webHost: Host = {
   onUpdate,
   applyUpdate,
   maskPreview,
+  depthDistortion: true,
 };
