@@ -39,7 +39,15 @@ const TETS = [
 const DIRS = [
   [1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 1, 0], [1, 0, 1], [0, 1, 1], [1, 1, 1],
 ];
-const dirIndex = (dx: number, dy: number, dz: number) => DIRS.findIndex((d) => d[0] === dx && d[1] === dy && d[2] === dz);
+/** Index in DIRS of the direction dx + 2·dy + 4·dz. */
+const DIR_OF = (() => {
+  const t = new Int8Array(8).fill(-1);
+  DIRS.forEach(([x, y, z], i) => (t[x + 2 * y + 4 * z] = i));
+  return t;
+})();
+// Flat tables for the hot loops (no nested arrays).
+const CX = Int32Array.from(CORNER, (c) => c[0]), CY = Int32Array.from(CORNER, (c) => c[1]), CZ = Int32Array.from(CORNER, (c) => c[2]);
+const TET = Int8Array.from(TETS.flat());
 
 class Grow {
   data: Float32Array;
@@ -78,6 +86,7 @@ class GrowU32 {
  *  `minWeight` times (or not allocated) are skipped. */
 export function extractSurface(vol: Volume, minWeight = 2): Mesh {
   const B = BLOCK, BV = B * B * B;
+  const { tsdfw, color, voxel } = vol;
   const nb = vol.blocks.length / 3;
   // Block lookup and the lattice bounding box (for edge keys).
   const bkey = blockKey;
@@ -99,16 +108,20 @@ export function extractSurface(vol: Volume, minWeight = 2): Mesh {
   const s = new Float32Array(8), w = new Float32Array(8), rgb = new Float32Array(24);
   const gxs = new Int32Array(8), gys = new Int32Array(8), gzs = new Int32Array(8);
   const local = new Int32Array(8); // voxel index (block-major) per corner
+  // Scratch for emitTet (it runs millions of times: no allocations).
+  const ins = new Int32Array(4), outs = new Int32Array(4);
+  /** Up to two triangles, each as three lattice edges (corner pairs). */
+  const E = new Int32Array(12);
 
   const vertex = (a: number, b: number) => {
     // ordered endpoints: componentwise a ≤ b
     let ia = a, ib = b;
-    if (gxs[a] > gxs[b] || gys[a] > gys[b] || gzs[a] > gzs[b]) [ia, ib] = [b, a];
-    const k = lin(gxs[ia], gys[ia], gzs[ia]) * 7 + dirIndex(gxs[ib] - gxs[ia], gys[ib] - gys[ia], gzs[ib] - gzs[ia]);
+    if (gxs[a] > gxs[b] || gys[a] > gys[b] || gzs[a] > gzs[b]) (ia = b), (ib = a);
+    const k = lin(gxs[ia], gys[ia], gzs[ia]) * 7 + DIR_OF[gxs[ib] - gxs[ia] + 2 * (gys[ib] - gys[ia]) + 4 * (gzs[ib] - gzs[ia])];
     const found = edges.get(k);
     if (found !== undefined) return found;
     const t = s[ia] / (s[ia] - s[ib]);
-    const v = vol.voxel;
+    const v = voxel;
     pos.push3(
       (gxs[ia] + t * (gxs[ib] - gxs[ia])) * v,
       (gys[ia] + t * (gys[ib] - gys[ia])) * v,
@@ -128,7 +141,7 @@ export function extractSurface(vol: Volume, minWeight = 2): Mesh {
   for (let b = 0; b < nb; b++) {
     const bx = vol.blocks[3 * b], by = vol.blocks[3 * b + 1], bz = vol.blocks[3 * b + 2];
     for (let k = 0; k < 8; k++) {
-      const n = index.get(bkey(bx + CORNER[k][0], by + CORNER[k][1], bz + CORNER[k][2]));
+      const n = index.get(bkey(bx + CX[k], by + CY[k], bz + CZ[k]));
       neighbors[k] = n === undefined ? -1 : n;
     }
     for (let lz = 0; lz < B; lz++) {
@@ -136,7 +149,7 @@ export function extractSurface(vol: Volume, minWeight = 2): Mesh {
         for (let lx = 0; lx < B; lx++) {
           let ok = true, neg = 0;
           for (let k = 0; k < 8 && ok; k++) {
-            let x = lx + CORNER[k][0], y = ly + CORNER[k][1], z = lz + CORNER[k][2];
+            let x = lx + CX[k], y = ly + CY[k], z = lz + CZ[k];
             const nk = (x >= B ? 1 : 0) + (y >= B ? 2 : 0) + (z >= B ? 4 : 0);
             const blk = neighbors[nk];
             if (blk < 0) {
@@ -147,7 +160,7 @@ export function extractSurface(vol: Volume, minWeight = 2): Mesh {
             if (y >= B) y -= B;
             if (z >= B) z -= B;
             const vi = blk * BV + x + B * (y + B * z);
-            const sw = vol.tsdfw[vi];
+            const sw = tsdfw[vi];
             w[k] = F16[sw >>> 16];
             if (w[k] < minWeight) ok = false;
             s[k] = F16[sw & 0xffff] || 1e-6; // exact zeros count as outside
@@ -156,48 +169,59 @@ export function extractSurface(vol: Volume, minWeight = 2): Mesh {
           }
           if (!ok || neg === 0 || neg === 8) continue;
           for (let k = 0; k < 8; k++) {
-            gxs[k] = (bx * B) + lx + CORNER[k][0];
-            gys[k] = (by * B) + ly + CORNER[k][1];
-            gzs[k] = (bz * B) + lz + CORNER[k][2];
-            const c = vol.color[local[k]];
+            gxs[k] = (bx * B) + lx + CX[k];
+            gys[k] = (by * B) + ly + CY[k];
+            gzs[k] = (bz * B) + lz + CZ[k];
+            const c = color[local[k]];
             rgb[3 * k] = (c & 255) / 255;
             rgb[3 * k + 1] = ((c >>> 8) & 255) / 255;
             rgb[3 * k + 2] = ((c >>> 16) & 255) / 255;
           }
-          for (const tet of TETS) emitTet(tet);
+          for (let q = 0; q < 6; q++) emitTet(q);
         }
       }
     }
   }
 
-  function emitTet(t: number[]) {
-    const ins: number[] = [], outs: number[] = [];
-    for (const k of t) (s[k] < 0 ? ins : outs).push(k);
-    if (ins.length === 0 || outs.length === 0) return;
-    // Polygons as lists of lattice edges (corner pairs).
-    let polys: [number, number][][];
-    if (ins.length === 1 || outs.length === 1) {
-      const [lone, others] = ins.length === 1 ? [ins[0], outs] : [outs[0], ins];
-      polys = [others.map((o) => [lone, o] as [number, number])];
+  function emitTet(q: number) {
+    let ni = 0, no = 0;
+    for (let c = 4 * q; c < 4 * q + 4; c++) {
+      const k = TET[c];
+      if (s[k] < 0) ins[ni++] = k;
+      else outs[no++] = k;
+    }
+    if (ni === 0 || no === 0) return;
+    let ntri = 1;
+    if (ni === 1 || no === 1) {
+      const lone = ni === 1 ? ins[0] : outs[0], others = ni === 1 ? outs : ins;
+      for (let e = 0; e < 3; e++) (E[2 * e] = lone), (E[2 * e + 1] = others[e]);
     } else {
       // quad: i0-o0, i0-o1, i1-o1, i1-o0 (a closed loop around the tetrahedron)
-      const [i0, i1] = ins, [o0, o1] = outs;
-      const q: [number, number][] = [[i0, o0], [i0, o1], [i1, o1], [i1, o0]];
-      polys = [[q[0], q[1], q[2]], [q[0], q[2], q[3]]];
+      const i0 = ins[0], i1 = ins[1], o0 = outs[0], o1 = outs[1];
+      (E[0] = i0), (E[1] = o0), (E[2] = i0), (E[3] = o1), (E[4] = i1), (E[5] = o1);
+      (E[6] = i0), (E[7] = o0), (E[8] = i1), (E[9] = o1), (E[10] = i1), (E[11] = o0);
+      ntri = 2;
     }
     // Outward = from the inside corners towards the outside ones. The winding
     // is decided on the lattice-edge midpoints, which never degenerate (the
     // interpolated vertices can, when the surface passes through a corner).
     let gx = 0, gy = 0, gz = 0;
-    for (const k of outs) (gx += gxs[k] / outs.length), (gy += gys[k] / outs.length), (gz += gzs[k] / outs.length);
-    for (const k of ins) (gx -= gxs[k] / ins.length), (gy -= gys[k] / ins.length), (gz -= gzs[k] / ins.length);
-    const mid = ([a, b]: [number, number]) => [gxs[a] + gxs[b], gys[a] + gys[b], gzs[a] + gzs[b]];
-    for (const tri of polys) {
-      const [pa, pb, pc] = tri.map(mid);
-      const ux = pb[0] - pa[0], uy = pb[1] - pa[1], uz = pb[2] - pa[2];
-      const vx = pc[0] - pa[0], vy = pc[1] - pa[1], vz = pc[2] - pa[2];
+    for (let c = 0; c < no; c++) {
+      const k = outs[c];
+      (gx += gxs[k] / no), (gy += gys[k] / no), (gz += gzs[k] / no);
+    }
+    for (let c = 0; c < ni; c++) {
+      const k = ins[c];
+      (gx -= gxs[k] / ni), (gy -= gys[k] / ni), (gz -= gzs[k] / ni);
+    }
+    for (let tri = 0; tri < ntri; tri++) {
+      const e = 6 * tri;
+      // edge midpoints (×2)
+      const ax = gxs[E[e]] + gxs[E[e + 1]], ay = gys[E[e]] + gys[E[e + 1]], az = gzs[E[e]] + gzs[E[e + 1]];
+      const ux = gxs[E[e + 2]] + gxs[E[e + 3]] - ax, uy = gys[E[e + 2]] + gys[E[e + 3]] - ay, uz = gzs[E[e + 2]] + gzs[E[e + 3]] - az;
+      const vx = gxs[E[e + 4]] + gxs[E[e + 5]] - ax, vy = gys[E[e + 4]] + gys[E[e + 5]] - ay, vz = gzs[E[e + 4]] + gzs[E[e + 5]] - az;
       const flip = (uy * vz - uz * vy) * gx + (uz * vx - ux * vz) * gy + (ux * vy - uy * vx) * gz < 0;
-      const [a, b, c] = tri.map(([i, j]) => vertex(i, j));
+      const a = vertex(E[e], E[e + 1]), b = vertex(E[e + 2], E[e + 3]), c = vertex(E[e + 4], E[e + 5]);
       if (a === b || b === c || a === c) continue;
       if (flip) (idx.push(a), idx.push(c), idx.push(b));
       else (idx.push(a), idx.push(b), idx.push(c));

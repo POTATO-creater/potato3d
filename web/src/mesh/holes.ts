@@ -195,16 +195,19 @@ function refine(P: Grow, C: Grow, tris: number[][], h: number, connected: (a: nu
     }
   };
   tris.forEach((_, t) => link(t));
-  const len = (a: number, b: number) => norm(sub(P.data, a, b));
+  const len = (a: number, b: number) => {
+    const d = P.data;
+    return Math.hypot(d[3 * a] - d[3 * b], d[3 * a + 1] - d[3 * b + 1], d[3 * a + 2] - d[3 * b + 2]);
+  };
   /** The other triangle on edge (a, b) of triangle t, rotated so it reads (b, a, d). */
   const across = (t: number, k: number) => {
     const a = tris[t][k], b = tris[t][(k + 1) % 3];
     const l = edges.get(edgeKey(a, b))!;
     if (l.length !== 2) return null;
-    const u = l[0] === t ? l[1] : l[0];
-    const j = tris[u].indexOf(b);
-    if (tris[u][(j + 1) % 3] !== a) return null;
-    return { u, d: tris[u][(j + 2) % 3] };
+    const u = l[0] === t ? l[1] : l[0], tu = tris[u];
+    const j = tu[0] === b ? 0 : tu[1] === b ? 1 : tu[2] === b ? 2 : -1;
+    if (tu[(j + 1) % 3] !== a) return null;
+    return { u, d: tu[(j + 2) % 3] };
   };
 
   for (let round = 0; round < 30; round++) {
@@ -362,11 +365,22 @@ function fair(P: Float64Array, tris: number[][], first: number, end: number, nb:
   for (let v = first; v < end; v++) add(v);
   for (let v = first; v < end; v++) for (const w of neighbours(v)) add(w);
   const nr = ids.length;
-  const rowN: number[][] = [];
-  for (let i = 0; i < nr; i++) rowN.push(neighbours(ids[i]).map(add));
-  const deg = rowN.map((n) => n.length || 1);
+  // rows as flat arrays (row i: items[start[i]..start[i+1]]): the solver
+  // below walks them thousands of times
+  const start = new Int32Array(nr + 1), list: number[] = [];
+  for (let i = 0; i < nr; i++) {
+    for (const j of neighbours(ids[i]).map(add)) list.push(j);
+    start[i + 1] = list.length;
+  }
+  const items = Int32Array.from(list);
+  const deg = new Float64Array(nr);
+  for (let i = 0; i < nr; i++) deg[i] = start[i + 1] - start[i] || 1;
   const diag = new Float64Array(nu);
-  for (let u = 0; u < nu; u++) diag[u] = deg[u] + rowN[u].reduce((s, i) => s + 1 / deg[i], 0);
+  for (let u = 0; u < nu; u++) {
+    let s = 0;
+    for (let k = start[u]; k < start[u + 1]; k++) s += 1 / deg[items[k]];
+    diag[u] = deg[u] + s;
+  }
 
   const full = new Float64Array(ids.length), r = new Float64Array(nr);
   /** out = K D⁻¹ K `full` (K = D − A, the uniform graph Laplacian; zero rows
@@ -374,12 +388,12 @@ function fair(P: Float64Array, tris: number[][], first: number, end: number, nb:
   const apply = (out: Float64Array) => {
     for (let i = 0; i < nr; i++) {
       let s = deg[i] * full[i];
-      for (const j of rowN[i]) s -= full[j];
+      for (let k = start[i]; k < start[i + 1]; k++) s -= full[items[k]];
       r[i] = s;
     }
     for (let u = 0; u < nu; u++) {
       let s = r[u];
-      for (const i of rowN[u]) s -= r[i] / deg[i];
+      for (let k = start[u]; k < start[u + 1]; k++) s -= r[items[k]] / deg[items[k]];
       out[u] = s;
     }
   };
