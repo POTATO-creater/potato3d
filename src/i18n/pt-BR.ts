@@ -168,6 +168,8 @@ export const ptBR = {
     ssimHint: "detalhes um pouco mais finos, mas ~3× mais lento no Mac",
     smooth: "Suavizar áreas não filmadas",
     smoothHint: "menos riscos e cores estranhas no topo; −1,3 dB de detalhe",
+    reduceHaze: "Reduzir névoa",
+    reduceHazeHint: "menos névoa em volta do sujeito em ângulos novos; só com recorte; ~25% mais lento",
     psnr: "Medir qualidade (PSNR)",
     psnrHint: "separa 1 a cada 16 frames para avaliação",
     runFrom: "Executar a partir de",

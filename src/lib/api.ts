@@ -150,6 +150,12 @@ export interface TrainOptions {
   opacBinaryWeight?: number;
   /** Weight of mean Gaussian size relative to the scene (keeps them compact). */
   volumeRegWeight?: number;
+  /** Depth distortion (2DGS, web/brush/geom.patch), set by "Reduce haze":
+   *  pulls each ray's weight onto one surface, removing the haze around the
+   *  subject in novel views. Masked training on hosts with `depthDistortion`
+   *  only; without masks it stays 0 (fog sheets next to the cameras make it
+   *  collapse training). Omitted or 0 = off. */
+  depthDistortionWeight?: number;
   /** Initial learning rate of positions; omitted = Brush default (2e-5).
    *  Retouch fine-tuning uses much less so the splat doesn't fall apart. */
   lrMean?: number;
@@ -493,6 +499,10 @@ export interface Host {
   applyUpdate?(): void;
   /** Web only, for now: mask preview in the panel. */
   maskPreview?: MaskPreviewer;
+  /** Training applies `TrainOptions.depthDistortionWeight` ("Reduce haze").
+   *  Web only: the desktop's Brush sidecar is built without that option, so
+   *  there the toggle is hidden and the field never reaches it. */
+  depthDistortion?: boolean;
 }
 
 // Set once by the entry point (src/main.tsx or web/src/main.tsx), before the

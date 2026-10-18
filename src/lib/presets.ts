@@ -20,6 +20,15 @@ export interface Preset {
 // opacBinaryWeight (web Brush only) is left out: on the same video, with
 // masks, 0.01 took semi-transparent Gaussians from 71% to 14% and removed
 // the haze under the chin, but hardened the edges; the baseline looked better.
+//
+// "Reduce haze" (web only, off in every preset) turns on depth distortion at
+// REDUCE_HAZE_WEIGHT, every 2 steps from 25% of training, masked videos only:
+// less haze around the subject in AI videos for ~25% more training time. On a
+// clean synthetic orbit it cost 0.76 dB, so it stays opt-in. Weight 100
+// hardened the edges; without masks any weight collapses training. See
+// docs/web.md, "Reduce haze".
+export const REDUCE_HAZE_WEIGHT = 10;
+
 export const PRESETS: Preset[] = [
   {
     id: "preview",

@@ -2,6 +2,7 @@
 
 import init, { BrushApp, BrushMessageKind, type BrushMessage, type Training } from "../pkg/brush_js.js";
 import type { Msg, TrainOptions } from "../../src/lib/api";
+import { trainConfig } from "./pipeline/train-config";
 
 export interface GpuInfo {
   vendor: string;
@@ -69,15 +70,8 @@ function enableSubgroupsInShaders(device: GPUDevice) {
     );
 }
 
-/** Background for masked training: a uniform color drawn every step (0.5 ± 0.5).
- *  On Brush's black ± 0.1, dark semi-transparent layers outside the silhouette
- *  cost almost nothing and become a ghost silhouette around the subject; with a
- *  varying background, any spurious transparency shows up in the loss. Same
- *  values in src-tauri/src/brush.rs. */
-export const MASKED_BACKGROUND = { color: [0.5, 0.5, 0.5], noise: 0.5 };
-
-/** `TrainStreamConfig` fields (flattened JSON, kebab-case) that Gausify Orbit
- *  controls; the rest keep Brush's defaults. */
+/** `initial` with the run's options (see trainConfig) and `extra` on top;
+ *  keys this Brush build doesn't have are logged and skipped. */
 function applyOptions(
   cfg: Record<string, unknown>,
   o: TrainOptions,
@@ -85,31 +79,7 @@ function applyOptions(
   log: (s: string) => void,
   extra: Record<string, unknown> = {},
 ) {
-  const set: Record<string, unknown> = {
-    "total-train-iters": o.totalSteps,
-    "sh-degree": Math.min(o.shDegree, 3),
-    "max-splats": o.maxSplats,
-    "max-resolution": o.maxResolution,
-    "ssim-weight": Math.max(o.ssimWeight, 0),
-    "eval-split-every": o.evalSplitEvery || null,
-  };
-  // Only with evaluation on, as on desktop: Brush computes iter % eval-every
-  // even without eval views, and 0 there crashes training (panic in WASM).
-  if (o.evalSplitEvery) set["eval-every"] = o.exportEvery;
-  if (o.scaleLossWeight != null) set["scale-loss-weight"] = o.scaleLossWeight;
-  if (o.contribPruneMinViews) set["contrib-prune-min-views"] = o.contribPruneMinViews;
-  if (o.contribPruneRatio != null) set["contrib-prune-ratio"] = o.contribPruneRatio;
-  if (o.contribPruneStart != null) set["contrib-prune-start"] = o.contribPruneStart;
-  if (o.opacSolidWeight) set["opac-solid-weight"] = o.opacSolidWeight;
-  if (o.opacBinaryWeight) set["opac-binary-weight"] = o.opacBinaryWeight;
-  if (o.volumeRegWeight) set["volume-reg-weight"] = o.volumeRegWeight;
-  if (o.lrMean != null) set["lr-mean"] = o.lrMean;
-  if (o.growthStopIter != null) set["growth-stop-iter"] = o.growthStopIter;
-  if (masked) {
-    set["background-color"] = MASKED_BACKGROUND.color;
-    set["background-noise-strength"] = MASKED_BACKGROUND.noise;
-  }
-  Object.assign(set, extra);
+  const set = { ...trainConfig(o, masked), ...extra };
   for (const [k, v] of Object.entries(set)) {
     if (k in cfg) cfg[k] = v;
     else log(`Option "${k}" does not exist in this Brush version; ignored.`);

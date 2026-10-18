@@ -29,7 +29,8 @@
 // frames; with &sfmDrop=0,20,… in the URL, simulates lost cameras),
 // --contrib N (negative-contribution pruning, judging splats that contributed in
 // ≥ N views; tuned by --contrib-ratio R and --contrib-start F), --opac-solid W,
-// --opac-binary W and --volume W (opacity and volume regularization). Chrome
+// --opac-binary W and --volume W (opacity and volume regularization),
+// --reduce-haze ("Reduce haze": depth distortion, masked runs only). Chrome
 // comes from CHROME (default: the macOS one in /Applications).
 //
 // The UI selectors below match pt-BR text, so the script forces the pt-BR locale.
@@ -39,7 +40,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_CHROMA } from "../../src/lib/api.ts";
-import { presetById } from "../../src/lib/presets.ts";
+import { presetById, REDUCE_HAZE_WEIGHT } from "../../src/lib/presets.ts";
 
 const [mode, url, ...rest] = process.argv.slice(2);
 const opt = (name, def) => {
@@ -172,6 +173,7 @@ if (opt("contrib-start")) settings.train.contribPruneStart = Number(opt("contrib
 if (opt("opac-solid")) settings.train.opacSolidWeight = Number(opt("opac-solid"));
 if (opt("opac-binary")) settings.train.opacBinaryWeight = Number(opt("opac-binary"));
 if (opt("volume")) settings.train.volumeRegWeight = Number(opt("volume"));
+if (flag("reduce-haze")) settings.train.depthDistortionWeight = REDUCE_HAZE_WEIGHT;
 const mask = opt("mask");
 const masks = {
   enabled: !!mask,
