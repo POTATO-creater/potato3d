@@ -10,21 +10,10 @@ export interface Msg {
 export type MsgArg = string | number | Msg;
 
 export interface Tools {
-  ffmpeg: string | null;
-  ffprobe: string | null;
-  colmap: string | null;
-  /** COLMAP with CUDA: extraction, matching and bundle adjustment on the GPU. */
-  colmapCuda: boolean;
+  /** Brush on WebGPU: the GPU's name, or null when WebGPU isn't available. */
   brush: string | null;
-  /** macOS: Vision masker (sidecar). */
-  masker: string | null;
-  /** Windows: masking models downloaded by the installer. */
-  birefnetModel: string | null;
-  modnetModel: string | null;
-  /** Windows and macOS (Apple Silicon): RMBG-1.4, downloaded on demand. */
+  /** RMBG-1.4, downloaded on demand. */
   rmbgModel: string | null;
-  /** "web": everything runs in the browser (web/); the tools above become labels. */
-  os: "macos" | "windows" | "linux" | "web";
 }
 
 export interface VideoInfo {
@@ -57,9 +46,8 @@ export interface FrameOptions {
   trimEnd: number | null;
 }
 
-/** auto: Vision (macOS) / MODNet (Windows) · people: MODNet · general: BiRefNet · rmbg: RMBG-1.4 ·
- *  sam2: SAM 2.1 with propagation across frames (web only) · chroma: solid color */
-export type MaskMethod = "auto" | "people" | "general" | "rmbg" | "sam2" | "chroma";
+/** rmbg: RMBG-1.4 · sam2: SAM 2.1 with propagation across frames · chroma: solid color */
+export type MaskMethod = "rmbg" | "sam2" | "chroma";
 
 /** Where the subject is, for SAM 2.1, in normalized (0–1) frame coordinates. */
 export interface SubjectPrompt {
@@ -114,8 +102,6 @@ export interface MaskStats {
 }
 
 export interface PoseOptions {
-  features: "sift" | "siftPlus" | "aliked";
-  cameraModel: "SIMPLE_PINHOLE" | "PINHOLE";
   matchWindow: number;
   closedLoop: boolean;
   /** Cameras forced onto one plane. Missing in older settings. */
@@ -150,7 +136,7 @@ export interface TrainOptions {
   volumeRegWeight?: number;
   /** Depth distortion (2DGS, web/brush/geom.patch), set by "Reduce haze":
    *  pulls each ray's weight onto one surface, removing the haze around the
-   *  subject in novel views. Masked training on hosts with `depthDistortion`
+   *  subject in novel views. Masked training
    *  only; without masks it stays 0 (fog sheets next to the cameras make it
    *  collapse training). Omitted or 0 = off. */
   depthDistortionWeight?: number;
@@ -249,7 +235,7 @@ export interface ExportStats {
 }
 
 /** Project package (.gorbit): a ZIP of what has been processed so far, to
- *  open on another machine (or in the other app) as a cached project. */
+ *  open on another machine as a cached project. */
 export const PACKAGE_EXT = "gorbit";
 
 export interface PackRequest {
@@ -326,14 +312,11 @@ export interface InstallPackage {
 export interface InstallPlan {
   packages: InstallPackage[];
   totalBytes: number;
-  cuda: boolean;
-  note: string | null;
 }
 
 export type InstallEvent =
   | { type: "started"; id: string; label: string; total: number }
   | { type: "progress"; id: string; done: number; total: number }
-  | { type: "extracting"; id: string }
   | { type: "done"; id: string }
   | { type: "finished" }
   | { type: "failed"; error: string }
@@ -411,8 +394,7 @@ export interface RetouchApi {
   undo(projectDir: string): Promise<ProjectState>;
 }
 
-/** Backend commands: Rust via Tauri on desktop, the TypeScript + WebGPU
- *  pipeline in the web version. */
+/** Backend commands: the TypeScript + WebGPU pipeline (web/src/host). */
 export interface Api {
   detectTools(): Promise<Tools>;
   probeVideo(path: string): Promise<VideoInfo>;
@@ -443,7 +425,7 @@ export interface Api {
   installTools(rmbg: boolean, onEvent: (e: InstallEvent) => void): Promise<void>;
   /** Returns immediately; progress arrives via `onEvent`. */
   startJob(config: JobConfig, onEvent: (e: JobEvent) => void): Promise<void>;
-  /** Retouch with ComfyUI; missing where not yet supported (desktop). */
+  /** Retouch with ComfyUI. */
   retouch?: RetouchApi;
   /** Projects open in the batch, which storage cleanup must keep (web: only
    *  the latest few projects stay in browser storage). */
@@ -466,8 +448,8 @@ export interface MaskPreviewer {
   release(): void;
 }
 
-/** What differs between the desktop app and the web version, beyond the
- *  commands. Paths are opaque to the UI: on the web they point into OPFS. */
+/** The platform the UI runs on, beyond the commands (web/src/host; tests can
+ *  swap it). Paths are opaque to the UI: they point into OPFS. */
 export interface Host {
   api: Api;
   /** Servable URL for a file (with optional cache-buster). */
@@ -481,29 +463,24 @@ export interface Host {
   pickFolder(defaultPath?: string): Promise<string | null>;
   /** Where to save the project package; null if cancelled. */
   pickPackageDest(projectDir: string): Promise<string | null>;
-  /** Shows the file in the file manager (on the web, downloads it). */
+  /** Downloads the file. */
   reveal(path: string): Promise<void>;
   /** Files and folders dropped on the window; returns an unsubscribe function. */
   onDrop(handler: (paths: string[]) => void): () => void;
-  /** File contents (on desktop, via the `asset:` protocol). */
+  /** File contents. */
   readBlob(path: string): Promise<Blob>;
-  /** Share-link server (worker/index.ts): the page's own origin on the web,
-   *  the published address on desktop. */
+  /** Share-link server (worker/index.ts): the page's own origin. */
   shareOrigin: string;
-  /** Web only: notifies when a new app version has been downloaded (service
-   *  worker); returns an unsubscribe function. */
+  /** Notifies when a new app version has been downloaded (service worker);
+   *  returns an unsubscribe function. */
   onUpdate?(handler: () => void): () => void;
   /** Activates the new version and reloads the page. */
   applyUpdate?(): void;
-  /** Web only, for now: mask preview in the panel. */
+  /** Mask preview in the panel. */
   maskPreview?: MaskPreviewer;
-  /** Training applies `TrainOptions.depthDistortionWeight` ("Reduce haze").
-   *  Web only: the desktop's Brush sidecar is built without that option, so
-   *  there the toggle is hidden and the field never reaches it. */
-  depthDistortion?: boolean;
 }
 
-// Set once by the entry point (src/main.tsx or web/src/main.tsx), before the
+// Set once by the entry point (web/src/main.tsx), before the
 // first render.
 export let host: Host;
 export let api: Api;

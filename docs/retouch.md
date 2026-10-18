@@ -109,5 +109,5 @@ in `.claude/launch.json`.
 
 `scripts/web-bench/retouch.mjs` runs the whole flow in headless Chrome against
 `pnpm web:dev` with `WEB_FS_ANY=1`. It opens a `.gorbit`, creates the clip,
-restores, applies and saves the splat. The desktop app's panel can't be used
-for this, since WebGPU training doesn't run there.
+restores, applies and saves the splat. Headless Chrome avoids the throttling
+of hidden tabs, where WebGPU training stalls.

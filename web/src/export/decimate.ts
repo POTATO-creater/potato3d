@@ -1,6 +1,6 @@
-// Decimation: reduces the Gaussian count by merging *similar* ones. Port of
-// src-tauri/src/export/decimate.rs (which came from WebGaussian's
-// sharp-decimate.ts, following splat-transform's generational pairwise scheme):
+// Decimation: reduces the Gaussian count by merging *similar* ones. From
+// WebGaussian's sharp-decimate.ts, following splat-transform's generational
+// pairwise scheme:
 // each generation, every splat finds its cheapest neighbors to merge (spatial
 // hash → nearest neighbors → edge cost), disjoint groups (pairs, chain-closed
 // up to 4 members) are matched greedily in cost order, and each group becomes

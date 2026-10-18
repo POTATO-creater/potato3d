@@ -1,8 +1,8 @@
 # Mesh export
 
 **Export → Mesh (GLB)** turns the trained splat into a triangle mesh textured
-with the photos (or, with *Photo texture* off, coloured per vertex). Web only for now (`web/src/mesh/`); the desktop gets a Rust port
-of the same steps later.
+with the photos (or, with *Photo texture* off, coloured per vertex). The code
+is in `web/src/mesh/`.
 
 ## Pipeline
 
@@ -77,7 +77,7 @@ Measured on a 154-frame orbit of a person (see the study notes in the PR):
 
 | Choice | Alternative | Result |
 |---|---|---|
-| Fine-tune of the trained splat (8 min native) | Separate mesh training (36 min) | Same mesh quality in novel views; splat PSNR 28.2 vs 27.5 dB |
+| Fine-tune of the trained splat (8 min) | Separate mesh training (36 min) | Same mesh quality in novel views; splat PSNR 28.2 vs 27.5 dB |
 | Normal consistency only, 1 extra render | + depth distortion, 2 extra renders | Same quality, 10% faster per step |
 | Expected depth | Median depth | Cleaner surface: the median jumps between Gaussian layers |
 | meshoptimizer simplification (`Regularize`) | Isotropic remeshing | Runs in the browser, keeps the neckline and stilettos; a little less smooth after filtering |

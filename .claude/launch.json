@@ -2,14 +2,6 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "ui-mock",
-      "runtimeExecutable": "pnpm",
-      "runtimeArgs": [
-        "dev:mock"
-      ],
-      "port": 1430
-    },
-    {
       "name": "web",
       "runtimeExecutable": "pnpm",
       "runtimeArgs": [
@@ -46,22 +38,11 @@
         "8787",
         "--test-scheduled",
         "--var",
-        "SHARE_ORIGINS:http://localhost:1430,http://localhost:1440",
+        "SHARE_ORIGINS:http://localhost:1440",
         "--var",
         "SHARE_ADMIN_TOKEN:dev-share-key"
       ],
       "port": 8787
-    },
-    {
-      "name": "ui-mock-share",
-      "runtimeExecutable": "pnpm",
-      "runtimeArgs": [
-        "dev:mock"
-      ],
-      "env": {
-        "VITE_SHARE_ORIGIN": "http://localhost:8787"
-      },
-      "port": 1430
     },
     {
       "name": "web-bench",

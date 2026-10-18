@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, host, type ExportOptions, type ExportStats, type Msg, type SceneFrame, type SplatInfo } from "../lib/api";
 import { fmtBytes, fmtCount, fmtDuration } from "../lib/format";
-import { basename, revealLabel, type Os } from "../lib/platform";
+import { basename, revealLabel } from "../lib/platform";
 import { Field, NumField, Segmented, Select, Toggle } from "./fields";
 import { SharePanel } from "./SharePanel";
 import { savedShare, shareKey } from "../lib/share";
@@ -23,7 +23,6 @@ function loadOptions(): ExportOptions {
 }
 
 interface Props {
-  os: Os | undefined;
   projectDir: string;
   finalPly: string;
   lastExport: ExportStats | null;
@@ -72,9 +71,7 @@ export function ExportPanel(p: Props) {
   }, [p.finalPly]);
 
   // A degree above the trained one becomes "keep".
-  // Mesh export runs on the web only for now.
-  const meshAvailable = p.os === "web";
-  const mesh = opts.format === "glb" && meshAvailable;
+  const mesh = opts.format === "glb";
   const abort = useRef<AbortController | null>(null);
   const trained = info?.shDegree ?? 3;
   const shDegree = opts.shDegree != null && opts.shDegree < trained ? opts.shDegree : null;
@@ -85,7 +82,7 @@ export function ExportPanel(p: Props) {
     setProgress({ fraction: 0, message: { key: "stage.starting" } });
     abort.current = new AbortController();
     try {
-      const format = opts.format === "glb" && !meshAvailable ? "sog" : opts.format;
+      const format = opts.format;
       const stats = await api.exportSplat(p.projectDir, { ...opts, format, shDegree }, setProgress, abort.current.signal);
       p.onExported(stats);
     } catch (e) {
@@ -98,7 +95,6 @@ export function ExportPanel(p: Props) {
 
   const bulk = p.bulk?.state ?? null;
   const busy = progress != null || !!bulk?.running;
-  const web = p.os === "web";
   const bulkDone = bulk && !bulk.running ? bulk.results.filter((r) => r.stats) : [];
 
   async function downloadAll() {
@@ -126,12 +122,12 @@ export function ExportPanel(p: Props) {
           hint={mesh ? te.formatHintGlb : opts.format === "ply" ? te.formatHintPly : te.formatHintSog}
         >
           <Segmented
-            value={opts.format === "glb" && !meshAvailable ? "sog" : opts.format}
+            value={opts.format}
             onChange={(format) => set({ format })}
             options={[
               { value: "sog", label: te.sog },
               { value: "ply", label: te.ply },
-              ...(meshAvailable ? [{ value: "glb" as const, label: te.glb }] : []),
+              { value: "glb" as const, label: te.glb },
             ]}
           />
         </Field>
@@ -220,7 +216,7 @@ export function ExportPanel(p: Props) {
       {p.bulk && !bulk?.running && (
         <button
           className="btn-sm export-run"
-          onClick={() => p.bulk!.onRun({ ...opts, format: opts.format === "glb" && !meshAvailable ? "sog" : opts.format })}
+          onClick={() => p.bulk!.onRun({ ...opts, format: opts.format })}
           disabled={busy || p.bulk.count === 0}
           title={te.exportAllTitle}
         >
@@ -268,7 +264,7 @@ export function ExportPanel(p: Props) {
                   <>
                     <span className="muted mono small">{fmtBytes(r.stats.outputBytes)}</span>
                     <button className="btn-sm ghost" onClick={() => host.reveal(r.stats!.path)} title={r.name}>
-                      {revealLabel(t, p.os)}
+                      {revealLabel(t)}
                     </button>
                   </>
                 ) : (
@@ -279,7 +275,7 @@ export function ExportPanel(p: Props) {
               </li>
             ))}
           </ul>
-          {web && bulkDone.length > 1 && (
+          {bulkDone.length > 1 && (
             <button className="btn-sm export-run" onClick={downloadAll}>
               {te.downloadAll(bulkDone.length)}
             </button>
@@ -323,7 +319,7 @@ export function ExportPanel(p: Props) {
               {p.previewing ? te.viewOriginal : te.view3d}
             </button>
             <button className="btn-sm ghost" onClick={() => host.reveal(last.path)}>
-              {revealLabel(t, p.os)}
+              {revealLabel(t)}
             </button>
           </div>
           {!last.mesh && (

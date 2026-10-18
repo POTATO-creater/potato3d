@@ -1,4 +1,4 @@
-// Optimized export of the trained splat, like src-tauri/src/export/mod.rs:
+// Optimized export of the trained splat:
 // opacity pruning, SH band truncation, merge-based decimation and output as
 // .ply or compressed .sog.
 

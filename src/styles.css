@@ -150,16 +150,10 @@ body.resizing canvas {
   display: flex;
   align-items: center;
   gap: 9px;
-  padding-left: 86px; /* room for the macOS window traffic lights */
+  padding-left: 16px;
   font-weight: 650;
   letter-spacing: 0.01em;
   border-bottom: 1px solid var(--border);
-}
-/* Outside macOS the window has its own title bar (on the web, the browser's). */
-:root[data-os="windows"] .brand,
-:root[data-os="linux"] .brand,
-:root[data-os="web"] .brand {
-  padding-left: 16px;
 }
 .brand-mark {
   width: 14px;

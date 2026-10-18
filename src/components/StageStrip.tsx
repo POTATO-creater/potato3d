@@ -1,4 +1,4 @@
-import type { MaskOptions, Stage, Tools } from "../lib/api";
+import type { MaskOptions, Stage } from "../lib/api";
 import { stageToolLabels } from "../lib/platform";
 import type { JobState, StageState } from "../lib/job";
 import { fmtCount, fmtDuration as fmtSecs } from "../lib/format";
@@ -76,7 +76,6 @@ function StageButton({
 export function StageStrip({
   job,
   totalSteps,
-  tools,
   masks: maskOpts,
   images,
   blocked,
@@ -86,7 +85,6 @@ export function StageStrip({
 }: {
   job: JobState;
   totalSteps: number;
-  tools: Tools | null;
   masks: MaskOptions;
   /** Frames come from images, not a video. */
   images?: boolean;
@@ -100,7 +98,7 @@ export function StageStrip({
   const { t, tm } = useI18n();
   const tl = t.stageStrip;
   const { stages, frames, masks, poses, train, evals } = job;
-  const labels = stageToolLabels(t, tools, maskOpts, images);
+  const labels = stageToolLabels(t, maskOpts, images);
 
   const rejected = frames.filter((f) => f.rejected).length;
   const medianSharp = (() => {

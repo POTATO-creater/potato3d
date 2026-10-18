@@ -1,7 +1,6 @@
 // In-browser AI cutout: RMBG-1.4 on ONNX Runtime Web (WebGPU, with WASM as
-// fallback), with the same pre/post-processing as src-tauri/src/masks.rs. Models
-// come from the same pinned URLs as the installer, SHA-256 checked, and are
-// cached in OPFS.
+// fallback). Models come from pinned URLs, SHA-256 checked, and are cached
+// in OPFS.
 
 export type ModelId = "rmbg";
 

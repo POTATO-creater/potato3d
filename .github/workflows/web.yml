@@ -1,5 +1,5 @@
 # Web version: checks on every push and PR; deploys to Cloudflare
-# (wrangler.jsonc) when `main` moves. The desktop app ships via release.yml.
+# (wrangler.jsonc) when `main` moves.
 
 name: web
 

@@ -1,5 +1,5 @@
-// Web host: the same commands as the Rust backend, implemented in the browser
-// (WebGPU, WASM, OPFS). The UI (src/) is the same as the desktop's.
+// Web host: the app's commands, implemented in the browser (WebGPU, WASM,
+// OPFS), behind the `Host` interface the UI (src/) uses.
 
 import { IMAGE_EXT, PACKAGE_EXT, type Api, type Host, type InstallEvent, type JobEvent, type Tools } from "../../../src/lib/api";
 import { brushRuntime } from "../brush";
@@ -45,18 +45,9 @@ const api: Api = {
       (r) => r.gpu,
       (e) => (console.error("Brush/WebGPU unavailable:", e), null),
     );
-    const here = "browser";
     return {
-      ffmpeg: here,
-      ffprobe: here,
-      colmap: here,
-      colmapCuda: false,
       brush: gpu ? [gpu.vendor, gpu.architecture].filter(Boolean).join(" · ") || "WebGPU" : null,
-      masker: null,
-      birefnetModel: null,
-      modnetModel: null,
       rmbgModel: (await cachedModel(MODELS.rmbg)) ? MODELS.rmbg.file : null,
-      os: "web",
     };
   },
 
@@ -109,7 +100,7 @@ const api: Api = {
     job = ctl;
     // The mask preview releases the GPU first: the job opens its own sessions.
     maskPreview.release();
-    // As on the desktop: returns right away and progress arrives via events.
+    // Returns right away; progress arrives via events.
     void previewIdle()
       .then(() => runJob(config, (e: JobEvent) => onEvent(e), ctl.signal))
       .finally(() => {
@@ -167,8 +158,6 @@ const api: Api = {
     return {
       packages: need ? [{ id: "rmbg", label: `Masking ${spec.label}`, file: spec.file, size: spec.bytes }] : [],
       totalBytes: need ? spec.bytes : 0,
-      cuda: false,
-      note: null,
     };
   },
 
@@ -350,5 +339,4 @@ export const webHost: Host = {
   onUpdate,
   applyUpdate,
   maskPreview,
-  depthDistortion: true,
 };

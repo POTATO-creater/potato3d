@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// End-to-end retouch in headless Chrome (visible tabs in the desktop app get
+// End-to-end retouch in headless Chrome (hidden tabs get
 // throttled and WebGPU training stalls). Requires `pnpm web:dev` with
 // WEB_FS_ANY=1 and a ComfyUI (or the mock, scripts/comfy-mock.mjs) at the
 // given address.

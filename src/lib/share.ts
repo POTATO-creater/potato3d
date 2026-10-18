@@ -1,7 +1,7 @@
 // Link sharing: uploads the export to the web version's Worker
 // (worker/index.ts), which keeps it in R2 for a few hours and returns a
-// private link to the viewer (web/share.html). Desktop and web share this
-// code; the host only says how to read the file and where the server is.
+// private link to the viewer (web/share.html). The host says how to read the
+// file and where the server is.
 
 import type { SceneFrame } from "./api";
 

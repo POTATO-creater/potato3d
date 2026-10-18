@@ -183,10 +183,10 @@ test("revoking requires the token", async () => {
   assert.equal((await del(deleteToken)).status, 204);
 });
 
-test("CORS only for the desktop app and configured origins", async () => {
+test("CORS only for configured origins", async () => {
   const { call } = setup({ SHARE_ORIGINS: "http://localhost:1420" });
   const pre = (origin: string) => call("/api/share", { method: "OPTIONS", headers: { Origin: origin } });
-  assert.equal((await pre("tauri://localhost")).headers.get("Access-Control-Allow-Origin"), "tauri://localhost");
+  assert.equal((await pre("tauri://localhost")).headers.get("Access-Control-Allow-Origin"), null);
   assert.equal((await pre("http://localhost:1420")).headers.get("Access-Control-Allow-Origin"), "http://localhost:1420");
   assert.equal((await pre("https://evil.example")).headers.get("Access-Control-Allow-Origin"), null);
 });

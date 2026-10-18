@@ -1,4 +1,4 @@
-// Same cases as the tests in src-tauri/src/masks.rs.  pnpm test:web
+// Chroma key and despill cases.  pnpm test:web
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { applyDespill, borderKey, chromaMask, DEFAULT_CHROMA, despillFor, keyDistance, type RGB } from "./chroma.ts";

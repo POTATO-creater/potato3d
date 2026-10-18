@@ -1,4 +1,4 @@
-// Masked training options (the desktop's are tested in src-tauri/src/brush.rs).  pnpm test:web
+// Masked training options.  pnpm test:web
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { TrainOptions } from "../../../src/lib/api.ts";

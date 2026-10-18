@@ -1,4 +1,4 @@
-// Erosion of the training alpha: port of `erode` in src-tauri/src/masks.rs.
+// Erosion of the training alpha.
 
 /** Radius used in the training dataset (see ALPHA_ERODE in masks.rs). */
 export const ALPHA_ERODE = 1;

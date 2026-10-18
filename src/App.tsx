@@ -9,6 +9,7 @@ import {
   type ImageSet,
   type JobEvent,
   STAGES,
+  type MaskMethod,
   type MaskOptions,
   type Settings,
   type Stage,
@@ -28,7 +29,7 @@ import { readRetouchSession, RetouchPanel, type RetouchSession } from "./compone
 import { StageStrip } from "./components/StageStrip";
 import { FrameLightbox, FramesGrid, LogView } from "./components/FramesGrid";
 import { ExportPanel } from "./components/ExportPanel";
-import { maskMethods } from "./components/MasksPanel";
+import { MASK_METHODS } from "./components/MasksPanel";
 import { GitHubLink } from "./components/GitHubLink";
 import { LanguageSelect } from "./components/LanguageSelect";
 import { ComfySettingsButton } from "./components/ComfySettings";
@@ -46,7 +47,7 @@ function loadMasks(): MaskOptions {
   const base: MaskOptions = {
     enabled: false,
     forPoses: false,
-    method: "auto",
+    method: "rmbg",
     chroma: DEFAULT_CHROMA,
     despill: true,
     despillStrength: 100,
@@ -58,12 +59,26 @@ function loadMasks(): MaskOptions {
     if (raw) {
       const { chroma: { despill, ...chroma } = {} as never, ...saved } = JSON.parse(raw);
       // The SAM 2.1 marking belongs to the previous session's video: drop it.
-      return { ...base, despill: despill ?? base.despill, ...saved, chroma: { ...DEFAULT_CHROMA, ...chroma }, prompt: null };
+      const method = maskMethod(saved.method, base.method);
+      return { ...base, despill: despill ?? base.despill, ...saved, method, chroma: { ...DEFAULT_CHROMA, ...chroma }, prompt: null };
     }
   } catch {
     /* storage unavailable */
   }
   return base;
+}
+
+/** A masking method from older settings or packages: the former desktop app's
+ *  ("auto", "people", "general") become RMBG, the AI masker here. */
+function maskMethod(m: unknown, fallback: MaskMethod): MaskMethod {
+  if (m === "auto" || m === "people" || m === "general") return "rmbg";
+  return MASK_METHODS.includes(m as MaskMethod) ? (m as MaskMethod) : fallback;
+}
+
+/** Drops fields of the former desktop app (COLMAP options) from stored settings. */
+function withoutLegacy(s: Settings): Settings {
+  const { features: _f, cameraModel: _c, ...poses } = s.poses as Settings["poses"] & { features?: unknown; cameraModel?: unknown };
+  return { ...s, poses };
 }
 
 type Tab = "viewer" | "frames" | "log";
@@ -76,7 +91,7 @@ function loadStored(): { preset: PresetId | "custom"; settings: Settings } {
       // A named preset follows its current definition (new tweaks reach users who
       // already picked it); only "custom" keeps the saved values.
       const p = PRESETS.find((x) => x.id === saved.preset);
-      return p ? { preset: p.id, settings: p.settings } : saved;
+      return p ? { preset: p.id, settings: p.settings } : { ...saved, settings: withoutLegacy(saved.settings) };
     }
   } catch {
     /* storage unavailable: use the default */
@@ -105,30 +120,27 @@ function readView(v: unknown): ViewState | null {
 }
 
 /** A package's session merged with current defaults: it may come from another
- *  app version (with fewer fields) or from the other app (desktop ↔ web), with
- *  a masking method that does not exist here. */
-function readSession(raw: unknown, current: Session, os: Tools["os"] | undefined): Session | null {
+ *  app version (with fewer fields) or from the former desktop app, with a
+ *  masking method that does not exist here. */
+function readSession(raw: unknown, current: Session): Session | null {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Partial<Session>;
   const s = r.settings;
   const m = r.masks;
   const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
-  const train = { ...current.settings.train, ...s?.train };
-  // "Reduce haze" from a web package: this host's Brush doesn't have it.
-  if (!host.depthDistortion) delete train.depthDistortionWeight;
   return {
     settings: s
-      ? {
+      ? withoutLegacy({
           frames: { ...current.settings.frames, ...s.frames },
           poses: { ...current.settings.poses, ...s.poses },
-          train,
-        }
+          train: { ...current.settings.train, ...s.train },
+        })
       : current.settings,
     masks: m
       ? {
           ...current.masks,
           ...m,
-          method: maskMethods(os).includes(m.method) ? m.method : current.masks.method,
+          method: maskMethod(m.method, current.masks.method),
           chroma: { ...DEFAULT_CHROMA, ...m.chroma },
           prompt: m.prompt ?? null,
         }
@@ -145,14 +157,10 @@ function matchPreset(s: Settings): PresetId | "custom" {
   return PRESETS.find((p) => JSON.stringify(p.settings) === json)?.id ?? "custom";
 }
 
-/** Does AI masking have what it needs on this system? */
+/** Does AI masking have what it needs? SAM 2.1 downloads its models during
+ *  masking; RMBG is downloaded beforehand. */
 function maskToolReady(tools: Tools, m: MaskOptions) {
-  // SAM 2.1 (web only) downloads its models during masking.
-  if (m.method === "sam2") return tools.os === "web";
-  // On the web the other AI masker is RMBG.
-  if (m.method === "rmbg" || tools.os === "web") return !!tools.rmbgModel;
-  if (tools.os !== "windows") return !!tools.masker;
-  return m.method === "general" ? !!tools.birefnetModel : !!tools.modnetModel;
+  return m.method === "sam2" || !!tools.rmbgModel;
 }
 
 export default function App() {
@@ -258,11 +266,7 @@ function AppView() {
   );
 
   useEffect(() => {
-    api.detectTools().then((t) => {
-      setTools(t);
-      // Per-OS layout tweaks (e.g. room for the macOS window buttons).
-      document.documentElement.dataset.os = t.os;
-    });
+    api.detectTools().then(setTools);
   }, []);
 
   useEffect(() => {
@@ -395,7 +399,7 @@ function AppView() {
       // No source: finished stages still hold (only frames can't be redone).
       if (!restored) await openProject(id, r.projectDir);
       const it = get(id);
-      const s = readSession(r.session, { settings: settingsRef.current, masks: it?.masks ?? defaultMasksRef.current, trim: it?.trim ?? { start: 0, end: null } }, tools?.os);
+      const s = readSession(r.session, { settings: settingsRef.current, masks: it?.masks ?? defaultMasksRef.current, trim: it?.trim ?? { start: 0, end: null } });
       if (s) {
         // Quality is shared by the batch: a package only sets it when it is
         // the first thing opened.
@@ -535,13 +539,10 @@ function AppView() {
     const m = it?.masks ?? defaultMasks;
     return (
       [
-        // Images don't need video decoding.
-        { name: "ffmpeg", key: "ffmpeg", ok: (!!tools.ffmpeg && !!tools.ffprobe) || !!it?.imageSet },
-        { name: "COLMAP", key: "colmap", ok: !!tools.colmap },
         { name: "Brush", key: "brush", ok: !!tools.brush },
         // Masking is only required when enabled.
         {
-          name: tools.os === "windows" || m.method === "rmbg" ? t.app.maskModel : t.app.masker,
+          name: t.app.maskModel,
           key: "model",
           ok: !m.enabled || m.method === "chroma" || maskToolReady(tools, m),
         },
@@ -550,7 +551,7 @@ function AppView() {
   }
   type Missing = ReturnType<typeof missingTools>;
   // Tool each stage needs (keys of `missing`).
-  const toolStage: Record<Missing[number]["key"], Stage> = { ffmpeg: "frames", model: "masks", colmap: "poses", brush: "train" };
+  const toolStage: Record<Missing[number]["key"], Stage> = { model: "masks", brush: "train" };
   const missingFor = (list: Missing, from: Stage, to: Stage) =>
     list.filter((m) => {
       const i = STAGES.indexOf(toolStage[m.key]);
@@ -774,7 +775,7 @@ function AppView() {
     }),
   ) as Record<Stage, string | null>;
 
-  const blurbs = stageBlurbs(t, tools?.os);
+  const blurbs = stageBlurbs(t);
   const sourcePath = videoPath ?? imageSet?.dir ?? null;
   const pending = ws.items.filter(pendingItem).length;
   const queued = (it: BatchItem) => batchRunning && !batchRun.current?.tried.has(it.id) && pendingItem(it);
@@ -783,7 +784,6 @@ function AppView() {
     <div className="app" style={{ "--sidebar-w": `${sidebar.width}px` } as React.CSSProperties}>
       {sidebar.handle}
       <Sidebar
-        os={tools?.os}
         batch={
           ws.items.length > 1 && (
             <BatchSelector
@@ -806,7 +806,6 @@ function AppView() {
         onPickFolder={pickFramesFolder}
         projectDir={projectDir}
         onPickProject={pickProject}
-        onRevealProject={() => projectDir && host.reveal(job.finalPly ?? projectDir)}
         onSavePackage={projectDir && job.frames.length ? savePackage : undefined}
         onOpenPackage={pickPackage}
         packageStatus={pack}
@@ -846,7 +845,6 @@ function AppView() {
             <ExportPanel
               // One per item: an export keeps going if another item is shown.
               key={item.id}
-              os={tools?.os}
               projectDir={projectDir}
               finalPly={job.finalPly}
               lastExport={lastExport}
@@ -915,7 +913,7 @@ function AppView() {
       />
 
       <main className="main">
-        <div className="topbar" data-tauri-drag-region>
+        <div className="topbar">
           <nav className="tabs">
             <button className={tab === "viewer" ? "active" : ""} onClick={() => setTab("viewer")}>
               {t.app.tabs.viewer}
@@ -933,7 +931,7 @@ function AppView() {
           )}
           {job.finalPly && (
             <button className="btn-sm" onClick={() => host.reveal(job.finalPly!)}>
-              {revealLabel(t, tools?.os, ".ply")}
+              {revealLabel(t, ".ply")}
             </button>
           )}
           {api.retouch && <ComfySettingsButton />}
@@ -944,7 +942,6 @@ function AppView() {
         <UpdateBanner busy={anyRunning} />
         {tools && missing.length > 0 && (
           <ToolsSetup
-            tools={tools}
             missing={[...missing]}
             rmbg={maskOpts.enabled && maskOpts.method === "rmbg"}
             onInstalled={() => api.detectTools().then(setTools)}
@@ -1019,7 +1016,6 @@ function AppView() {
         <StageStrip
           job={job}
           totalSteps={settings.train.totalSteps}
-          tools={tools}
           masks={maskOpts}
           images={!!imageSet}
           blocked={blocked}

@@ -1,4 +1,4 @@
-// Same cases as the tests in src-tauri/src/decontam.rs.  pnpm test:web
+// Edge decontamination cases.  pnpm test:web
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { decontaminate } from "./decontam.ts";

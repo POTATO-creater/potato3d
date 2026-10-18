@@ -1,6 +1,6 @@
 // Cameras and poses of the COLMAP model, for the mesh export: each image with
 // its own pinhole intrinsics (lens distortion is ignored — the web SfM and the
-// desktop's SIMPLE_PINHOLE models have none).
+// former desktop app's SIMPLE_PINHOLE models have none).
 
 export interface View {
   name: string;

@@ -1,5 +1,4 @@
 import type { ChromaOptions, MaskMethod, MaskOptions } from "../lib/api";
-import type { Os } from "../lib/platform";
 import { Segmented, Slider, Toggle } from "./fields";
 import { MaskPreview, type PreviewSource } from "./MaskPreview";
 import { useI18n, type Messages } from "../i18n";
@@ -9,23 +8,13 @@ const fmtTime = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padS
 const toHex = (c: [number, number, number]) => `#${c.map((v) => v.toString(16).padStart(2, "0")).join("")}`;
 const fromHex = (h: string): [number, number, number] => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)) as never;
 
-/** Masking methods available on each OS. */
-export function maskMethods(os: Os | undefined): MaskMethod[] {
-  return os === "windows"
-    ? ["people", "general", "rmbg", "chroma"]
-    : os === "web"
-      ? ["rmbg", "sam2", "chroma"]
-      : os === "macos"
-        ? ["auto", "rmbg", "chroma"]
-        : ["auto", "chroma"];
-}
+export const MASK_METHODS: MaskMethod[] = ["rmbg", "sam2", "chroma"];
 
-function methods(t: Messages, os: Os | undefined): { value: MaskMethod; label: string; hint: string }[] {
-  return maskMethods(os).map((value) => ({ value, ...t.masks.methods[value] }));
+function methods(t: Messages): { value: MaskMethod; label: string; hint: string }[] {
+  return MASK_METHODS.map((value) => ({ value, ...t.masks.methods[value] }));
 }
 
 export function MasksPanel({
-  os,
   masks,
   onMasks,
   onApplyAll,
@@ -34,7 +23,6 @@ export function MasksPanel({
   preview,
   promptOutside,
 }: {
-  os: Os | undefined;
   masks: MaskOptions;
   onMasks: (m: MaskOptions) => void;
   /** Batch: copies this masking to the other items. */
@@ -49,7 +37,7 @@ export function MasksPanel({
 }) {
   const { t } = useI18n();
   const tm = t.masks;
-  const options = methods(t, os);
+  const options = methods(t);
   // The saved method may not exist on this OS (e.g. "people" from Windows).
   const method = options.some((o) => o.value === masks.method) ? masks.method : options[0].value;
   const c = masks.chroma;

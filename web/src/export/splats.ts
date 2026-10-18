@@ -1,5 +1,4 @@
-// Gaussian Splatting .ply reading and writing: port of
-// src-tauri/src/export/ply.rs. Brush writes the properties in its own order
+// Gaussian Splatting .ply reading and writing. Brush writes the properties in its own order
 // (f_dc, f_rest, opacity, rot, scale, xyz), so reading locates each column by
 // name; writing uses the INRIA order, which every viewer understands.
 

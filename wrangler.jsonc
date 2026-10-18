@@ -30,7 +30,7 @@
     "SHARE_TTL_HOURS": "6",
     // Largest accepted file; Cloudflare rejects bodies over 100 MB.
     "SHARE_MAX_MB": "95",
-    // Extra CORS origins (the desktop app is already allowed in code).
+    // Extra CORS origins (e.g. local dev servers).
     "SHARE_ORIGINS": ""
   },
 

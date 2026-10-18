@@ -1,7 +1,7 @@
 // Minimal dependency-free ZIP for the project package (.gorbit): writes as a
 // stream (STORE, or DEFLATE via the browser's CompressionStream, with a data
-// descriptor) and reads via the central directory, with ZIP64 (the desktop
-// writes with the `zip` crate, which switches to it above 4 GB). Stored
+// descriptor) and reads via the central directory, with ZIP64 (packages from
+// the former desktop app's `zip` crate switch to it above 4 GB). Stored
 // (uncompressed) entries become slices of the file when read, with no copy.
 
 /** Sink for the ZIP bytes, in order. */

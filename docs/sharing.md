@@ -1,6 +1,6 @@
 # Share links
 
-After exporting, **Share** (in the export panel, desktop and web) uploads the
+After exporting, **Share** (in the export panel) uploads the
 `.sog`/`.ply` to Cloudflare R2 and creates a private `/s/<id>` link with a QR
 code. Anyone with the link can open the splat in a dedicated viewer
 (`web/share.html`, PlayCanvas): drag/pinch on desktop and mobile, plus **VR**
@@ -57,9 +57,8 @@ exists.
 - **Limits:** `SHARE_MAX_MB` (95 MiB; Cloudflare rejects bodies over 100 MB),
   only files that start like a `.sog` (ZIP) or `.ply`, and 10 uploads per minute
   per IP (`ratelimits`).
-- **Desktop:** uploads to the published web version; the Worker allows CORS
-  from the Tauri webview. `VITE_SHARE_ORIGIN` changes the server (desktop and
-  `web:dev`).
+- **Server:** the page's own origin; `VITE_SHARE_ORIGIN` points `web:dev` at
+  another one, which must list the page's origin in `SHARE_ORIGINS` (CORS).
 
 ## Self-hosting
 
@@ -84,6 +83,6 @@ expire objects in less than a day). The CI token (`CLOUDFLARE_API_TOKEN`, "Edit
 Cloudflare Workers" template) already includes R2 permissions.
 
 To test locally: `pnpm web:build`, `pnpm exec wrangler dev` (R2 and the rate
-limiter are simulated in `.wrangler/`) and open `http://localhost:8787`. To test
-the desktop UI against it: `VITE_SHARE_ORIGIN=http://localhost:8787 pnpm dev:mock`
-and `wrangler dev --var SHARE_ORIGINS:http://localhost:1430`.
+limiter are simulated in `.wrangler/`) and open `http://localhost:8787`. To use
+it from the dev server: `VITE_SHARE_ORIGIN=http://localhost:8787 pnpm web:dev`
+and `wrangler dev --var SHARE_ORIGINS:http://localhost:1440`.

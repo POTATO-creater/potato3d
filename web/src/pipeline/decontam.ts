@@ -1,4 +1,4 @@
-// Edge decontamination of the training images: port of src-tauri/src/decontam.rs.
+// Edge decontamination of the training images.
 //
 // A soft mask edge keeps the photo's color, a mix of subject and background
 // (I = a·F + (1 − a)·B). Brush premultiplies by the alpha, so the background

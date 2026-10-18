@@ -1,27 +1,25 @@
 import { useEffect, useState } from "react";
-import { api, type InstallEvent, type InstallPlan, type Tools } from "../lib/api";
+import { api, type InstallEvent, type InstallPlan } from "../lib/api";
 import { installCommand } from "../lib/platform";
 import { useI18n } from "../i18n";
 
-type Missing = { name: string; key: "ffmpeg" | "colmap" | "brush" | "model" }[];
+type Missing = { name: string; key: "brush" | "model" }[];
 
 interface PackageState {
   label: string;
   done: number;
   total: number;
-  phase: "waiting" | "download" | "extract" | "done";
+  phase: "waiting" | "download" | "done";
 }
 
 const mb = (n: number) => `${(n / 1e6).toFixed(0)} MB`;
 
-/** First run: lists what's missing and, on Windows, installs it in one click. */
+/** First run: lists what's missing and downloads the masking model in one click. */
 export function ToolsSetup({
-  tools,
   missing,
   rmbg,
   onInstalled,
 }: {
-  tools: Tools;
   missing: Missing;
   /** RMBG-1.4 was chosen: include it in the download plan. */
   rmbg: boolean;
@@ -29,7 +27,7 @@ export function ToolsSetup({
 }) {
   const { t } = useI18n();
   const tt = t.setup;
-  /** Models have translated labels; tools use the name from the backend. */
+  /** Models have translated labels; anything else uses the name from the host. */
   const pkgLabel = (id: string, label: string) => tt.packages[id] ?? label;
   const [plan, setPlan] = useState<InstallPlan | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
@@ -37,13 +35,7 @@ export function ToolsSetup({
   const [pkgs, setPkgs] = useState<Record<string, PackageState>>({});
   const [error, setError] = useState<string | null>(null);
 
-  const modelMissing = missing.some((m) => m.key === "model");
-  // On macOS the app only downloads RMBG; the rest comes from Homebrew.
-  const canInstall =
-    (tools.os === "windows" && missing.some((m) => m.key !== "brush")) ||
-    ((tools.os === "macos" || tools.os === "web") && rmbg && modelMissing);
-  const macMasker = tools.os === "macos" && modelMissing && !rmbg;
-  const brewTools = tools.os !== "windows" ? missing.filter((m) => m.key === "ffmpeg" || m.key === "colmap") : [];
+  const canInstall = rmbg && missing.some((m) => m.key === "model");
 
   useEffect(() => {
     if (!canInstall) return;
@@ -57,9 +49,6 @@ export function ToolsSetup({
         break;
       case "progress":
         setPkgs((p) => ({ ...p, [e.id]: { ...p[e.id], done: e.done, total: e.total } }));
-        break;
-      case "extracting":
-        setPkgs((p) => ({ ...p, [e.id]: { ...p[e.id], phase: "extract" } }));
         break;
       case "done":
         setPkgs((p) => ({ ...p, [e.id]: { ...p[e.id], phase: "done", done: p[e.id].total } }));
@@ -95,6 +84,8 @@ export function ToolsSetup({
     }
   }
 
+  const needs = missing.filter((m) => m.key === "brush" || !canInstall);
+
   return (
     <div className="setup">
       <div className="setup-head">
@@ -107,7 +98,7 @@ export function ToolsSetup({
         </button>
       </div>
 
-      {canInstall ? (
+      {canInstall && (
         <>
           {plan && plan.packages.length > 0 && !running && Object.keys(pkgs).length === 0 && (
             <div className="setup-plan">
@@ -120,9 +111,8 @@ export function ToolsSetup({
                 ))}
               </ul>
               <p className="help">
-                {tools.os === "windows" && (plan.cuda ? tt.nvidia : tt.noNvidia)}
                 {plan.packages.some((p) => p.id === "rmbg") && tt.rmbgLicense}
-                {tools.os === "web" ? tt.storedInBrowser : tt.storedLocally}
+                {tt.storedInBrowser}
               </p>
               <button className="btn-primary setup-btn" onClick={install}>
                 {tt.install(mb(plan.totalBytes))}
@@ -141,15 +131,11 @@ export function ToolsSetup({
                     <span className="mono muted">
                       {p.phase === "waiting" && tt.queued}
                       {p.phase === "download" && `${mb(p.done)} / ${mb(p.total)}`}
-                      {p.phase === "extract" && tt.extracting}
                       {p.phase === "done" && tt.ready}
                     </span>
                   </div>
                   <div className="bar">
-                    <div
-                      className={`bar-fill ${p.phase === "extract" ? "indeterminate" : ""}`}
-                      style={{ width: `${p.phase === "extract" ? 100 : Math.round((p.done / Math.max(p.total, 1)) * 100)}%` }}
-                    />
+                    <div className="bar-fill" style={{ width: `${Math.round((p.done / Math.max(p.total, 1)) * 100)}%` }} />
                   </div>
                 </div>
               ))}
@@ -160,31 +146,15 @@ export function ToolsSetup({
               )}
             </div>
           )}
-          {tools.os !== "web" && missing.some((m) => m.key === "brush") && (
-            <p className="help">
-              {tt.brushDev} <code>pnpm setup:tools</code>.
-            </p>
-          )}
-          {brewTools.length > 0 && (
-            <div className="setup-cmds">
-              {brewTools.map((m) => (
-                <span key={m.name}>
-                  {m.name} → <code>{installCommand(t, m.key, tools.os)}</code>
-                </span>
-              ))}
-            </div>
-          )}
         </>
-      ) : (
+      )}
+      {needs.length > 0 && (
         <div className="setup-cmds">
-          {missing
-            .filter((m) => m.key !== "model")
-            .map((m) => (
-              <span key={m.name}>
-                {m.name} → <code>{installCommand(t, m.key, tools.os)}</code>
-              </span>
-            ))}
-          {macMasker && <span>{tt.visionNote}</span>}
+          {needs.map((m) => (
+            <span key={m.name}>
+              {m.name} → <code>{installCommand(t, m.key)}</code>
+            </span>
+          ))}
         </div>
       )}
       {error && <pre className="setup-error">{error}</pre>}

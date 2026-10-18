@@ -1,5 +1,5 @@
-// Web projects: same layout and project.json as the desktop
-// (src-tauri/src/pipeline.rs: Layout and ProjectState), inside OPFS.
+// Web projects: the project folder layout and project.json (ProjectState),
+// inside OPFS. Folders made by the former desktop app import as they are.
 
 import type { FrameInfo, ProjectState } from "../../../src/lib/api";
 import { sharpness } from "../pipeline/frames";
@@ -97,8 +97,7 @@ export async function openProject(root: string): Promise<ProjectState> {
   return s;
 }
 
-/** Rejects (moves to `rejected/`) or restores frames, like
- *  `set_frames_rejected` in src-tauri/src/pipeline.rs. */
+/** Rejects (moves to `rejected/`) or restores frames. */
 export async function setFramesRejected(root: string, names: string[], rejected: boolean): Promise<ProjectState> {
   const l = layout(root);
   const state = await readState(root);
@@ -172,7 +171,8 @@ async function framesOf(images: string): Promise<FrameInfo[]> {
 async function datasetState(root: string, mapper: string, saved?: ProjectState): Promise<ProjectState> {
   const l = layout(root);
   const names = new Set(await listFiles(l.images, IMAGE_EXT));
-  // The desktop's project.json provides each frame's timestamp and sharpness.
+  // A project.json (e.g. from the former desktop app) provides each frame's
+  // timestamp and sharpness.
   const known = saved?.frames.filter((f) => names.has(basename(f.path)));
   const frames =
     known && known.length === names.size

@@ -1,6 +1,6 @@
 // SOG v2 (PlayCanvas) writer: an uncompressed ZIP with `meta.json` and
-// lossless WebP textures. Port of src-tauri/src/export/sog.rs (which came from
-// WebGaussian's sog-encode.ts, following splat-transform's `write-sog.ts`):
+// lossless WebP textures. From WebGaussian's sog-encode.ts, following
+// splat-transform's `write-sog.ts`:
 // Morton order, dynamic-programming 1D quantizer (256-entry codebooks),
 // log-transformed 16-bit positions, "smallest three" quaternions and opacity
 // in the `sh0` alpha. SH bands are stored as in splat-transform: a palette of
