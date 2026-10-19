@@ -1,4 +1,4 @@
-import type { MaskOptions, Stage } from "../lib/api";
+import type { MaskOptions, PoseEstimator, Stage } from "../lib/api";
 import { stageToolLabels } from "../lib/platform";
 import type { JobState, StageState } from "../lib/job";
 import { fmtCount, fmtDuration as fmtSecs } from "../lib/format";
@@ -78,6 +78,7 @@ export function StageStrip({
   totalSteps,
   masks: maskOpts,
   images,
+  estimator,
   blocked,
   busy,
   onRunStage,
@@ -88,6 +89,8 @@ export function StageStrip({
   masks: MaskOptions;
   /** Frames come from images, not a video. */
   images?: boolean;
+  /** Camera estimator chosen in the settings (the poses stage's tool label). */
+  estimator?: PoseEstimator;
   /** Why each stage can't run on its own right now; null = it can. */
   blocked: Record<Stage, string | null>;
   /** Something else holds the pipeline (another batch item, a retouch). */
@@ -98,7 +101,7 @@ export function StageStrip({
   const { t, tm } = useI18n();
   const tl = t.stageStrip;
   const { stages, frames, masks, poses, train, evals } = job;
-  const labels = stageToolLabels(t, maskOpts, images);
+  const labels = stageToolLabels(t, maskOpts, images, estimator);
 
   const rejected = frames.filter((f) => f.rejected).length;
   const medianSharp = (() => {
