@@ -3,7 +3,7 @@ import { host, type MaskOptions } from "../lib/api";
 import { useI18n } from "../i18n";
 
 /** Where the preview frame comes from. */
-export type PreviewSource = { kind: "video"; src: string; time: number } | { kind: "image"; src: string };
+export type PreviewSource = { kind: "video"; src: string; time: number } | { kind: "image"; src: string; name: string };
 
 const HIDDEN_KEY = "splatforge.maskPreview.v1";
 /** Long side of the preview frame: SAM and RMBG work at 1024². */
@@ -77,7 +77,18 @@ function draw(canvas: HTMLCanvasElement, frame: ImageBitmap, mask: Uint8Array, m
 }
 
 /** Mask preview on one frame (only where the host provides it: web, for now). */
-export function MaskPreview({ source, masks, locked }: { source: PreviewSource | null; masks: MaskOptions; locked: boolean }) {
+export function MaskPreview({
+  source,
+  masks,
+  locked,
+  external,
+}: {
+  source: PreviewSource | null;
+  masks: MaskOptions;
+  locked: boolean;
+  /** Method "external": the project and the attached mask (its id refreshes the preview). */
+  external?: { projectDir: string; id: string } | null;
+}) {
   const { t } = useI18n();
   const tp = t.masks.preview;
   const previewer = host.maskPreview;
@@ -92,6 +103,7 @@ export function MaskPreview({ source, masks, locked }: { source: PreviewSource |
 
   const src = source?.src;
   const time = source?.kind === "video" ? source.time : null;
+  const image = source?.kind === "image" ? source.name : null;
   const active = !!previewer && !!source && !hidden && !locked;
 
   useEffect(() => {
@@ -145,10 +157,17 @@ export function MaskPreview({ source, masks, locked }: { source: PreviewSource |
     const timer = setTimeout(async () => {
       setStatus({ kind: "working", text: tp.working });
       try {
-        const mask = await previewer.mask(frame.key, frame.bmp, masks, (d, n) => {
-          if (id === request.current)
-            setStatus({ kind: "working", text: tp.downloading(Math.round(d / 1e6), Math.round(n / 1e6)) });
-        });
+        const at = masks.method === "external" && external ? { projectDir: external.projectDir, ...(time != null ? { time } : { image: image ?? "" }) } : undefined;
+        const mask = await previewer.mask(
+          frame.key,
+          frame.bmp,
+          masks,
+          (d, n) => {
+            if (id === request.current)
+              setStatus({ kind: "working", text: tp.downloading(Math.round(d / 1e6), Math.round(n / 1e6)) });
+          },
+          at,
+        );
         if (id !== request.current || !canvas.current) return;
         draw(canvas.current, frame.bmp, mask, masks);
         setShown(true);
@@ -160,7 +179,7 @@ export function MaskPreview({ source, masks, locked }: { source: PreviewSource |
     return () => clearTimeout(timer);
     // masks is tracked via the fields that change the result
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, frame, ready, previewer, masks.method, promptJson, chromaJson, tp]);
+  }, [active, frame, ready, previewer, masks.method, promptJson, chromaJson, tp, external?.projectDir, external?.id]);
 
   if (!previewer || !source) return null;
   return (

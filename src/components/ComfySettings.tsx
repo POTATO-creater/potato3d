@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../i18n";
 import type { Messages } from "../i18n/pt-BR";
 import { ComfyClient, ComfyError } from "../lib/comfy/client";
-import { loadComfy, saveComfy, type ComfySettings as Settings, type ComfyWorkflow } from "../lib/comfy/settings";
+import { loadComfy, saveComfy, WORKFLOW_KINDS, type ComfySettings as Settings, type ComfyWorkflow } from "../lib/comfy/settings";
 import { checkIO, editableFields, fileFields, guessIO, listNodes, paramDefault, parseWorkflow, WorkflowParseError, type WorkflowParam } from "../lib/comfy/workflow";
 import { Field, Select } from "./fields";
 
@@ -182,7 +182,7 @@ function WorkflowCard({ wf, onChange, onRemove }: { wf: ComfyWorkflow; onChange:
         </button>
       </div>
       <Field label={tc.kind} hint={tc.kindHints[wf.kind]}>
-        <Select value={wf.kind} options={[{ value: "restore" as const, label: tc.kinds.restore }]} onChange={(kind) => onChange({ kind })} />
+        <Select value={wf.kind} options={WORKFLOW_KINDS.map((k) => ({ value: k, label: tc.kinds[k] }))} onChange={(kind) => onChange({ kind })} />
       </Field>
       {problems.length > 0 && !wf.io.input.node && <p className="warn small">{tc.noGuess}</p>}
       <div className="grid2">

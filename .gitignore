@@ -31,3 +31,6 @@ dist-web
 
 # Local wrangler cache (web deploy)
 .wrangler/
+
+# Local test and study scripts and their outputs
+scripts/tests/

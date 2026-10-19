@@ -22,7 +22,8 @@ desktop Chrome or Edge with WebGPU and the `subgroups` feature.
   ones made by the former desktop app) or a COLMAP dataset (`images/` +
   `sparse/0`).
 - **Files:** exports and packages are **downloaded**.
-- **Masking:** RMBG-1.4, SAM 2.1 and solid colour. RMBG (176 MB,
+- **Masking:** RMBG-1.4, SAM 2.1, solid colour and an attached or ComfyUI-generated
+  mask video ([pipeline.md](pipeline.md)). RMBG (176 MB,
   non-commercial license) is downloaded through a first-use prompt, with its
   SHA-256 verified. SAM 2.1 (Apache-2.0) is
   downloaded on first use: 84 MB in fp16 where the GPU has `shader-f16` (Chrome
@@ -212,8 +213,7 @@ multi-mask mode, a multi-part subject can lose one of its parts when its
 appearance changes (PyTorch does the same).
 
 The chroma key doesn't reach IoU 1 because the cube has blue-green patches that
-touch its edge and get removed together with the screen; RMBG + despill keeps
-them. In a hidden panel or tab the browser
+touch its edge and get removed together with the screen; RMBG keeps them. In a hidden panel or tab the browser
 throttles seeks and frame extraction gets ~10× slower.
 
 Poses measured on a synthetic 120-frame 960×720 orbit with known ground-truth

@@ -1,6 +1,8 @@
-import type { ChromaOptions, MaskMethod, MaskOptions } from "../lib/api";
+import { useState } from "react";
+import type { ChromaOptions, MaskMethod, MaskOptions, MaskSource, MaskSourceOf } from "../lib/api";
 import { Segmented, Slider, Toggle } from "./fields";
 import { MaskPreview, type PreviewSource } from "./MaskPreview";
+import { MaskSourceBox } from "./MaskSourceBox";
 import { useI18n, type Messages } from "../i18n";
 
 const fmtTime = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, "0")}`;
@@ -8,7 +10,7 @@ const fmtTime = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padS
 const toHex = (c: [number, number, number]) => `#${c.map((v) => v.toString(16).padStart(2, "0")).join("")}`;
 const fromHex = (h: string): [number, number, number] => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)) as never;
 
-export const MASK_METHODS: MaskMethod[] = ["rmbg", "sam2", "chroma"];
+export const MASK_METHODS: MaskMethod[] = ["rmbg", "sam2", "chroma", "external"];
 
 function methods(t: Messages): { value: MaskMethod; label: string; hint: string }[] {
   return MASK_METHODS.map((value) => ({ value, ...t.masks.methods[value] }));
@@ -22,6 +24,10 @@ export function MasksPanel({
   previewPaused,
   preview,
   promptOutside,
+  projectDir,
+  source,
+  sourceSize,
+  onMaskSource,
 }: {
   masks: MaskOptions;
   onMasks: (m: MaskOptions) => void;
@@ -34,6 +40,12 @@ export function MasksPanel({
   preview: PreviewSource | null;
   /** The marking fell outside the trim range (it will be ignored). */
   promptOutside: boolean;
+  /** Method "external": the item's project and source, which the mask
+   *  video or frames are matched to. */
+  projectDir: string | null;
+  source: MaskSourceOf | null;
+  sourceSize: [number, number] | null;
+  onMaskSource: (projectDir: string, src: MaskSource | null) => void;
 }) {
   const { t } = useI18n();
   const tm = t.masks;
@@ -42,6 +54,9 @@ export function MasksPanel({
   const method = options.some((o) => o.value === masks.method) ? masks.method : options[0].value;
   const c = masks.chroma;
   const setChroma = (patch: Partial<ChromaOptions>) => onMasks({ ...masks, method, chroma: { ...c, ...patch } });
+  // What is attached, for the preview.
+  const [attached, setAttached] = useState<MaskSource | null>(null);
+  const external = method === "external";
 
   return (
     <section className="panel">
@@ -94,8 +109,26 @@ export function MasksPanel({
             </div>
           )}
 
+          {external && (
+            <MaskSourceBox
+              projectDir={projectDir}
+              source={source}
+              sourceSize={sourceSize}
+              locked={locked}
+              onChanged={onMaskSource}
+              onCurrent={setAttached}
+            />
+          )}
+
           {/* As in the job: a marking outside the trim range doesn't apply. */}
-          <MaskPreview source={preview} masks={{ ...masks, method, prompt: promptOutside ? null : masks.prompt }} locked={locked || !!previewPaused} />
+          {(!external || (attached && projectDir)) && (
+            <MaskPreview
+              source={preview}
+              masks={{ ...masks, method, prompt: promptOutside ? null : masks.prompt }}
+              locked={locked || !!previewPaused}
+              external={external && attached && projectDir ? { projectDir, id: attached.id } : null}
+            />
+          )}
 
           {method === "chroma" && (
             <fieldset className="chroma" disabled={locked}>
@@ -126,14 +159,16 @@ export function MasksPanel({
             </fieldset>
           )}
 
-          <Toggle
-            label={tm.despill}
-            hint={tm.despillHint}
-            checked={masks.despill}
-            disabled={locked}
-            onChange={(v) => onMasks({ ...masks, method, despill: v })}
-          />
-          {masks.despill && (
+          {method === "chroma" && (
+            <Toggle
+              label={tm.despill}
+              hint={tm.despillHint}
+              checked={masks.despill}
+              disabled={locked}
+              onChange={(v) => onMasks({ ...masks, method, despill: v })}
+            />
+          )}
+          {method === "chroma" && masks.despill && (
             <fieldset className="chroma" disabled={locked}>
               <Slider
                 label={tm.despillStrength}

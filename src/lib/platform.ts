@@ -6,7 +6,14 @@ export function stageToolLabels(t: Messages, masks?: MaskOptions, images?: boole
   const p = t.platform;
   return {
     frames: images ? p.yourImages : p.browserDecoder,
-    masks: masks?.method === "chroma" ? p.solidColor : masks?.method === "sam2" ? "SAM 2.1 · WebGPU" : "RMBG-1.4 · WebGPU",
+    masks:
+      masks?.method === "chroma"
+        ? p.solidColor
+        : masks?.method === "sam2"
+          ? "SAM 2.1 · WebGPU"
+          : masks?.method === "external"
+            ? p.maskSource
+            : "RMBG-1.4 · WebGPU",
     poses: estimator === "colmap" ? p.webPosesColmap : p.webPoses,
     train: "Brush · WebGPU",
   };

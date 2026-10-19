@@ -46,8 +46,10 @@ export interface FrameOptions {
   trimEnd: number | null;
 }
 
-/** rmbg: RMBG-1.4 · sam2: SAM 2.1 with propagation across frames · chroma: solid color */
-export type MaskMethod = "rmbg" | "sam2" | "chroma";
+/** rmbg: RMBG-1.4 · sam2: SAM 2.1 with propagation across frames · chroma: solid color ·
+ *  external: a mask video or image sequence attached to the item (white =
+ *  subject), from a file or a ComfyUI workflow (`MaskSourceApi`). */
+export type MaskMethod = "rmbg" | "sam2" | "chroma" | "external";
 
 /** Where the subject is, for SAM 2.1, in normalized (0–1) frame coordinates. */
 export interface SubjectPrompt {
@@ -85,7 +87,7 @@ export interface MaskOptions {
   forPoses: boolean;
   method: MaskMethod;
   chroma: ChromaOptions;
-  /** Removes green/blue background spill from the subject (any method). */
+  /** Removes green/blue screen spill from the subject (solid color only). */
   despill: boolean;
   /** 0–100 */
   despillStrength: number;
@@ -99,6 +101,66 @@ export interface MaskStats {
   meanCoverage: number;
   backend: string;
   keyColor?: [number, number, number] | null;
+}
+
+/** Mask video or image sequence for the "external" method, kept in the
+ *  project folder apart from the frames (re-extracting frames keeps it). */
+export interface MaskSource {
+  id: string;
+  kind: "video" | "frames";
+  /** Mask frames. */
+  count: number;
+  width: number;
+  height: number;
+  /** Where each mask frame sits in the source: seconds into the video, or the
+   *  index of the source image. Null = mask frame k is source frame k
+   *  (video: at k / `fps`). */
+  positions: number[] | null;
+  /** Frame rate of the source video, to place frames when `positions` is
+   *  null and to measure gaps in frames; null when the source is images. */
+  fps: number | null;
+  /** File name, or the ComfyUI workflow that generated it. */
+  origin: string;
+  createdAt: number;
+}
+
+/** The item's source, as the masking sees it. */
+export type MaskSourceOf =
+  | { kind: "video"; path: string; fps: number; trim: { start: number; end: number | null } }
+  | { kind: "images"; paths: string[] };
+
+/** A frame of the source: a time in the video or an image's name. */
+export type MaskFrameAt = { time: number } | { image: string };
+
+/** Source as a video for a mask workflow, with where each of its frames sits
+ *  in the source (see `MaskSource.positions`). */
+export interface MaskWorkflowInput {
+  video: Blob;
+  fps: number;
+  /** Real frames only: the video may end with copies of the last one. */
+  positions: number[];
+  /** Frame rate of the source video (positions in seconds); null for images
+   *  (positions are image indices). */
+  sourceFps: number | null;
+  /** Source image names in order, for image sources. */
+  images: string[] | null;
+}
+
+export interface MaskSourceApi {
+  get(projectDir: string): Promise<MaskSource | null>;
+  /** A video, or images (sorted by name), with white = subject. */
+  attach(projectDir: string, files: File[], source: MaskSourceOf): Promise<MaskSource>;
+  /** Mask video returned by a workflow for `input`. */
+  saveGenerated(projectDir: string, video: Blob, input: Omit<MaskWorkflowInput, "video">, origin: string): Promise<MaskSource>;
+  remove(projectDir: string): Promise<void>;
+  /** The mask video file (kind "video"), to watch or download. */
+  video(projectDir: string): Promise<Blob | null>;
+  /** Encodes the source (the trimmed video, or the images) as a video for a
+   *  mask workflow. */
+  workflowInput(source: MaskSourceOf, onProgress: (fraction: number) => void, signal?: AbortSignal): Promise<MaskWorkflowInput>;
+  /** Mask frame (255 = subject) at `width`×`height` for a time in the video
+   *  or a source image; null when there is none for it. */
+  frame(projectDir: string, at: MaskFrameAt, width: number, height: number): Promise<Uint8Array | null>;
 }
 
 /** How cameras are estimated: AKAZE + incremental SfM in TS, or COLMAP's
@@ -434,6 +496,8 @@ export interface Api {
   startJob(config: JobConfig, onEvent: (e: JobEvent) => void): Promise<void>;
   /** Retouch with ComfyUI. */
   retouch?: RetouchApi;
+  /** Attached or generated masks (method "external"). */
+  maskSource?: MaskSourceApi;
   /** Projects open in the batch, which storage cleanup must keep (web: only
    *  the latest few projects stay in browser storage). */
   keepProjects?(projectDirs: string[]): void;
@@ -450,6 +514,8 @@ export interface MaskPreviewer {
     frame: ImageBitmap,
     masks: MaskOptions,
     onProgress?: (done: number, total: number) => void,
+    /** Method "external": the project and the frame's place in the source. */
+    at?: { projectDir: string } & MaskFrameAt,
   ): Promise<Uint8Array>;
   /** Frees the GPU (the real masking run will need it). */
   release(): void;

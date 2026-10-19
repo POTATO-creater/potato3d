@@ -27,6 +27,7 @@ import { runJob } from "./job";
 import { maskPreview, previewIdle } from "./preview";
 import { packProject, pickPackageDest, unpackProject } from "./package";
 import { retouchApi } from "./retouch";
+import { maskSourceApi } from "./masksource";
 import { importFolder, importUrl, keepProjects, layout, openProject, projectFor, readState, saveState, setFramesRejected } from "./project";
 
 const params = new URLSearchParams(location.search);
@@ -183,6 +184,7 @@ const api: Api = {
   },
 
   retouch: retouchApi,
+  maskSource: maskSourceApi,
   keepProjects,
 };
 

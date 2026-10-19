@@ -3,7 +3,7 @@
 // through angles the orbit never saw and return to a real photo: the ends
 // (anchors) have exactly a photo's pose, which gives the video model a real
 // reference and lets us measure the restoration. Port of build_trajectory from
-// scripts/restore-test/restore_test.py.
+// scripts/tests/restore-test/restore_test.py.
 
 export type Vec3 = [number, number, number];
 /** (w, x, y, z), COLMAP order. */

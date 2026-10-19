@@ -1,13 +1,15 @@
 // Frames → masks → poses → training in the browser: stage events, resume
 // rules and project.json.
 
-import type { JobConfig, JobEvent, MaskOptions, Msg, ProjectState, Stage } from "../../../src/lib/api";
+import type { FrameInfo, JobConfig, JobEvent, MaskOptions, MaskStats, Msg, ProjectState, Stage } from "../../../src/lib/api";
 import { train } from "../brush";
 import { extractFrames, framesFromImages, probeVideo, type PickedFrame } from "../pipeline/frames";
-import { buildAlpha, makeMasks } from "../pipeline/masks";
+import { buildAlpha, listImages, makeMasks } from "../pipeline/masks";
+import { encodePng } from "../pipeline/png";
 import { DEFAULT_SFM, runSfm } from "../sfm";
 import { renameImages, writeModel } from "../sfm/colmap";
 import { dirAt, exists, inputImage, publish, publishDir, readFile, remove, requestPersistence, stem, unpublishUnder, video, writeFile } from "./files";
+import { externalMasks } from "./masksource";
 import { IMAGE_EXT, layout, pruneProjects, readState, saveState } from "./project";
 
 const ORDER: Stage[] = ["frames", "masks", "poses", "train"];
@@ -104,7 +106,10 @@ async function run(cfg: JobConfig, emit: (e: JobEvent) => void, signal: AbortSig
       rep.progress(0, { key: "masks.detecting" });
       await remove(l.masks);
       const origin = new Map(state.frames.map((f) => [f.path.split("/").pop()!, { time: f.source ? null : f.time, source: f.source }]));
-      const stats = await makeMasks(await dirAt(l.images), await dirAt(l.masks, true), m, rep.log, rep.progress, origin);
+      const stats =
+        m.method === "external"
+          ? await attachedMasks(l.root, state.frames, rep.log, rep.progress)
+          : await makeMasks(await dirAt(l.images), await dirAt(l.masks, true), m, rep.log, rep.progress, origin);
       await publishDir(l.masks, /\.png$/i);
       rep.progress(1, m.method === "chroma" ? { key: "masks.doneChroma", args: { n: stats.count } } : { key: "masks.done", args: { n: stats.count, backend: stats.backend } });
       state = { ...state, masks: stats, masksDir: l.masks };
@@ -228,6 +233,39 @@ async function run(cfg: JobConfig, emit: (e: JobEvent) => void, signal: AbortSig
   await saveState(l.root, state);
   emit({ type: "stageDone", stage: "train", seconds: secs(t) });
   return l.finalPly;
+}
+
+/** Masks from the attached or generated mask video/frames (method "external"):
+ *  each frame takes the mask frame at its place in the source. */
+async function attachedMasks(root: string, frames: FrameInfo[], log: (s: string) => void, progress: (f: number, msg: Msg) => void): Promise<MaskStats> {
+  const l = layout(root);
+  const images = await dirAt(l.images);
+  const out = await dirAt(l.masks, true);
+  const names = await listImages(images);
+  if (!names.length) throw new Error("no frames to cut out");
+  // Frames all have one size (from one video, or images checked for it).
+  const bmp = await createImageBitmap(await (await images.getFileHandle(names[0])).getFile());
+  const [width, height] = [bmp.width, bmp.height];
+  bmp.close();
+  const info = new Map(frames.map((f) => [f.path.split("/").pop()!, f]));
+  let done = 0, coverage = 0, empty = 0;
+  const { origin, maxGap } = await externalMasks(
+    root,
+    names.map((name) => ({ name, time: info.get(name)?.time ?? 0, source: info.get(name)?.source, width, height })),
+    async (name, mask, w, h) => {
+      let sum = 0;
+      for (const v of mask) sum += v;
+      coverage += sum / (255 * mask.length);
+      if (sum < 255 * mask.length * 0.001) empty++;
+      const w2 = await (await out.getFileHandle(`${stem(name)}.png`, { create: true })).createWritable();
+      await w2.write(await encodePng(mask, w, h, 1));
+      await w2.close();
+      progress(++done / names.length, { key: "masks.cutting", args: { i: done, n: names.length } });
+    },
+    log,
+  );
+  if (maxGap > 1) log(`mask: up to ${maxGap.toFixed(1)} frames away from a project frame (the mask ends early or has fewer frames)`);
+  return { count: names.length, noSubject: empty, meanCoverage: coverage / names.length, backend: origin, keyColor: null };
 }
 
 /** A masked training dataset (by default dataset_alpha): RGBA images with the

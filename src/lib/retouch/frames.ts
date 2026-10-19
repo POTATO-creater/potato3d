@@ -1,7 +1,7 @@
 // Which restored frames go into the fine-tune. Neighbouring frames of a clip are
 // nearly identical, and too many restored frames relative to the photos pull the
 // splat toward details the video model reinvented: the center, which the photos
-// cover well, loses sharpness (scripts/restore-test: 1 in every 3 frames
+// cover well, loses sharpness (scripts/tests/restore-test: 1 in every 3 frames
 // recovered 2 dB on the photos and kept the ghost removed).
 
 /** Default: restored frames up to 25% of the photo count. */

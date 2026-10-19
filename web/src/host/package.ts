@@ -22,13 +22,14 @@ import {
   writeFile,
 } from "./files";
 import { layout, readState, saveState } from "./project";
+import { maskSourceDir } from "./masksource";
 import { entryBlob, readZip, ZipWriter } from "./zip";
 
 const FORMAT = "gausify-orbit-project";
 const VERSION = 1;
 const MODEL_FILES = ["cameras.bin", "images.bin", "points3D.bin"];
 /** What a package may contain; anything else is ignored (future versions). */
-const ALLOWED = ["dataset/images/", "dataset/sparse/0/", "rejected/", "masks/", "export/", "splat.ply", "retouch/", "splat_before_retouch.ply"];
+const ALLOWED = ["dataset/images/", "dataset/sparse/0/", "rejected/", "masks/", "export/", "splat.ply", "retouch/", "splat_before_retouch.ply", "mask_source/"];
 
 type PackedSource = { kind: "video"; file: string } | { kind: "images"; files: string[] };
 
@@ -95,6 +96,9 @@ export async function packProject(req: PackRequest, onProgress: (f: number) => v
     state.masks = null;
     state.masksDir = null;
   }
+
+  // The attached or generated mask video/frames: an input, like the source.
+  entries.push(...(await folderEntries(maskSourceDir(l.root), "mask_source")));
 
   const poses = req.include.poses && !!state.poses && (await exists(`${l.model}/images.bin`));
   if (poses) {
@@ -218,6 +222,20 @@ export async function packProject(req: PackRequest, onProgress: (f: number) => v
   if (!writable) download(new Blob(parts, { type: "application/zip" }), name);
   onProgress(1);
   return { path: name, bytes, files: entries.length + 2 };
+}
+
+/** Every file under a folder, named `<rel>/<path inside>`. */
+async function folderEntries(dir: string, rel: string): Promise<{ name: string; blob: Blob }[]> {
+  const root = await dirAt(dir).catch(() => null);
+  const out: { name: string; blob: Blob }[] = [];
+  const walk = async (d: FileSystemDirectoryHandle, at: string) => {
+    for await (const [name, h] of d.entries()) {
+      if (h.kind === "directory") await walk(h as FileSystemDirectoryHandle, `${at}/${name}`);
+      else out.push({ name: `${at}/${name}`, blob: await (h as FileSystemFileHandle).getFile() });
+    }
+  };
+  if (root) await walk(root, rel);
+  return out;
 }
 
 /** Every file of every retouch clip, with clip.json rewritten to paths

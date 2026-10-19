@@ -1030,7 +1030,7 @@ export function RetouchPanel(props: {
 
 /** Editor for a custom workflow field, typed like the original value.
  *  `fallback` is the workflow's value (default); undefined = field is gone. */
-function ParamField(props: {
+export function ParamField(props: {
   param: WorkflowParam;
   fallback: ParamValue | undefined;
   value: ParamValue | undefined;

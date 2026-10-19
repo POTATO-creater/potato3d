@@ -156,7 +156,8 @@ async function sam2Masks(
 }
 
 /** RGBA PNG with A = eroded mask (straight alpha), edge colors unmixed from the
- *  background (decontam.ts) and despill on the subject. `maxSide` downscales
+ *  background (decontam.ts) and, with a solid-color key, despill on the
+ *  subject (other methods may face any background). `maxSide` downscales
  *  the frames (the mesh fine-tune trains at ≤ 1920 px and needs no more). */
 export async function buildAlpha(
   images: FileSystemDirectoryHandle,
@@ -175,7 +176,7 @@ export async function buildAlpha(
     return { rgba, mask, w, h };
   };
   let despill = null;
-  if (s.despill) {
+  if (s.despill && s.method === "chroma") {
     const step = Math.max(Math.ceil(names.length / 24), 1);
     const samples = [];
     for (let i = 0; i < names.length; i += step) samples.push(await load(names[i]));
