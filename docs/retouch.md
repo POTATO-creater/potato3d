@@ -93,12 +93,13 @@ cover well (from below, from above, or the view you aimed at in 3D). The flow:
 
 ## Example workflows
 
-`assets/workflows/` has two ComfyUI workflows to start from. Model files are
+`assets/workflows/` has three ComfyUI workflows to start from. Model files are
 not included; download them into your ComfyUI `models/` folders.
 
 | File | Format | What it does |
 |---|---|---|
 | `ltx-2.5-refinement.json` | API (*Export (API)*) | Restoration workflow for **Retouch**: LTX 2.5 with the IC-LoRA decompression guide re-renders the reference video. Import it in **Integrations**; the input node is the `LoadVideo` and the output is the `SaveVideo`. |
+| `ltx-2.5-alpha-gen.json` | UI (open in ComfyUI) | Mask workflow for the **Mask** cutout: LTX 2.5 with the IC-LoRA Alpha Gen turns the source video into a mask video (white = subject). Open it in ComfyUI, then *Export (API)* and import that file in **Integrations** with the use **Subject mask**; the input node is the `LoadVideo` and the output is the `SaveVideo`. See [pipeline.md](pipeline.md). |
 | `minimax-h3-360-orbit.json` | UI (open in ComfyUI) | Generates an orbit video from a single photo with MiniMax-H3 and a 360° orbit LoRA. The result can be dropped into Gausify Orbit as the input video. |
 
 ComfyUI must run with `--enable-cors-header` so the browser can call it. In

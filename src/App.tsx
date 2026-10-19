@@ -11,6 +11,7 @@ import {
   STAGES,
   type MaskMethod,
   type MaskOptions,
+  type MaskSource,
   POSE_ESTIMATORS,
   type PoseEstimator,
   type Settings,
@@ -38,6 +39,7 @@ import { ComfySettingsButton } from "./components/ComfySettings";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { useSidebarWidth } from "./components/SidebarResizer";
 import { promptInTrim } from "./lib/prompt";
+import { useMaskGens } from "./lib/maskgen";
 import { basename } from "./lib/platform";
 import { I18nProvider, useI18n } from "./i18n";
 import "./styles.css";
@@ -172,9 +174,10 @@ function matchPreset(s: Settings): PresetId | "custom" {
 }
 
 /** Does AI masking have what it needs? SAM 2.1 downloads its models during
- *  masking; RMBG is downloaded beforehand. */
+ *  masking; RMBG is downloaded beforehand. An attached mask needs no model
+ *  (the job says so if none is attached). */
 function maskToolReady(tools: Tools, m: MaskOptions) {
-  return m.method === "sam2" || !!tools.rmbgModel;
+  return m.method === "sam2" || m.method === "external" || !!tools.rmbgModel;
 }
 
 export default function App() {
@@ -251,6 +254,8 @@ function AppView() {
   const pack = item?.pack ?? null;
   const packBusy = pack?.kind === "saving" || pack?.kind === "opening";
   const anyRunning = ws.items.some((it) => it.job.running);
+  /** Masks being generated in ComfyUI, by project. */
+  const maskGens = useMaskGens();
 
   const get = (id: string) => wsRef.current.items.find((it) => it.id === id) ?? null;
   const patch = useCallback(
@@ -582,9 +587,12 @@ function AppView() {
       const i = STAGES.indexOf(toolStage[m.key]);
       return i >= STAGES.indexOf(from) && i <= STAGES.indexOf(to);
     });
-  /** Only the frames stage reads the source; the others use what's in the project. */
+  /** Only the frames stage reads the source; the others use what's in the project.
+   *  A mask being generated in ComfyUI must arrive before the masks stage. */
   const startableItem = (it: BatchItem, st: Stage) =>
-    !!it.projectDir && (!!it.video || !!it.imageSet || (st !== "frames" && it.job.frames.length > 0));
+    !!it.projectDir &&
+    (!!it.video || !!it.imageSet || (st !== "frames" && it.job.frames.length > 0)) &&
+    !(it.masks.enabled && it.masks.method === "external" && maskGens.get(it.projectDir)?.fraction != null && STAGES.indexOf(st) <= STAGES.indexOf("masks"));
   const itemPackBusy = (it: BatchItem) => it.pack?.kind === "saving" || it.pack?.kind === "opening";
   /** Waiting for "Process all": not trained yet and ready to start. */
   const pendingItem = (it: BatchItem) =>
@@ -721,6 +729,13 @@ function AppView() {
     }
   }
 
+  /** A new mask video/frames: masks cut from the old one are stale. */
+  function maskSourceChanged(dir: string, _src: MaskSource | null) {
+    const it = wsRef.current.items.find((x) => x.projectDir === dir);
+    if (!it || !it.masks.enabled || it.masks.method !== "external" || !it.job.frames.length) return;
+    if (STAGES.indexOf(it.fromStage) > STAGES.indexOf("masks")) patch(it.id, { fromStage: "masks" });
+  }
+
   function setMasks(m: MaskOptions) {
     // The next items added start from the last masking edited.
     setDefaultMasks({ ...m, prompt: null });
@@ -842,6 +857,7 @@ function AppView() {
         masks={maskOpts}
         onMasks={setMasks}
         onMasksToAll={ws.items.length > 1 ? applyMasksToAll : undefined}
+        onMaskSource={maskSourceChanged}
         estimator={estimator}
         onEstimator={setEstimator}
         settings={settings}

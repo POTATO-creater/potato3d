@@ -1,5 +1,5 @@
 import { useRef, type ReactNode } from "react";
-import { fileUrl, type ImageSet, type MaskOptions, type PoseEstimator, type Settings, type Stage, type SubjectPrompt, type VideoInfo } from "../lib/api";
+import { fileUrl, type ImageSet, type MaskOptions, type MaskSource, type MaskSourceOf, type PoseEstimator, type Settings, type Stage, type SubjectPrompt, type VideoInfo } from "../lib/api";
 import { promptInTrim } from "../lib/prompt";
 import { PRESETS, REDUCE_HAZE_WEIGHT, type PresetId } from "../lib/presets";
 import { Field, NumField, Segmented, Toggle } from "./fields";
@@ -49,6 +49,8 @@ interface Props {
   onMasks: (m: MaskOptions) => void;
   /** Copies this masking to the other items; missing without a batch. */
   onMasksToAll?: () => void;
+  /** The attached or generated mask of a project changed. */
+  onMaskSource: (projectDir: string, src: MaskSource | null) => void;
   fromStage: Stage;
   onFromStage: (s: Stage) => void;
   available: Record<Stage, boolean>;
@@ -88,8 +90,16 @@ export function Sidebar(p: Props) {
   const previewSource: PreviewSource | null = p.videoPath
     ? { kind: "video", src: fileUrl(p.videoPath), time: !promptOutside && prompt?.time != null ? prompt.time : p.trim.start }
     : p.imageSet
-      ? { kind: "image", src: fileUrl(markedImage ?? p.imageSet.paths[0]) }
+      ? { kind: "image", src: fileUrl(markedImage ?? p.imageSet.paths[0]), name: basename(markedImage ?? p.imageSet.paths[0]) }
       : null;
+  // Mask video/frames ("external"): matched to this source.
+  const maskSource: MaskSourceOf | null =
+    p.videoPath && p.video
+      ? { kind: "video", path: p.videoPath, fps: p.video.fps, trim: p.trim }
+      : p.imageSet
+        ? { kind: "images", paths: p.imageSet.paths }
+        : null;
+  const sourceSize: [number, number] | null = p.video ? [p.video.width, p.video.height] : p.imageSet ? [p.imageSet.width, p.imageSet.height] : null;
   const pack = p.packageStatus;
   const packBusy = pack?.kind === "saving" || pack?.kind === "opening";
   const end = p.trim.end ?? p.video?.duration ?? 0;
@@ -251,6 +261,10 @@ export function Sidebar(p: Props) {
           previewPaused={p.anyRunning}
           preview={previewSource}
           promptOutside={promptOutside}
+          projectDir={p.projectDir}
+          source={maskSource}
+          sourceSize={sourceSize}
+          onMaskSource={p.onMaskSource}
         />
 
         <section className="panel">

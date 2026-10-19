@@ -50,8 +50,10 @@ video ──► Frames ──────────► Masking ─────
 - **Orbit-aware frame selection:** samples N×K candidates across the chosen
   range and keeps the sharpest frame of each window, evenly spread around the
   orbit. Image sequences and folders work too.
-- **Subject masking:** RMBG-1.4, SAM 2.1 video tracking with box/point prompts
-  and a chroma key with despill for green and blue screens. Masked training uses a random
+- **Subject masking:** RMBG-1.4, SAM 2.1 video tracking with box/point prompts,
+  a chroma key with despill for green and blue screens, or a mask video/image
+  sequence you attach or generate with a ComfyUI workflow (an LTX 2.5 +
+  IC-LoRA Alpha Gen one is in [`assets/workflows/`](assets/workflows/ltx-2.5-alpha-gen.json)). Masked training uses a random
   background, so no ghost silhouettes form around the subject, and edge colours
   are unmixed from the background, so no light fringe forms around hair. The
   optional **Reduce haze** keeps semi-transparent haze off the subject

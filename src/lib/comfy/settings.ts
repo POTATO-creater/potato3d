@@ -3,8 +3,10 @@
 import type { ApiGraph, ParamValue, WorkflowIO, WorkflowParam } from "./workflow.ts";
 
 /** "restore": takes the video rendered from the splat and returns the restored one.
+ *  "mask": takes the source video and returns its mask video (white = subject).
  *  (Planned: "orbit", image → 360 orbit video.) */
-export type WorkflowKind = "restore";
+export type WorkflowKind = "restore" | "mask";
+export const WORKFLOW_KINDS: WorkflowKind[] = ["restore", "mask"];
 
 export interface ComfyWorkflow {
   id: string;
@@ -34,7 +36,9 @@ export function loadComfy(): ComfySettings {
     if (!raw) return DEFAULT_COMFY;
     return {
       url: typeof raw.url === "string" ? raw.url : DEFAULT_COMFY.url,
-      workflows: Array.isArray(raw.workflows) ? raw.workflows.filter((w) => w && w.graph && w.io) : [],
+      workflows: Array.isArray(raw.workflows)
+        ? raw.workflows.filter((w) => w && w.graph && w.io).map((w) => (WORKFLOW_KINDS.includes(w.kind) ? w : { ...w, kind: "restore" as const }))
+        : [],
     };
   } catch {
     return DEFAULT_COMFY;
