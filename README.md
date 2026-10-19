@@ -58,7 +58,11 @@ video ──► Frames ──────────► Masking ─────
   when it's seen from new angles.
 - **Orbit-aware poses:** an incremental SfM built for orbits (AKAZE features,
   circular matching with long jumps on the GPU, bundle adjustment) that closes
-  the orbit, plus inferred poses for frames it can't register.
+  the orbit, plus inferred poses for frames it can't register. A second
+  estimator, **COLMAP**, runs COLMAP's own SIFT and global mapper compiled to
+  WebAssembly, with exact SIFT matching on the GPU
+  ([colmap-wasm](https://github.com/obraia/colmap-wasm), on npm): steadier
+  on AI-generated orbits, at the cost of more memory.
 - **GPU training without CUDA:** [Brush](https://github.com/ArthurBrussee/brush),
   pinned to a fixed commit and patched, compiled to WASM + WebGPU. A live 3D viewer
   ([Spark](https://sparkjs.dev)) reloads snapshots as training goes.

@@ -16,7 +16,8 @@ export default defineConfig({
   // ONNX Runtime locates its own .wasm via import.meta.url, so it can't be pre-bundled.
   // The mesh worker's dependencies are only met when an export starts; found
   // then, their pre-bundling reloads the page and the worker fails to load.
-  optimizeDeps: { exclude: ["onnxruntime-web"], include: ["meshoptimizer", "xatlas-wasm", "three/examples/jsm/loaders/GLTFLoader.js"] },
+  // colmap-wasm also resolves its worker and .wasm via import.meta.url.
+  optimizeDeps: { exclude: ["onnxruntime-web", "colmap-wasm"], include: ["meshoptimizer", "xatlas-wasm", "three/examples/jsm/loaders/GLTFLoader.js"] },
   build: {
     outDir: "../dist-web",
     emptyOutDir: true,

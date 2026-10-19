@@ -1,5 +1,5 @@
 import { useRef, type ReactNode } from "react";
-import { fileUrl, type ImageSet, type MaskOptions, type Settings, type Stage, type SubjectPrompt, type VideoInfo } from "../lib/api";
+import { fileUrl, type ImageSet, type MaskOptions, type PoseEstimator, type Settings, type Stage, type SubjectPrompt, type VideoInfo } from "../lib/api";
 import { promptInTrim } from "../lib/prompt";
 import { PRESETS, REDUCE_HAZE_WEIGHT, type PresetId } from "../lib/presets";
 import { Field, NumField, Segmented, Toggle } from "./fields";
@@ -40,6 +40,9 @@ interface Props {
   packageStatus: PackageStatus | null;
   preset: PresetId | "custom";
   onPreset: (p: PresetId) => void;
+  /** Camera estimator (stored apart from the quality presets). */
+  estimator: PoseEstimator;
+  onEstimator: (e: PoseEstimator) => void;
   settings: Settings;
   onSettings: (s: Settings) => void;
   masks: MaskOptions;
@@ -284,6 +287,16 @@ export function Sidebar(p: Props) {
               </div>
 
               <h3>{ts.poses}</h3>
+              <Field label={ts.estimator} hint={p.estimator === "colmap" ? ts.estimatorColmapHint : ts.estimatorAkazeHint}>
+                <Segmented
+                  value={p.estimator}
+                  options={[
+                    { value: "akaze", label: ts.estimatorAkaze },
+                    { value: "colmap", label: ts.estimatorColmap },
+                  ]}
+                  onChange={p.onEstimator}
+                />
+              </Field>
               <div className="grid2">
                 <NumField label={ts.matchWindow} value={s.poses.matchWindow} min={3} max={40}
                   onChange={(v) => set("poses", { matchWindow: v })} />
