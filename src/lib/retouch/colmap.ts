@@ -2,7 +2,7 @@
 // images.bin), copying the existing entries byte for byte. Used for the retouch
 // dataset: restored frames get their own camera (different size) and no 2D
 // points. Port of write_cameras/image_entry from
-// scripts/restore-test/restore_test.py.
+// scripts/tests/restore-test/restore_test.py.
 
 export interface NewCamera {
   width: number;
