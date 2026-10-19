@@ -6,3 +6,5 @@ allowBuilds:
   # wrangler (web deploy): these install the per-platform binary
   esbuild: true
   workerd: true
+minimumReleaseAgeExclude:
+  - colmap-wasm@0.1.0

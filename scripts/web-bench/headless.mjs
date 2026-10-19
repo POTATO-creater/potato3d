@@ -25,7 +25,7 @@
 //            Use `pnpm web:wasm --profiling` to get WASM function names.
 //
 // Settings (starting from the Preview preset): --preset preview|balanced|quality,
-// --frames N, --steps N, --max-res N, --flat (flat orbit), --fill (use all
+// --estimator akaze|colmap (camera estimator), --frames N, --steps N, --max-res N, --flat (flat orbit), --fill (use all
 // frames; with &sfmDrop=0,20,… in the URL, simulates lost cameras),
 // --contrib N (negative-contribution pruning, judging splats that contributed in
 // ≥ N views; tuned by --contrib-ratio R and --contrib-start F), --opac-solid W,
@@ -193,6 +193,7 @@ await sleep(1000);
 await evaluate(`localStorage.setItem('splatforge.locale.v1', 'pt-BR');
   localStorage.setItem('splatforge.settings.v3', ${JSON.stringify(JSON.stringify({ preset: "custom", settings }))});
   localStorage.setItem('splatforge.masks.v1', ${JSON.stringify(JSON.stringify(masks))});
+  localStorage.setItem('splatforge.poseEstimator.v1', ${JSON.stringify(opt("estimator", "akaze"))});
   localStorage.setItem('splatforge.export.v1', ${JSON.stringify(opt("export", "{}"))})`);
 await send("Page.navigate", { url });
 

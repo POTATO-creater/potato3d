@@ -139,6 +139,7 @@ async function run(cfg: JobConfig, emit: (e: JobEvent) => void, signal: AbortSig
       await dirAt(l.dataset),
       {
         ...DEFAULT_SFM,
+        estimator: cfg.poses.estimator,
         window: cfg.poses.matchWindow,
         closedLoop: cfg.poses.closedLoop,
         flatOrbit: cfg.poses.flatOrbit,
@@ -157,7 +158,9 @@ async function run(cfg: JobConfig, emit: (e: JobEvent) => void, signal: AbortSig
       total: Number(s.total),
       points: Number(s.points),
       reprojectionError: Number(s.meanError),
-      mapper: ["incremental SfM (browser)", s.flat ? "flat orbit" : null].filter(Boolean).join(" · "),
+      mapper: [s.mapper === "colmap" ? "COLMAP global mapper (browser)" : "incremental SfM (browser)", s.flat ? "flat orbit" : null]
+        .filter(Boolean)
+        .join(" · "),
       inferred: Number(s.inferred ?? 0),
       refined: Number(s.refined ?? 0),
     };

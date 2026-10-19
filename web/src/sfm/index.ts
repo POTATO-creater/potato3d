@@ -1,15 +1,21 @@
-// In-browser poses: features (AKAZE in workers) → matching (WebGPU) →
-// incremental SfM (TS) → COLMAP model. Proof of concept.
+// In-browser poses, with one of two estimators:
+// - "akaze": features (AKAZE in workers) → matching (WebGPU) → incremental SfM (TS);
+// - "colmap": COLMAP's SIFT and global mapper in WebAssembly, matching on the GPU
+//   (colmap-sfm.ts, with the colmap-wasm package).
+// Both end in a COLMAP model.
 
-import type { Msg } from "../../../src/lib/api";
+import type { Msg, PoseEstimator } from "../../../src/lib/api";
 import { colmapFiles } from "./colmap";
+import { colmapPoses } from "./colmap-sfm";
 import type { FeatureRequest, FeatureResult } from "./features.worker";
-import { HammingMatcher } from "./matcher";
+import { HammingMatcher, type PairMatches } from "./matcher";
 import { correspondences, fillMissing, flattenOrbit } from "./orbit.ts";
 import type { ImageFeatures, SfmModel } from "./reconstruct";
 import type { SfmWorkerMessage } from "./sfm.worker";
 
 export interface SfmOptions {
+  /** Missing = "akaze". */
+  estimator?: PoseEstimator;
   maxSide: number;
   maxFeatures: number;
   /** Neighbours matched on each side (like the app's `matchWindow`). */
@@ -112,27 +118,19 @@ async function extractAll(
   return results;
 }
 
-export async function runSfm(
-  dir: FileSystemDirectoryHandle,
+/** The "akaze" estimator: AKAZE features, Hamming matching on the GPU and the
+ *  incremental reconstruction in a worker. */
+async function akazePoses(
+  files: File[],
+  masks: (File | undefined)[],
+  names: string[],
+  pairs: [number, number][],
   opts: SfmOptions,
   log: (s: string) => void,
   progress: (frac: number, msg: Msg) => void,
-): Promise<SfmRun> {
-  const timings: Record<string, number> = {};
+  timings: Record<string, number>,
+): Promise<{ model: SfmModel; xy: Float32Array[]; matches: PairMatches[] }> {
   const t0 = performance.now();
-  const imagesDir = await dir.getDirectoryHandle("images");
-  const names: string[] = [];
-  for await (const [name, h] of imagesDir.entries()) if (h.kind === "file" && IMAGE_EXT.test(name)) names.push(name);
-  names.sort();
-  if (names.length < 3) throw new Error("Too few images in images/.");
-  const files = await Promise.all(names.map(async (n) => (await imagesDir.getFileHandle(n)).getFile()));
-
-  const masks = await Promise.all(
-    names.map(async (n) => {
-      if (!opts.masksDir) return undefined;
-      return (await opts.masksDir.getFileHandle(n.replace(/\.[^.]+$/, ".png"))).getFile();
-    }),
-  );
   progress(0, { key: "poses.webFeatures" });
   const feats = await extractAll(files, masks, opts, (d) => progress((0.3 * d) / names.length, { key: "poses.webFeaturesN", args: { i: d, n: names.length } }));
   timings.features = performance.now() - t0;
@@ -140,7 +138,6 @@ export async function runSfm(
   log(`AKAZE features: mean ${meanFeat.toFixed(0)}/image in ${(timings.features / 1000).toFixed(1)} s`);
 
   const t1 = performance.now();
-  const pairs = orbitPairs(names.length, opts.window, opts.closedLoop);
   const matcher = await HammingMatcher.create();
   let matches;
   try {
@@ -187,6 +184,36 @@ export async function runSfm(
       `mean error ${Number(model.stats.meanError).toFixed(2)} px, f = ${model.f.toFixed(1)} in ${(timings.reconstruction / 1000).toFixed(1)} s`,
   );
 
+  return { model, xy: feats.map((f) => f.xy), matches };
+}
+
+export async function runSfm(
+  dir: FileSystemDirectoryHandle,
+  opts: SfmOptions,
+  log: (s: string) => void,
+  progress: (frac: number, msg: Msg) => void,
+): Promise<SfmRun> {
+  const timings: Record<string, number> = {};
+  const t0 = performance.now();
+  const imagesDir = await dir.getDirectoryHandle("images");
+  const names: string[] = [];
+  for await (const [name, h] of imagesDir.entries()) if (h.kind === "file" && IMAGE_EXT.test(name)) names.push(name);
+  names.sort();
+  if (names.length < 3) throw new Error("Too few images in images/.");
+  const files = await Promise.all(names.map(async (n) => (await imagesDir.getFileHandle(n)).getFile()));
+
+  const masks = await Promise.all(
+    names.map(async (n) => {
+      if (!opts.masksDir) return undefined;
+      return (await opts.masksDir.getFileHandle(n.replace(/\.[^.]+$/, ".png"))).getFile();
+    }),
+  );
+  const pairs = orbitPairs(names.length, opts.window, opts.closedLoop);
+  const { model, xy, matches } =
+    opts.estimator === "colmap"
+      ? await colmapPoses(files, masks, names, pairs, log, progress, timings, opts.signal)
+      : await akazePoses(files, masks, names, pairs, opts, log, progress, timings);
+
   // Tests (scripts/web-bench/headless.mjs): `?sfmDrop=0,20,21` removes those
   // cameras from the model, as if reconstruction had not registered them;
   // `?sfmRefine=0` disables refinement of the inferred poses.
@@ -202,7 +229,6 @@ export async function runSfm(
   }
 
   // Orbit corrections, as in colmap.rs (flat orbit) and pipeline.rs.
-  const xy = feats.map((f) => f.xy);
   if (opts.flatOrbit) {
     progress(0.99, { key: "poses.flattening" });
     const dev = flattenOrbit(model, xy);
@@ -222,5 +248,5 @@ export async function runSfm(
     for (const [i, n] of refined) log(`pose of ${names[i]} refined against ${n} 3D points`);
   }
   timings.total = performance.now() - t0;
-  return { model, files: colmapFiles(model, names, feats.map((f) => f.xy)), names, timings };
+  return { model, files: colmapFiles(model, names, xy), names, timings };
 }

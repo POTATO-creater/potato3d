@@ -101,7 +101,14 @@ export interface MaskStats {
   keyColor?: [number, number, number] | null;
 }
 
+/** How cameras are estimated: AKAZE + incremental SfM in TS, or COLMAP's
+ *  SIFT + global mapper in WebAssembly (steadier on AI orbits, more memory). */
+export type PoseEstimator = "akaze" | "colmap";
+export const POSE_ESTIMATORS: PoseEstimator[] = ["akaze", "colmap"];
+
 export interface PoseOptions {
+  /** Kept apart from the quality presets (App stores it on its own); missing = "akaze". */
+  estimator?: PoseEstimator;
   matchWindow: number;
   closedLoop: boolean;
   /** Cameras forced onto one plane. Missing in older settings. */

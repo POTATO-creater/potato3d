@@ -14,6 +14,9 @@ importers:
       '@techstark/opencv-js':
         specifier: 4.12.0-release.1
         version: 4.12.0-release.1
+      colmap-wasm:
+        specifier: ^0.1.0
+        version: 0.1.0
       mediabunny:
         specifier: 1.60.0
         version: 1.60.0
@@ -665,6 +668,9 @@ packages:
 
   blake3-wasm@2.1.5:
     resolution: {integrity: sha512-F1+K8EbfOZE49dtoPtmxUQrpXaBIl3ICvasLh+nJta0xkz+9kF/7uet9fLnwKqhDrmj6g+6K3Tw9yQPUg2ka5g==}
+
+  colmap-wasm@0.1.0:
+    resolution: {integrity: sha512-iD0jFB+WpCov+n9kuUXVJ8rCLqHj6OXEFK0q1LX/4cGlsvFB3dsekDl2nmeeOwWwaSrJuixbOGTr+Y3k5orDhw==}
 
   cookie@1.1.1:
     resolution: {integrity: sha512-ei8Aos7ja0weRpFzJnEA9UHJ/7XQmqglbRwnf2ATjcB9Wq874VKH9kfjjirM6UhU2/E5fFYadylyhFldcqSidQ==}
@@ -1354,6 +1360,8 @@ snapshots:
   '@webgpu/types@0.1.74': {}
 
   blake3-wasm@2.1.5: {}
+
+  colmap-wasm@0.1.0: {}
 
   cookie@1.1.1: {}
 

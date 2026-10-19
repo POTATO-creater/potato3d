@@ -11,6 +11,8 @@ import {
   STAGES,
   type MaskMethod,
   type MaskOptions,
+  POSE_ESTIMATORS,
+  type PoseEstimator,
   type Settings,
   type Stage,
   type Tools,
@@ -42,6 +44,18 @@ import "./styles.css";
 
 const STORE_KEY = "splatforge.settings.v3";
 const MASKS_KEY = "splatforge.masks.v1";
+/** Camera estimator, stored apart from the quality settings: presets don't change it. */
+const ESTIMATOR_KEY = "splatforge.poseEstimator.v1";
+
+function loadEstimator(): PoseEstimator {
+  try {
+    const v = localStorage.getItem(ESTIMATOR_KEY);
+    if (POSE_ESTIMATORS.includes(v as PoseEstimator)) return v as PoseEstimator;
+  } catch {
+    /* storage unavailable */
+  }
+  return "akaze";
+}
 
 function loadMasks(): MaskOptions {
   const base: MaskOptions = {
@@ -191,6 +205,9 @@ function AppView() {
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
   /** Masking for new items (the last one edited); each item then has its own. */
+  const [estimator, setEstimator] = useState<PoseEstimator>(loadEstimator);
+  const estimatorRef = useRef(estimator);
+  estimatorRef.current = estimator;
   const [defaultMasks, setDefaultMasks] = useState<MaskOptions>(loadMasks);
   const defaultMasksRef = useRef(defaultMasks);
   defaultMasksRef.current = defaultMasks;
@@ -276,6 +293,14 @@ function AppView() {
       /* ignore */
     }
   }, [preset, settings]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(ESTIMATOR_KEY, estimator);
+    } catch {
+      /* ignore */
+    }
+  }, [estimator]);
 
   useEffect(() => {
     try {
@@ -600,7 +625,7 @@ function AppView() {
           frames: { ...s.frames, trimStart: trim.start, trimEnd: trim.end },
           // A marking outside the trim range (changed afterwards) no longer applies.
           masks: promptInTrim(masks.prompt, trim) ? masks : { ...masks, prompt: null },
-          poses: s.poses,
+          poses: { ...s.poses, estimator: estimatorRef.current },
           train: s.train,
         },
         (e) => onEvent(id, e),
@@ -817,6 +842,8 @@ function AppView() {
         masks={maskOpts}
         onMasks={setMasks}
         onMasksToAll={ws.items.length > 1 ? applyMasksToAll : undefined}
+        estimator={estimator}
+        onEstimator={setEstimator}
         settings={settings}
         onSettings={(s) => {
           setSettings(s);
