@@ -1,4 +1,4 @@
-import type { MaskOptions, PoseEstimator, Stage } from "../lib/api";
+import type { MaskOptions, PoseCheckStats, PoseEstimator, Stage } from "../lib/api";
 import { stageToolLabels } from "../lib/platform";
 import type { JobState, StageState } from "../lib/job";
 import { fmtCount, fmtDuration as fmtSecs } from "../lib/format";
@@ -20,6 +20,41 @@ function Sparkline({ values }: { values: number[] }) {
     <svg className="spark" width={w} height={h} viewBox={`0 0 ${w} ${h}`} aria-hidden>
       <polyline points={pts} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
     </svg>
+  );
+}
+
+/** One bar per frame of the pose check: green under the threshold, then
+ *  amber, red from twice it. */
+function ConsistencyStrip({ values, threshold }: { values: number[]; threshold: number }) {
+  if (values.length < 2) return null;
+  const w = 96, h = 14, bw = w / values.length;
+  const tone = (v: number) => (v < threshold ? "var(--good)" : v < 2 * threshold ? "var(--warn)" : "var(--bad)");
+  return (
+    <svg className="spark" width={w} height={h} viewBox={`0 0 ${w} ${h}`} aria-hidden>
+      {values.map((v, i) => {
+        const bh = Math.max(2, Math.min(1, v / (3 * threshold)) * h);
+        return <rect key={i} x={i * bw} y={h - bh} width={Math.max(bw - 0.5, 0.5)} height={bh} fill={tone(v)} />;
+      })}
+    </svg>
+  );
+}
+
+const pct = (x: number) => `${(100 * x).toFixed(1)}%`;
+
+function Consistency({ check }: { check: PoseCheckStats }) {
+  const { t } = useI18n();
+  const tl = t.stageStrip;
+  const final = check.after ?? check.score;
+  const tone = final < check.threshold ? "good" : check.rounds ? "warn" : "bad";
+  const title = tl.consistencyTitle(pct(check.threshold)) + (check.rounds ? ` ${tl.consistencyCorrected(check.rounds)}` : "");
+  return (
+    <>
+      <div className="metric" title={title}>
+        <span className="metric-label">{tl.consistency}</span>
+        <span className={`metric-value ${tone}`}>{check.after != null ? `${pct(check.score)} → ${pct(check.after)}` : pct(check.score)}</span>
+      </div>
+      <ConsistencyStrip values={check.afterFrames ?? check.frames} threshold={check.threshold} />
+    </>
   );
 }
 
@@ -195,6 +230,7 @@ export function StageStrip({
                       tone={poses.reprojectionError < 1 ? "good" : poses.reprojectionError < 1.6 ? "warn" : "bad"}
                     />
                   )}
+                  {poses.check && <Consistency check={poses.check} />}
                 </>
               )}
               {st === "train" && (train || psnr != null) && (

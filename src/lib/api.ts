@@ -168,9 +168,17 @@ export interface MaskSourceApi {
 export type PoseEstimator = "akaze" | "colmap";
 export const POSE_ESTIMATORS: PoseEstimator[] = ["akaze", "colmap"];
 
+/** Pose consistency check after the poses (masked projects only): "auto"
+ *  corrects the poses when the orbit disagrees with itself, "always" corrects
+ *  them anyway. */
+export type PoseCheckMode = "off" | "auto" | "always";
+export const POSE_CHECK_MODES: PoseCheckMode[] = ["off", "auto", "always"];
+
 export interface PoseOptions {
   /** Kept apart from the quality presets (App stores it on its own); missing = "akaze". */
   estimator?: PoseEstimator;
+  /** Missing = "off" (also the app's default). */
+  check?: PoseCheckMode;
   matchWindow: number;
   closedLoop: boolean;
   /** Cameras forced onto one plane. Missing in older settings. */
@@ -257,6 +265,28 @@ export interface ModelStats {
   inferred?: number;
   /** Of those, the ones refined against the 3D points. */
   refined?: number;
+  /** Pose consistency check, when it ran. */
+  check?: PoseCheckStats | null;
+}
+
+/** Each frame against the silhouette of a short training run that never saw
+ *  it (half of the frames each): the share of the subject's area where that
+ *  model sticks out of the frame's mask. A misplaced contour becomes a
+ *  doubled edge in training. */
+export interface PoseCheckStats {
+  /** Mean over the frames (0–1), with the poses as estimated. */
+  score: number;
+  /** Above it the orbit is flagged. */
+  threshold: number;
+  /** Per registered frame, in frame order. */
+  frames: number[];
+  flagged: boolean;
+  /** Correction rounds applied to the poses (0 = only checked). */
+  rounds: number;
+  /** Measured again after the correction (null when not corrected). */
+  after: number | null;
+  afterFrames: number[] | null;
+  seconds: number;
 }
 
 export interface ProjectState {

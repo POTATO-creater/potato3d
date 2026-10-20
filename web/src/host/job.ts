@@ -1,11 +1,12 @@
 // Frames → masks → poses → training in the browser: stage events, resume
 // rules and project.json.
 
-import type { FrameInfo, JobConfig, JobEvent, MaskOptions, MaskStats, Msg, ProjectState, Stage } from "../../../src/lib/api";
+import type { FrameInfo, JobConfig, JobEvent, MaskOptions, MaskStats, ModelStats, Msg, ProjectState, Stage } from "../../../src/lib/api";
 import { train } from "../brush";
 import { extractFrames, framesFromImages, probeVideo, type PickedFrame } from "../pipeline/frames";
 import { buildAlpha, listImages, makeMasks } from "../pipeline/masks";
 import { encodePng } from "../pipeline/png";
+import { checkPoses } from "../posecheck/job";
 import { DEFAULT_SFM, runSfm } from "../sfm";
 import { renameImages, writeModel } from "../sfm/colmap";
 import { dirAt, exists, inputImage, publish, publishDir, readFile, remove, requestPersistence, stem, unpublishUnder, video, writeFile } from "./files";
@@ -67,7 +68,7 @@ async function run(cfg: JobConfig, emit: (e: JobEvent) => void, signal: AbortSig
     await pruneProjects(l.root);
     // Later stages become invalid.
     const clear = async () => {
-      for (const p of [l.images, l.rejected, `${l.dataset}/sparse`, l.masks, l.alpha, l.training, l.finalPly, l.exports, ...retouchFiles]) await remove(p);
+      for (const p of [l.images, l.rejected, `${l.dataset}/sparse`, l.masks, l.alpha, l.poseCheck, l.training, l.finalPly, l.exports, ...retouchFiles]) await remove(p);
       return dirAt(l.images, true);
     };
     let picked: PickedFrame[];
@@ -158,7 +159,7 @@ async function run(cfg: JobConfig, emit: (e: JobEvent) => void, signal: AbortSig
     );
     await writeModel(await dirAt(l.dataset), sfm.files);
     const s = sfm.model.stats;
-    const stats = {
+    const stats: ModelStats = {
       registered: Number(s.registered),
       total: Number(s.total),
       points: Number(s.points),
@@ -170,6 +171,19 @@ async function run(cfg: JobConfig, emit: (e: JobEvent) => void, signal: AbortSig
       refined: Number(s.refined ?? 0),
     };
     if (stats.registered < 3) throw new Error(`only ${stats.registered} cameras registered; the video can't be reconstructed`);
+    // Consistency check (and correction) against the masks. If it fails, the
+    // poses stay usable: the model is only rewritten once the rounds are done.
+    const check = cfg.poses.check ?? "off";
+    if (check !== "off" && m.enabled) {
+      try {
+        stats.check = await checkPoses(l.root, m, check, rep, signal);
+        if (stats.check) rep.progress(1, { key: stats.check.rounds ? "check.corrected" : "check.done", args: { score: (100 * (stats.check.after ?? stats.check.score)).toFixed(1) } });
+      } catch (e) {
+        if (signal.aborted) throw e;
+        console.error(e);
+        rep.log(`pose check failed, poses kept: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
     // Retouch clips have poses from the old model: they are no longer valid.
     for (const p of retouchFiles) await remove(p);
     state = { ...state, poses: stats, finalPly: null, lastPsnr: null, lastExport: null, retouch: null };

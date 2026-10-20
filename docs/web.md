@@ -39,7 +39,8 @@ desktop Chrome or Edge with WebGPU and the `subgroups` feature.
   SAM 2.1 and solid colour and follows the marks: the encoder runs once per
   frame and each new point only runs the decoder. The preview can be hidden,
   which frees the GPU before a job.
-- **Poses:** own SfM (below).
+- **Poses:** own SfM (below), then the **pose check** on masked projects
+  ([below](#pose-check)).
 - **Export:** PLY or SOG, pruning, SH band trimming and decimation, in
   TypeScript in `web/src/export/` and running in a worker. Lossless WebP comes from splat-transform's libwebp WASM build (MIT,
   `web/src/export/webp/`), because canvas premultiplies alpha.
@@ -141,6 +142,8 @@ desktop Chrome or Edge with WebGPU and the `subgroups` feature.
       global BA (Levenberg–Marquardt with Schur complement, Huber loss, shared
       focal length). At the end, BA with a decreasing threshold recovers the
       observations that close the orbit.
+   5. **Pose check** (masked projects, **Check poses** in the advanced pose
+      settings): [below](#pose-check).
 4. **Training:** Brush in WASM + WebGPU, with previews in the viewer every
    "Preview every" steps.
 
@@ -182,6 +185,111 @@ Other measurements:
   Preview), training went from 2 min 44 s to 3 min 29 s (+27%). PSNR went from
   30.25 to 29.69 dB, in line with native Brush on the same dataset
   (30.26 → 29.60).
+
+## Pose check
+
+On AI-generated orbits, SfM poses can be off by about a degree in one stretch
+of the orbit. The textured interior still lines up (feature matches come from
+there, so reprojection error and training PSNR look fine), but the subject's
+outline lands several pixels away from where the other frames put it, and
+training builds a second, doubled outline. The check looks at the
+outlines; the correction moves the cameras until they agree. Code in
+`web/src/posecheck/` (tested), run at the end of the Poses stage.
+
+**Check poses** (advanced pose settings) is **No** by default: **Auto**
+checks and corrects when the orbit is flagged, **Always correct** corrects
+anyway. Auto isn't the default because the check still flags some orbits
+whose poses are fine (point 4 below); the threshold needs more calibration
+first.
+
+**Check** (`score.ts`):
+1. Two short trainings (600 steps at 480 px, the training's masked random
+   background and depth distortion), one on the even frames and one on the odd
+   ones, from frames rebuilt at 640 px with the cutout.
+2. Each frame is rendered from the training that did not see it, and its
+   silhouette (alpha > 0.5) is compared with the frame's mask, its holes
+   filled (a misplaced camera moves the outline; a hole is usually the cutout
+   missing part of the subject in that frame): the XOR, split
+   into where the model sticks out of the mask and where the mask sticks out
+   of the model, each opened with a small disk (~2 px of a 1280 px frame) to
+   drop thin strands and anti-aliasing.
+3. Score = mean over the frames of the area where the model sticks out,
+   divided by the subject's area. At this budget the other side is mostly
+   thin detail not learned yet, so it doesn't count.
+4. Above 2.8% the orbit is flagged. The threshold was calibrated on real
+   AI-generated orbits; it depends on the budget of the short trainings. The
+   score also counts what is not the poses' fault: floaters left by the short
+   trainings (even the exact poses of the synthetic orbit below score above
+   it) and a rough cutout (with the solid-colour key, that orbit scores 6.3%).
+   Auto then runs a correction that changes little.
+
+The Poses card shows the score and a strip with each frame's value.
+
+**Correction** (`align.ts`, `job.ts`), when flagged (**Auto**) or always
+(**Always correct**), for 3 rounds:
+1. Train the two folds again on the current poses: 750 steps at 640 px,
+   starting from the previous training of the same frames (`init.ply`; as
+   good as 1500 steps from scratch, in half the time).
+2. Measure the training's halo: short trainings render the subject's edge
+   1–2 px outside the masks even where the poses agree. The interquartile
+   mean of each held-out frame's edge offset, its median over the frames, is
+   subtracted below; otherwise every camera backs away to shrink the outline.
+3. For each held-out frame, two Gauss-Newton steps on its 6-DOF pose, each on
+   a new render (Brush's `renderColor`, `web/brush/render.patch`, and
+   `renderDepth`):
+   - **contour:** the render's edge pixels, lifted to 3D with the render's
+     depth read 2 px inside, against the distance transform of the frame's
+     mask (Felzenszwalb), Huber 2 px, cut at 15 px;
+   - **interior:** direct photometric alignment of points inside both
+     silhouettes using the render's depth (Lucas–Kanade in 6 DOF, coarse to
+     fine on 3 levels, residuals as image motion along the gradient, Huber
+     1 px, median brightness offset removed);
+   - both blocks with the same total weight, plus a pull toward the step's
+     start (5% of the data's mean curvature) so a step doesn't slide along
+     what the images barely constrain, like orbiting a round subject;
+   - the contour alone fixes the outline but drags frontal views off their
+     texture, so the interior term is required.
+4. Each frame keeps the pose, among those it went through, with the lowest
+   alignment loss (measured on a render at each), so a step that made things
+   worse is undone.
+5. Both folds are aligned to trainings of the same poses, then all poses are
+   updated together; the next round retrains on them.
+6. The new poses replace the model's (`dataset/sparse/0/images.bin`, its 3D
+   points unchanged) and the check runs again, from scratch; the card shows
+   before → after.
+
+Measurements on `synth-orbit.py --green` (96 frames at 960×720, ground-truth
+masks) in headless Chrome on an M4. "Bad stretch": frames 30–45 turned by 1°
+and moved by 1% of the orbit radius, all the same way (a stretch that
+disagrees with the rest of the orbit). "+ jitter": on top of that, every frame
+turned by 0.25° and moved by 0.25% of the radius, each its own way (estimated
+poses are never exact). PSNR: native Brush, 4000 steps, masked, on the frames
+left out of training (every 8th), rendered at their true poses after a Sim(3)
+alignment of the trained poses to the true ones.
+
+| | Exact poses | Bad stretch | Corrected | + jitter | Corrected |
+|---|---|---|---|---|---|
+| Score | 3.7% | 4.9% (frames 30–39: 8.4%) | 3.0% (2.3%) | 5.3% | 3.1% |
+| Rotation error, max / median | — | 1.06° / 0.08° | 0.47° / 0.27° | 1.31° / 0.27° | 0.62° / 0.31° |
+| Held-out PSNR | 32.0 dB | 27.9 dB | 27.7 dB | 26.6 dB | 27.8 dB |
+
+- The correction halves the worst errors, but it moves the frames that were
+  right too (median ~0.25°, mostly turning around the subject, which on this
+  scene of two round objects the short trainings barely see). With only the
+  bad stretch, that noise cancels the gain; with poses that are all a little
+  off, the correction gains 1.2 dB. Keeping a frame in place unless its
+  alignment improved by some margin stops that noise on this scene but also
+  most of the real corrections, which are small too.
+- On real AI-generated orbits (not published here) it removed the doubled
+  outlines the check flagged and raised held-out PSNR over the whole subject.
+- Time: the check takes ~25 s; each round ~45 s; with the correction, ~3 min
+  in all.
+
+`scripts/web-bench/posecheck.mjs` runs the check on a COLMAP dataset with
+masks (`--perturb a:b:deg` for the test above, `--out` for the corrected
+poses and each step's trace). `localStorage["gausify.poseCheck"]` (JSON)
+overrides the settings in `POSE_CHECK` (`web/src/posecheck/job.ts`):
+budgets, rounds, threshold and the alignment options.
 
 ## Benchmarks
 

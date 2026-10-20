@@ -25,13 +25,15 @@
 //            Use `pnpm web:wasm --profiling` to get WASM function names.
 //
 // Settings (starting from the Preview preset): --preset preview|balanced|quality,
-// --estimator akaze|colmap (camera estimator), --frames N, --steps N, --max-res N, --flat (flat orbit), --fill (use all
+// --estimator akaze|colmap (camera estimator), --pose-check off|auto|always (pose
+// check after the poses; default off here), --frames N, --steps N, --max-res N, --flat (flat orbit), --fill (use all
 // frames; with &sfmDrop=0,20,… in the URL, simulates lost cameras),
 // --contrib N (negative-contribution pruning, judging splats that contributed in
 // ≥ N views; tuned by --contrib-ratio R and --contrib-start F), --opac-solid W,
 // --opac-binary W and --volume W (opacity and volume regularization),
 // --reduce-haze ("Reduce haze": depth distortion, masked runs only), --ssim W
-// (SSIM loss weight; Preview has 0). Chrome
+// (SSIM loss weight; Preview has 0), --screenshot <file.png> (the window at the
+// end). Chrome
 // comes from CHROME (default: the macOS one in /Applications).
 //
 // The UI selectors below match pt-BR text, so the script forces the pt-BR locale.
@@ -194,6 +196,7 @@ await evaluate(`localStorage.setItem('splatforge.locale.v1', 'pt-BR');
   localStorage.setItem('splatforge.settings.v3', ${JSON.stringify(JSON.stringify({ preset: "custom", settings }))});
   localStorage.setItem('splatforge.masks.v1', ${JSON.stringify(JSON.stringify(masks))});
   localStorage.setItem('splatforge.poseEstimator.v1', ${JSON.stringify(opt("estimator", "akaze"))});
+  localStorage.setItem('splatforge.poseCheck.v1', ${JSON.stringify(opt("pose-check", "off"))});
   localStorage.setItem('splatforge.export.v1', ${JSON.stringify(opt("export", "{}"))})`);
 await send("Page.navigate", { url });
 
@@ -313,6 +316,13 @@ if (opt("export") && !stopAfterPoses) {
   const viewer = await evaluate(`document.querySelector('.content').innerText`);
   if (/erro|falh/i.test(viewer)) fail(`viewer: ${viewer}`);
   console.log(`viewer: ${viewer.replace(/\n+/g, " · ").slice(0, 120)}`);
+}
+
+const shot = opt("screenshot");
+if (shot) {
+  const { result } = await send("Page.captureScreenshot", { format: "png" });
+  writeFileSync(shot, Buffer.from(result.data, "base64"));
+  console.log("screenshot saved to", shot);
 }
 
 const project = await evaluate(ui.project);
