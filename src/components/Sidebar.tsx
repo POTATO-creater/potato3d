@@ -1,5 +1,5 @@
 import { useRef, type ReactNode } from "react";
-import { fileUrl, type ImageSet, type MaskOptions, type MaskSource, type MaskSourceOf, type PoseEstimator, type Settings, type Stage, type SubjectPrompt, type VideoInfo } from "../lib/api";
+import { fileUrl, type ImageSet, type MaskOptions, type MaskSource, type MaskSourceOf, type PoseCheckMode, type PoseEstimator, type Settings, type Stage, type SubjectPrompt, type VideoInfo } from "../lib/api";
 import { promptInTrim } from "../lib/prompt";
 import { PRESETS, REDUCE_HAZE_WEIGHT, type PresetId } from "../lib/presets";
 import { Field, NumField, Segmented, Toggle } from "./fields";
@@ -43,6 +43,9 @@ interface Props {
   /** Camera estimator (stored apart from the quality presets). */
   estimator: PoseEstimator;
   onEstimator: (e: PoseEstimator) => void;
+  /** Pose check (stored apart from the quality presets). */
+  poseCheck: PoseCheckMode;
+  onPoseCheck: (m: PoseCheckMode) => void;
   settings: Settings;
   onSettings: (s: Settings) => void;
   masks: MaskOptions;
@@ -323,6 +326,29 @@ export function Sidebar(p: Props) {
               <Toggle label={ts.fillMissing} hint={ts.fillMissingHint}
                 checked={s.poses.fillMissing ?? false}
                 onChange={(v) => set("poses", { fillMissing: v })} />
+              <Field
+                label={ts.poseCheck}
+                hint={
+                  !p.masks.enabled
+                    ? ts.poseCheckNeedsMasks
+                    : p.poseCheck === "off"
+                      ? ts.poseCheckOffHint
+                      : p.poseCheck === "always"
+                        ? ts.poseCheckAlwaysHint
+                        : ts.poseCheckAutoHint
+                }
+              >
+                <Segmented
+                  value={p.poseCheck}
+                  disabled={!p.masks.enabled}
+                  options={[
+                    { value: "off", label: ts.poseCheckOff },
+                    { value: "auto", label: ts.poseCheckAuto },
+                    { value: "always", label: ts.poseCheckAlways },
+                  ]}
+                  onChange={p.onPoseCheck}
+                />
+              </Field>
 
               <h3>{ts.training}</h3>
               <div className="grid2">

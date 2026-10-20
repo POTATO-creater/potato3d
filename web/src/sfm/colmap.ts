@@ -1,7 +1,7 @@
 // Writes the model in COLMAP's binary format (cameras/images/points3D.bin),
 // which Brush and the rest of Gausify Orbit read.
 
-import { quatFromMat } from "./linalg";
+import { quatFromMat } from "./linalg.ts";
 import type { SfmModel } from "./reconstruct";
 
 class Writer {
@@ -127,21 +127,49 @@ export async function writeModel(dir: FileSystemDirectoryHandle, files: Record<s
   }
 }
 
-/** Copy of images.bin with the image names replaced (e.g. .jpg → .png of the
- *  dataset with transparency); the rest of each record is unchanged. */
-export function renameImages(imagesBin: ArrayBuffer, rename: (name: string) => string): Blob {
+/** One image record of images.bin: name and pose (COLMAP world → camera). */
+export interface ImageRecord {
+  name: string;
+  /** (w, x, y, z) */
+  q: [number, number, number, number];
+  t: [number, number, number];
+}
+
+/** Copy of images.bin where `edit` renames, moves or drops (null) each
+ *  image; the rest of each record is unchanged. */
+export function rewriteImages(imagesBin: ArrayBuffer, edit: (r: ImageRecord) => ImageRecord | null): Blob {
   const v = new DataView(imagesBin);
   const bytes = new Uint8Array(imagesBin);
-  const parts: BlobPart[] = [bytes.slice(0, 8)];
+  const parts: BlobPart[] = [];
+  let count = 0;
   let o = 8;
   for (let i = Number(v.getBigUint64(0, true)); i > 0; i--) {
     const head = o + 4 + 7 * 8 + 4; // id, qvec, tvec, camera_id
     const end = bytes.indexOf(0, head);
-    parts.push(bytes.slice(o, head), new TextEncoder().encode(rename(new TextDecoder().decode(bytes.subarray(head, end)))), new Uint8Array(1));
-    o = end + 1;
-    const next = o + 8 + Number(v.getBigUint64(o, true)) * 24;
-    parts.push(bytes.slice(o, next));
+    const f = (k: number) => v.getFloat64(o + 4 + 8 * k, true);
+    const rec = edit({
+      name: new TextDecoder().decode(bytes.subarray(head, end)),
+      q: [f(0), f(1), f(2), f(3)],
+      t: [f(4), f(5), f(6)],
+    });
+    const body = end + 1;
+    const next = body + 8 + Number(v.getBigUint64(body, true)) * 24;
+    if (rec) {
+      const top = bytes.slice(o, head);
+      const tv = new DataView(top.buffer);
+      [...rec.q, ...rec.t].forEach((x, k) => tv.setFloat64(4 + 8 * k, x, true));
+      parts.push(top, new TextEncoder().encode(rec.name), new Uint8Array(1), bytes.slice(body, next));
+      count++;
+    }
     o = next;
   }
-  return new Blob(parts);
+  const n = new Uint8Array(8);
+  new DataView(n.buffer).setBigUint64(0, BigInt(count), true);
+  return new Blob([n, ...parts]);
+}
+
+/** Copy of images.bin with the image names replaced (e.g. .jpg → .png of the
+ *  dataset with transparency). */
+export function renameImages(imagesBin: ArrayBuffer, rename: (name: string) => string): Blob {
+  return rewriteImages(imagesBin, (r) => ({ ...r, name: rename(r.name) }));
 }

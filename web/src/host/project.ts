@@ -42,6 +42,8 @@ export const layout = (root: string) => ({
   retouchBase: `${root}/splat_before_retouch.ply`,
   /** Temporary masked dataset of the mesh export, when dataset_alpha is missing. */
   meshDataset: `${root}/dataset_mesh`,
+  /** Pose check screens (temporary). */
+  poseCheck: `${root}/posecheck`,
 });
 
 export const emptyState = (): ProjectState => ({

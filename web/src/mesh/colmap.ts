@@ -21,8 +21,10 @@ export interface View {
 
 class Bin {
   private o = 0;
+  private buf: ArrayBuffer;
   private v: DataView;
-  constructor(private buf: ArrayBuffer) {
+  constructor(buf: ArrayBuffer) {
+    this.buf = buf;
     this.v = new DataView(buf);
   }
   u32() {

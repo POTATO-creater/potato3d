@@ -12,7 +12,9 @@ import {
   type MaskMethod,
   type MaskOptions,
   type MaskSource,
+  POSE_CHECK_MODES,
   POSE_ESTIMATORS,
+  type PoseCheckMode,
   type PoseEstimator,
   type Settings,
   type Stage,
@@ -48,6 +50,19 @@ const STORE_KEY = "splatforge.settings.v3";
 const MASKS_KEY = "splatforge.masks.v1";
 /** Camera estimator, stored apart from the quality settings: presets don't change it. */
 const ESTIMATOR_KEY = "splatforge.poseEstimator.v1";
+/** Pose check, likewise. Off unless chosen: it still flags some orbits whose
+ *  poses are fine (docs/web.md, "Pose check"). */
+const POSE_CHECK_KEY = "splatforge.poseCheck.v1";
+
+function loadPoseCheck(): PoseCheckMode {
+  try {
+    const v = localStorage.getItem(POSE_CHECK_KEY);
+    if (POSE_CHECK_MODES.includes(v as PoseCheckMode)) return v as PoseCheckMode;
+  } catch {
+    /* storage unavailable */
+  }
+  return "off";
+}
 
 function loadEstimator(): PoseEstimator {
   try {
@@ -211,6 +226,9 @@ function AppView() {
   const [estimator, setEstimator] = useState<PoseEstimator>(loadEstimator);
   const estimatorRef = useRef(estimator);
   estimatorRef.current = estimator;
+  const [poseCheck, setPoseCheck] = useState<PoseCheckMode>(loadPoseCheck);
+  const poseCheckRef = useRef(poseCheck);
+  poseCheckRef.current = poseCheck;
   const [defaultMasks, setDefaultMasks] = useState<MaskOptions>(loadMasks);
   const defaultMasksRef = useRef(defaultMasks);
   defaultMasksRef.current = defaultMasks;
@@ -306,6 +324,14 @@ function AppView() {
       /* ignore */
     }
   }, [estimator]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(POSE_CHECK_KEY, poseCheck);
+    } catch {
+      /* ignore */
+    }
+  }, [poseCheck]);
 
   useEffect(() => {
     try {
@@ -633,7 +659,7 @@ function AppView() {
           frames: { ...s.frames, trimStart: trim.start, trimEnd: trim.end },
           // A marking outside the trim range (changed afterwards) no longer applies.
           masks: promptInTrim(masks.prompt, trim) ? masks : { ...masks, prompt: null },
-          poses: { ...s.poses, estimator: estimatorRef.current },
+          poses: { ...s.poses, estimator: estimatorRef.current, check: poseCheckRef.current },
           train: s.train,
         },
         (e) => onEvent(id, e),
@@ -860,6 +886,8 @@ function AppView() {
         onMaskSource={maskSourceChanged}
         estimator={estimator}
         onEstimator={setEstimator}
+        poseCheck={poseCheck}
+        onPoseCheck={setPoseCheck}
         settings={settings}
         onSettings={(s) => {
           setSettings(s);
